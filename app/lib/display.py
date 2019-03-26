@@ -1,13 +1,15 @@
-# 12/29/2018
-# Author: Mohamed
-# Description: Display
+from __future__ import absolute_import
 
-from os import system
-from time import sleep
-from .const import debug
-from colorama import Fore
 from builtins import input
-from platform import system as platform
+import time
+import platform
+
+from colorama import Fore
+
+from app import settings
+
+
+__all__ = ('Display', )
 
 
 class Display(object):
@@ -16,19 +18,18 @@ class Display(object):
     total_lines = None
     account_exists = None
 
-    def __init__(self, username=None, passlist=None, is_color=None):
+    def __init__(self, username=None, is_color=None):
         self.delay = 1.3
         self.username = username
-        self.passlist = passlist
         self.colors_disabled = True
-        self.cls = 'cls' if platform() == 'Windows' else 'clear'
+        self.cls = 'cls' if platform.system() == 'Windows' else 'clear'
 
-        if Display.__is_color == None:
+        if Display.__is_color is None:
             Display.__is_color = is_color
 
     def clear(self):
-        if not debug or self.colors_disabled:
-            system(self.cls)
+        if not settings.DEBUG or self.colors_disabled:
+            platform.platform(self.cls)
 
             if self.colors_disabled and self.__is_color:
                 self.colors_disabled = False
@@ -37,13 +38,13 @@ class Display(object):
 
     def stats(self, password, attempts, browsers, load=True):
         self.clear()
-        complete = round((attempts/Display.total_lines) * 100, 2)
-        account_exists = self.account_exists if self.account_exists != None else ''
+        complete = round((attempts / Display.total_lines) * 100, 2)
+        account_exists = self.account_exists or ''
 
         if self.__is_color:
-            print('{0}[{1}-{0}] {1}Wordlist: {2}{3}{4}'.format(
-                Fore.YELLOW, Fore.WHITE, Fore.CYAN, self.passlist, Fore.RESET
-            ))
+            # print('{0}[{1}-{0}] {1}Wordlist: {2}{3}{4}'.format(
+            #     Fore.YELLOW, Fore.WHITE, Fore.CYAN, self.passlist, Fore.RESET
+            # ))
 
             print('{0}[{1}-{0}] {1}Username: {2}{3}{4}'.format(
                 Fore.YELLOW, Fore.WHITE, Fore.CYAN, self.username.title(), Fore.RESET
@@ -70,14 +71,16 @@ class Display(object):
             ))
 
         else:
-            print(
-                f'[-] Wordlist: {self.passlist}\n[-] Username: {self.username}\n[-] Password: {password}')
+            print(f'[-] Username: {self.username}')
+            print(f'[-] Password: {password}')
 
-            print(
-                f'Complete: {complete}\n[-] Attempts: {attempts}\n[-] Browsers: {browsers}\n[-] Exists: {account_exists}')
+            print(f'Complete: {complete}')
+            print(f'[-] Attempts: {attempts}')
+            print(f'[-] Browsers: {browsers}')
+            print(f'[-] Exists: {account_exists}')
 
         if load:
-            sleep(self.delay)
+            time.sleep(self.delay)
 
     def stats_found(self, password, attempts, browsers):
         self.stats(password, attempts, browsers, load=False)
@@ -99,7 +102,7 @@ class Display(object):
                 self.username.title(), password
             ))
 
-        sleep(self.delay)
+        time.sleep(self.delay)
 
     def stats_not_found(self, password, attempts, browsers):
         self.stats(password, attempts, browsers, load=False)
@@ -111,7 +114,7 @@ class Display(object):
         else:
             print('\n[!] Password Not Found')
 
-        sleep(self.delay)
+        time.sleep(self.delay)
 
     def shutdown(self, password, attempts, browsers):
         self.stats(password, attempts, browsers, load=False)
@@ -123,7 +126,7 @@ class Display(object):
         else:
             print('\n[!] Shutting Down ...')
 
-        sleep(self.delay)
+        time.sleep(self.delay)
 
     def info(self, msg):
         self.clear()
@@ -135,7 +138,7 @@ class Display(object):
         else:
             print('[i] {}'.format(msg))
 
-        sleep(2.5)
+        time.sleep(2.5)
 
     def warning(self, msg):
         self.clear()
@@ -147,7 +150,7 @@ class Display(object):
         else:
             print('[!] {}'.format(msg))
 
-        sleep(self.delay)
+        time.sleep(self.delay)
 
     def prompt(self, data):
         self.clear()
