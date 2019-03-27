@@ -7,16 +7,13 @@ from app import settings
 from argparse import ArgumentParser
 
 from app.engine import Engine
-from app.validation import validate_mode, validate_password_file
+from app.validation import validate_mode
 
 
 def get_args():
     args = ArgumentParser()
     args.add_argument('username',
         help='email or username')
-    args.add_argument('passlist',
-        type=validate_password_file,
-        help='List of passwords')
     args.add_argument('-nc', '--no-color',
         dest='color',
         action='store_true',
@@ -43,7 +40,6 @@ if __name__ == '__main__':
     engine = Engine(
         arugments.username,
         settings.MODES[arugments.mode],
-        arugments.passlist,
         is_color=True if not arugments.color else False,
     )
     engine.start()

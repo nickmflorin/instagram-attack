@@ -7,23 +7,21 @@ from queue import Queue
 
 from app import settings
 from app.lib.display import Display
-from app.lib.browser import Browser
-from .threads import PasswordThread, ProxyThread, BrowserThread
+from app.lib.users import User, Users
+
+from .threads import ProxyThread, BrowserThread
 
 
 class Engine(object):
 
-    def __init__(self, username, max_passwords, file_path, is_color):
+    def __init__(self, username, max_passwords, is_color):
 
-        self.username = username
+        self.user = Users.get_or_create(username)
 
-        self.base_password_queue = Queue()
-        self.altered_password_queue = Queue()
-        self.password_attempt_queue = Queue()
+        self.passwords_queue = Queue()
         self.results_queue = Queue()
         self.proxy_queue = Queue()
 
-        self.file_path = file_path
         # password_file = PasswordFile(file_path)
         # self.password_manager = PasswordManager(password_file, max_passwords)
         # self.proxy_manager = ProxyManager()
@@ -89,6 +87,12 @@ class Engine(object):
     #     # for attack in self.attacks:
     #     #     attack.stop()
 
+    def _collect_passwords(self):
+        for password in self.user.get_new_attempts():
+            self.passwords_queue.put(password)
+        if self.passwords_queue.empty():
+            raise Exception("User %s has no passwords to attempt." % self.user.username)
+
     def start(self):
 
         proxy_pool = [ProxyThread(
@@ -96,35 +100,33 @@ class Engine(object):
             link=link,
         ) for link in settings.PROXY_LINKS]
 
-        password_pool = [PasswordThread(
-            base_password_queue=self.base_password_queue,
-            altered_password_queue=self.altered_password_queue,
-            password_attempt_queue=self.password_attempt_queue,  # Might not be needed
-        ) for i in range(5)]
-
+        proxy_thread = ProxyThread(proxy_queue=self.proxy_queue, link=settings.PROXY_LINKS[0])
+        browser_thread = BrowserThread(self.user, self.passwords_queue, self.proxy_queue, self.results_queue)
         # TODO: Figure out how to limit the number of bots per proxy.
-        browser_pool = [
-            BrowserThread(self.password_attempt_queue, self.proxy_queue, self.results_queue)
-            for i in range(30)
-        ]
+        # browser_pool = [
+        #     BrowserThread(self.passwords_queue, self.proxy_queue, self.results_queue)
+        #     for i in range(30)
+        # ]
 
-        pool = proxy_pool + password_pool + browser_pool
+        proxy_thread.daemon = True
+        browser_thread.daemon = True
 
-        for thread in pool:
-            thread.start()
+        proxy_thread.start()
+        browser_thread.start()
 
-        self._read()
+        # pool = proxy_pool + browser_pool
 
-        while not self.altered_password_queue.empty():
-            result = self.altered_password_queue.get()
-            for password in result[2]:
-                if password not in self.password_attempt_queue.queue:
-                    print("Adding {password}")
-                    self.password_attempt_queue.put(password)
+        # for thread in pool:
+        #     thread.start()
 
-        # Ask threads to die and wait for them to do it
-        for thread in pool:
-            thread.join()
+        self._collect_passwords()
+
+        # # Ask threads to die and wait for them to do it
+        # for thread in pool:
+        #     thread.join()
+
+        proxy_thread.join()
+        browser_thread.join()
 
         # This might wait for all of the threads to finish before showing,
         # which is probably not what we want.

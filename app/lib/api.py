@@ -8,7 +8,7 @@ import urllib3
 
 from app.exceptions import (ApiClientException, ApiServerException,
     InstagramClientException, InstagramServerException, InvalidUserName,
-    BadProxyError)
+    ApiBadProxyException, InstagramTooManyRequests, ApiTimeoutException)
 import app.settings as settings
 
 
@@ -22,6 +22,10 @@ class InstagramSession(requests.Session):
 
     __client_exception__ = InstagramClientException
     __server_exception__ = InstagramServerException
+
+    __status_code_exceptions__ = {
+        429: InstagramTooManyRequests
+    }
 
     def __init__(self, proxy, *args, **kwargs):
         super(InstagramSession, self).__init__(*args, **kwargs)
@@ -44,24 +48,57 @@ class InstagramSession(requests.Session):
             response.raise_for_status()
         except requests.RequestException:
             if response.status_code >= 400 and response.status_code < 500:
-                raise self.__client_exception__(response)
+                if response.status_code in self.__status_code_exceptions__:
+                    raise self.__status_code_exceptions__[response.status_code](response)
+                raise self.__client_exception__(status_code=response.status_code)
             else:
-                raise self.__server_exception__(response)
+                raise self.__server_exception__(status_code=response.status_code)
         else:
+            try:
+                results = response.json()
+                if 'errors' in results:
+                    error = results['errors']['error'][0]
+                    error_type = results['error_type']
+                    raise self.__client_exception__(
+                        status_code=response.status_code,
+                        message=error,
+                        error_type=error_type
+                    )
+            except ValueError:
+                return response
             return response
 
-    def post(self, endpoint, **data):
+    def safe_http_request(self, method, endpoint, fetch_time=None, **data):
+        fetch_time = fetch_time or settings.FETCH_TIME
+        methods = {
+            'GET': super(InstagramSession, self).get,
+            'POST': super(InstagramSession, self).post,
+        }
+        error_kwargs = {
+            'method': method,
+            'endpoint': endpoint,
+            'proxy': self.proxy
+        }
         try:
-            resp = super(InstagramSession, self).post(endpoint,
-                data=data, timeout=settings.FETCH_TIME)
+            response = methods[method](endpoint, data=data, timeout=fetch_time)
+        except requests.exceptions.ProxyError:
+            raise ApiBadProxyException(**error_kwargs)
+        except requests.exceptions.ConnectTimeout:
+            raise ApiTimeoutException(**error_kwargs)
+        except requests.exceptions.ReadTimeout:
+            raise ApiTimeoutException(**error_kwargs)
         except urllib3.exceptions.MaxRetryError:
-            raise BadProxyError(self.proxy)
+            raise ApiMaxRetryError(**error_kwargs)
+        except urllib3.exceptions.ReadTimeoutError:
+            raise ApiTimeoutException(**error_kwargs)
         else:
-            return self._handle_response(resp)
+            return self._handle_response(response)
 
-    def get(self, endpoint, **data):
-        return super(InstagramSession, self).get(endpoint, data=data,
-            timeout=settings.FETCH_TIME)
+    def post(self, endpoint, fetch_time=None, **data):
+        return self.safe_http_request('POST', endpoint, **data)
+
+    def get(self, endpoint, fetch_time=None, **data):
+        return self.safe_http_request('GET', endpoint, fetch_time=fetch_time, **data)
 
 
 class Api(object):
@@ -154,17 +191,31 @@ class InstagramApi(Api):
             self._token = self.refresh_token()
         return self._token
 
-    def post(self, endpoint, **data):
+    def post(self, endpoint, token=None, **data):
         if 'token' not in self.session.headers:
-            self.session.headers['x-csrftoken'] = self.token
+            if not token:
+                self.session.headers['x-csrftoken'] = self.token
+            else:
+                self.session.headers['x-csrftoken'] = token
         return self.session.post(endpoint, **data)
 
-    def get(self, endpoint, **data):
-        return self.session.get(endpoint, **data)
+    def get(self, endpoint, fetch_time=None, **data):
+        return self.session.get(endpoint, fetch_time=fetch_time, **data)
 
     def refresh_token(self):
-        response = self.get(settings.INSTAGRAM_URL)
+        response = self.get(
+            settings.INSTAGRAM_URL,
+            fetch_time=settings.TOKEN_FETCH_TIME
+        )
+
+        # results = response.json()
+        # if 'user' not in results or not results['user']:
+        #     raise InvalidUserName(self.username)
+
         cookies = response.cookies.get_dict()
+        if 'csrftoken' not in cookies:
+            print("Warning: csrftoken not in cookies of response.")
+            return None
         return cookies['csrftoken']
 
     def _format_state(self, results):
@@ -172,9 +223,6 @@ class InstagramApi(Api):
             'accessed': False,
             'locked': False,
         }
-
-        if 'user' not in results or not results['user']:
-            raise InvalidUserName(self.username)
 
         if 'authenticated' in results:
             state['accessed'] = results['authenticated']
@@ -187,11 +235,17 @@ class InstagramApi(Api):
 
         return state
 
-    def login(self, password):
+    def login(self, password, token=None):
+        print(f"Logging in with {password}.")
+        token = token or self.refresh_token()
         data = {
             settings.INSTAGRAM_USERNAME_FIELD: self.username,
             settings.INSTAGRAM_PASSWORD_FIELD: password
         }
-        response = self.post(settings.INSTAGRAM_LOGIN_URL, **data)
+        response = self.post(settings.INSTAGRAM_LOGIN_URL, token=token, **data)
         results = response.json()
+
+        # if 'user' not in results or not results['user']:
+        #     raise InvalidUserName(self.username)
+        return results
         return self._format_state(results)

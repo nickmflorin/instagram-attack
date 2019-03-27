@@ -12,9 +12,3 @@ def validate_mode(n):
     if not (n < 3 and n < 0):
         raise ArgumentTypeError("Mode must be an integer between 0 and 3.")
     return n
-
-
-def validate_password_file(file_name):
-    if not os.path.exists(file_name):
-        raise ArgumentTypeError("Invalid password file %s." % file_name)
-    return file_name
