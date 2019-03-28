@@ -42,7 +42,7 @@ INSTAGRAM_PASSWORD_FIELD = 'password'
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
-FETCH_TIME = (3, 4)
+FETCH_TIME = (6, 10)
 TOKEN_FETCH_TIME = (5, 7)
 
 RESPONSE_CODES = {'succeed': 0, 'failed': 1, 'locked': -1}
@@ -60,4 +60,6 @@ EXTRA_PROXY = 'http://spys.me/proxy.txt'
 
 PASSWORD_FILENAME = "passwords"
 ATTEMPTS_FILENAME = "attempts"
+ALTERATIONS_FILENAME = "alterations"
+NUMBERS_FILENAME = "common_numbers"
 USER_DIRECTORY = "users"

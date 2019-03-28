@@ -1,16 +1,5 @@
 from __future__ import absolute_import
 
-__all__ = (
-    'UserDoesNotExist',
-    'ApiException',
-    'ApiClientException',
-    'ApiServerException',
-    'InstagramClientException',
-    'InstagramServerException',
-    'InvalidUserName',
-    'InstagramTooManyRequests',
-)
-
 
 class UserDoesNotExist(Exception):
     def __init__(self, username):
@@ -20,6 +9,9 @@ class UserDoesNotExist(Exception):
 
 class ApiException(Exception):
 
+    def __init__(self, message=None):
+        self.message = message
+
     def get_message_part(self, attr):
         attr = f"{attr}_part"
         if getattr(self, attr):
@@ -27,28 +19,48 @@ class ApiException(Exception):
         return ""
 
     @property
+    def output_components(self):
+        return [
+            'status_code',
+            'message',
+            'error_type',
+        ]
+
+    @property
     def parts(self):
-        parts = [self.get_message_part(pt) for pt in self.identify_parts]
+        parts = [self.get_message_part(pt) for pt in self.output_components]
         parts = [pt for pt in parts if pt is not None]
         return parts
 
     @property
     def status_code_part(self):
-        if getattr(self, 'status_code'):
+        if getattr(self, 'status_code', None):
             return f"[{self.status_code}];"
 
     @property
     def message_part(self):
-        if getattr(self, 'message'):
+        if getattr(self, 'message', None):
             return f"Error: {self.message}"
 
     @property
     def error_type_part(self):
-        if getattr(self, 'error_type'):
+        if getattr(self, 'error_type', None):
             return f"({self.error_type})"
 
     def __str__(self):
         return " ".join(self.parts)
+
+
+class MissingTokenException(ApiException):
+    def __init__(self):
+        message = "The token is missing from the session!"
+        super(MissingTokenException, self).__init__(message=message)
+
+
+class MissingProxyException(ApiException):
+    def __init__(self):
+        message = "There is no proxy associated with the session!"
+        super(MissingProxyException, self).__init__(message=message)
 
 
 class InvalidUserName(ApiException):
@@ -67,17 +79,22 @@ class ApiRequestsException(ApiException):
         return f"[{self.method}]: {self.endpoint}; PROXY: {self.proxy}"
 
 
-class ApiMaxRetryError(ApiRequestsException):
-    pass
-
-
-class ApiTimeoutException(ApiRequestsException):
-    pass
-
-
 class ApiBadProxyException(ApiRequestsException):
+
     def __str__(self):
         return f"The proxy {self.proxy} is invalid."
+
+
+class ApiMaxRetryError(ApiBadProxyException):
+    pass
+
+
+class ApiTimeoutException(ApiBadProxyException):
+    pass
+
+
+class ApiSSLException(ApiBadProxyException):
+    pass
 
 
 class ApiClientException(ApiException):
@@ -87,13 +104,13 @@ class ApiClientException(ApiException):
         self.message = message
         self.error_type = error_type
 
-    @property
-    def identify_parts(self):
-        return [
-            'status_code',
-            'message',
-            'error_type',
-        ]
+
+class ApiTooManyRequestsException(ApiClientException):
+    __change_proxy__ = True
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('status_code', 429)
+        super(ApiTooManyRequestsException, self).__init__(**kwargs)
 
 
 class ApiServerException(ApiException):
@@ -101,21 +118,3 @@ class ApiServerException(ApiException):
         super(ApiClientException, self).__init__(
             f"[{response.status_code}] Server Error: {response.reason}"
         )
-
-
-class InstagramClientException(ApiClientException):
-    pass
-
-
-class InstagramTooManyRequests(InstagramClientException):
-    def __init__(self, response):
-        self.status_code = 429
-        self.reason = "Too many requests"
-        self.response = response
-
-    def __str__(self):
-        return f"[{self.status_code}] Client Error: {self.reason} at {self.response.url}"
-
-
-class InstagramServerException(ApiServerException):
-    pass

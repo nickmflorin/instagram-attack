@@ -1,107 +1,174 @@
 from __future__ import absolute_import
 
-from bs4 import BeautifulSoup as soup
-from collections import namedtuple
+from bs4 import BeautifulSoup
 import random
 import requests
-import urllib3
 
-from app.exceptions import (ApiClientException, ApiServerException,
-    InstagramClientException, InstagramServerException, InvalidUserName,
-    ApiBadProxyException, InstagramTooManyRequests, ApiTimeoutException)
+import app.exceptions as exceptions
 import app.settings as settings
+from app.lib.models import InstagramResult, Proxy
 
 
 __all__ = ('ProxyApi', 'InstagramApi', )
 
 
-Proxy = namedtuple('Proxy', ['ip', 'port', 'country'])
+def ensure_safe_http(func):
+    def wrapper(instance, *args, **kwargs):
+        if not instance.proxies:
+            raise exceptions.MissingProxyException()
+        return func(instance, *args, **kwargs)
+    return wrapper
+
+
+def set_token(func):
+    def wrapper(instance, *args, **kwargs):
+        if kwargs.get('token'):
+            instance.update_token(kwargs['token'])
+        return func(instance, *args, **kwargs)
+    return wrapper
+
+
+def ensure_token(func):
+    def wrapper(instance, *args, **kwargs):
+        if not instance.headers.get('x-csrftoken'):
+            raise exceptions.MissingTokenException()
+        return func(instance, *args, **kwargs)
+    return wrapper
 
 
 class InstagramSession(requests.Session):
 
-    __client_exception__ = InstagramClientException
-    __server_exception__ = InstagramServerException
+    __client_exception__ = exceptions.ApiClientException
+    __server_exception__ = exceptions.ApiServerException
 
     __status_code_exceptions__ = {
-        429: InstagramTooManyRequests
+        429: exceptions.ApiTooManyRequestsException
     }
 
-    def __init__(self, proxy, *args, **kwargs):
+    def __init__(self, proxy=None, token=None, *args, **kwargs):
         super(InstagramSession, self).__init__(*args, **kwargs)
+
+        self.token = self.proxy = None
 
         self.headers = settings.HEADER.copy()
         self.headers['user-agent'] = random.choice(settings.USER_AGENTS)
-        self.set_proxy(proxy)
 
-    def set_proxy(self, proxy):
+        if token:
+            self.update_token(token)
+        if proxy:
+            self.update_proxy(proxy)
+
+    def update_proxy(self, proxy):
         self.proxy = proxy
-
-        addr = '{}:{}'.format(self.proxy.ip, self.proxy.port)
         self.proxies.update(
-            http=addr,
-            https=addr
+            http=self.proxy.address,
+            https=self.proxy.address
         )
 
-    def _handle_response(self, response):
-        try:
-            response.raise_for_status()
-        except requests.RequestException:
-            if response.status_code >= 400 and response.status_code < 500:
-                if response.status_code in self.__status_code_exceptions__:
-                    raise self.__status_code_exceptions__[response.status_code](response)
-                raise self.__client_exception__(status_code=response.status_code)
-            else:
-                raise self.__server_exception__(status_code=response.status_code)
-        else:
-            try:
-                results = response.json()
-                if 'errors' in results:
-                    error = results['errors']['error'][0]
-                    error_type = results['error_type']
-                    raise self.__client_exception__(
-                        status_code=response.status_code,
-                        message=error,
-                        error_type=error_type
-                    )
-            except ValueError:
-                return response
-            return response
+    def update_token(self, token):
+        self.token = token
+        self.headers['x-csrftoken'] = self.token
 
-    def safe_http_request(self, method, endpoint, fetch_time=None, **data):
-        fetch_time = fetch_time or settings.FETCH_TIME
-        methods = {
-            'GET': super(InstagramSession, self).get,
-            'POST': super(InstagramSession, self).post,
-        }
+    def _handle_response(self, r):
+        try:
+            r.raise_for_status()
+        except requests.RequestException:
+            if r.status_code >= 400 and r.status_code < 500:
+
+                # Status Code 400 Refers to Checkpoint Required
+                if r.status_code == 400:
+                    result = InstagramResult.from_response(r)
+                    if result.has_error:
+                        result.raise_client_exception(status_code=400)
+                    return result
+
+                exc = self.__status_code_exceptions__.get(r.status_code,
+                    exceptions.ApiClientException)
+                raise exc(status_code=r.status_code)
+            else:
+                raise self.__server_exception__(
+                    status_code=r.status_code
+                )
+        else:
+            result = InstagramResult.from_response(r)
+            if result.has_error:
+                result.raise_client_exception(status_code=400)
+            return result
+
+    def _handle_request_error(self, e, method, endpoint):
         error_kwargs = {
             'method': method,
             'endpoint': endpoint,
             'proxy': self.proxy
         }
+
+        if isinstance(e, requests.exceptions.ProxyError):
+            raise exceptions.ApiBadProxyException(**error_kwargs)
+        elif isinstance(e, requests.exceptions.ConnectTimeout):
+            raise exceptions.ApiTimeoutException(**error_kwargs)
+        elif isinstance(e, requests.exceptions.ReadTimeout):
+            raise exceptions.ApiTimeoutException(**error_kwargs)
+        elif isinstance(e, requests.exceptions.SSLError):
+            raise exceptions.ApiSSLException(**error_kwargs)
+        elif isinstance(e, requests.exceptions.ConnectionError):
+            # We can make a more appropriate exception later.
+            raise exceptions.ApiBadProxyException(**error_kwargs)
+        else:
+            raise e
+
+    @ensure_safe_http
+    def get_token(self):
         try:
-            response = methods[method](endpoint, data=data, timeout=fetch_time)
-        except requests.exceptions.ProxyError:
-            raise ApiBadProxyException(**error_kwargs)
-        except requests.exceptions.ConnectTimeout:
-            raise ApiTimeoutException(**error_kwargs)
-        except requests.exceptions.ReadTimeout:
-            raise ApiTimeoutException(**error_kwargs)
-        except urllib3.exceptions.MaxRetryError:
-            raise ApiMaxRetryError(**error_kwargs)
-        except urllib3.exceptions.ReadTimeoutError:
-            raise ApiTimeoutException(**error_kwargs)
+            response = super(InstagramSession, self).get(
+                settings.INSTAGRAM_URL,
+                timeout=settings.TOKEN_FETCH_TIME
+            )
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, 'GET', settings.INSTAGRAM_URL)
+        else:
+            cookies = response.cookies.get_dict()
+            if 'csrftoken' not in cookies:
+                raise exceptions.ApiBadProxyException(proxy=self.proxy)
+            return cookies['csrftoken']
+
+    @set_token
+    @ensure_safe_http
+    @ensure_token
+    def post(self, endpoint, fetch_time=None, token=None, **data):
+        fetch_time = fetch_time or settings.FETCH_TIME
+
+        try:
+            response = super(InstagramSession, self).post(
+                endpoint,
+                data=data,
+                timeout=fetch_time
+            )
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, 'POST', endpoint)
         else:
             return self._handle_response(response)
 
-    def post(self, endpoint, fetch_time=None, **data):
-        return self.safe_http_request('POST', endpoint, **data)
+    @ensure_safe_http
+    @set_token
+    def get(self, endpoint, fetch_time=None, token=None, **data):
+        fetch_time = fetch_time or settings.FETCH_TIME
 
-    def get(self, endpoint, fetch_time=None, **data):
-        return self.safe_http_request('GET', endpoint, fetch_time=fetch_time, **data)
+        try:
+            response = super(InstagramSession, self).get(
+                endpoint,
+                data=data,
+                timeout=fetch_time
+            )
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, 'GET', endpoint)
+        else:
+            return self._handle_response(response)
 
 
 class Api(object):
+
+    __client_exception__ = exceptions.ApiClientException
+    __server_exception__ = exceptions.ApiServerException
 
     def __init__(self):
         pass
@@ -132,120 +199,65 @@ class Api(object):
 
 class ProxyApi(Api):
 
-    __client_exception__ = ApiClientException
-    __server_exception__ = ApiServerException
-
     def __init__(self, link):
         self.link = link
 
-    def _parse_extra_proxy(self, proxy):
-        proxy = proxy.split(' ')
-        addr = proxy[0].split(':')
-        return Proxy(
-            ip=addr[0],
-            port=addr[1],
-            country=addr[1].split('-')[0]
-        )
-
-    def _parse_proxy(self, proxy):
-        proxy = proxy.find_all('td')
-        if 'transparent' not in (proxy[4].string, proxy[5].string):
-            return Proxy(
-                ip=proxy[0].string,
-                port=proxy[1].string,
-                country=proxy[3].string
-            )
-
     def get_proxies(self):
         response = self.get(self.link)
-        body = soup(response.text, 'html.parser')
+        body = BeautifulSoup(response.text, 'html.parser')
 
-        proxies = body.find('tbody').find_all('tr')
-        for proxy in proxies:
+        table_rows = body.find('tbody').find_all('tr')
+        for row in table_rows:
+            proxy = Proxy.from_scraped_tr(row)
             if proxy:
-                _proxy = self._parse_proxy(proxy)
-                if _proxy:
-                    yield _proxy
+                yield proxy
 
     def get_extra_proxies(self):
-        # The previous code was built almost like it expected this to fail
-        # occasionally, so we should too.
         response = self.get(settings.EXTRA_PROXY)
-        for proxy in response:
-            if '-H' in proxy and '-S' in proxy:
-                yield self.parse_extra_proxy(proxy)
+
+        def filter_ip_address(line):
+            if line.strip() != "":
+                if '-H' in line or '-S' in line:
+                    if len(line.strip()) < 30:
+                        return True
+            return False
+
+        body = BeautifulSoup(response.text, 'html.parser')
+        lines = [line.strip() for line in body.string.split("\n")]
+        ip_addresses = filter(filter_ip_address, lines)
+
+        for proxy_string in ip_addresses:
+            yield Proxy.from_text_file(proxy_string)
 
 
 class InstagramApi(Api):
 
-    def __init__(self, username, proxy):
+    def __init__(self, username, proxy=None, token=None):
         self.username = username
-        self.proxy = proxy
-
-        self.session = InstagramSession(self.proxy)
-        self._token = None
-
-    @property
-    def token(self):
-        if not self._token:
-            self._token = self.refresh_token()
-        return self._token
-
-    def post(self, endpoint, token=None, **data):
-        if 'token' not in self.session.headers:
-            if not token:
-                self.session.headers['x-csrftoken'] = self.token
-            else:
-                self.session.headers['x-csrftoken'] = token
-        return self.session.post(endpoint, **data)
-
-    def get(self, endpoint, fetch_time=None, **data):
-        return self.session.get(endpoint, fetch_time=fetch_time, **data)
-
-    def refresh_token(self):
-        response = self.get(
-            settings.INSTAGRAM_URL,
-            fetch_time=settings.TOKEN_FETCH_TIME
+        self.session = InstagramSession(
+            proxy=proxy,
+            token=token
         )
 
-        # results = response.json()
-        # if 'user' not in results or not results['user']:
-        #     raise InvalidUserName(self.username)
+    def update_proxy(self, proxy):
+        print("Updating Proxy")
+        self.session.update_proxy(proxy)
 
-        cookies = response.cookies.get_dict()
-        if 'csrftoken' not in cookies:
-            print("Warning: csrftoken not in cookies of response.")
-            return None
-        return cookies['csrftoken']
+    def update_token(self, token):
+        self.session.update_token(token)
 
-    def _format_state(self, results):
-        state = {
-            'accessed': False,
-            'locked': False,
-        }
-
-        if 'authenticated' in results:
-            state['accessed'] = results['authenticated']
-
-        elif 'message' in results and results['message'] == 'checkpoint_required':
-            state['accesed'] = True
-
-        elif 'status' in results and results['status'] == 'fail':
-            state['locked'] = True
-
-        return state
+    def fetch_token(self):
+        return self.session.get_token()
 
     def login(self, password, token=None):
         print(f"Logging in with {password}.")
-        token = token or self.refresh_token()
+
         data = {
             settings.INSTAGRAM_USERNAME_FIELD: self.username,
             settings.INSTAGRAM_PASSWORD_FIELD: password
         }
-        response = self.post(settings.INSTAGRAM_LOGIN_URL, token=token, **data)
-        results = response.json()
-
-        # if 'user' not in results or not results['user']:
-        #     raise InvalidUserName(self.username)
-        return results
-        return self._format_state(results)
+        return self.session.post(
+            settings.INSTAGRAM_LOGIN_URL,
+            token=token,
+            **data
+        )

