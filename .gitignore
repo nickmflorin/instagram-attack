@@ -1,2 +1,4 @@
 *.DS_Store
 *.pyc
+old_code.py
+test.py

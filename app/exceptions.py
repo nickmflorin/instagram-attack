@@ -97,7 +97,11 @@ class ApiSSLException(ApiBadProxyException):
     pass
 
 
-class ApiClientException(ApiException):
+class ApiClientBadProxyException(ApiBadProxyException):
+    """
+    Base class for exceptions that are raised after a response is received
+    that should inform that the proxy should be changed.
+    """
 
     def __init__(self, status_code=None, message=None, error_type=None):
         self.status_code = status_code
@@ -105,12 +109,19 @@ class ApiClientException(ApiException):
         self.error_type = error_type
 
 
-class ApiTooManyRequestsException(ApiClientException):
-    __change_proxy__ = True
+class ApiTooManyRequestsException(ApiClientBadProxyException):
 
     def __init__(self, **kwargs):
         kwargs.setdefault('status_code', 429)
         super(ApiTooManyRequestsException, self).__init__(**kwargs)
+
+
+class ApiClientException(ApiException):
+
+    def __init__(self, status_code=None, message=None, error_type=None):
+        self.status_code = status_code
+        self.message = message
+        self.error_type = error_type
 
 
 class ApiServerException(ApiException):

@@ -22,6 +22,9 @@ class Proxy:
     port: int
     country: str
 
+    def url(self, scheme="http"):
+        return f"{scheme}://{self.ip}:{self.port}/"
+
     @property
     def address(self):
         return f'{self.ip}:{self.port}'

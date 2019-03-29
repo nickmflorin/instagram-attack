@@ -64,33 +64,48 @@ class InstagramSession(requests.Session):
             http=self.proxy.address,
             https=self.proxy.address
         )
+        # token = self.get_token()
+        # self.update_token(token)
 
     def update_token(self, token):
         self.token = token
         self.headers['x-csrftoken'] = self.token
 
-    def _handle_response(self, r):
+    def _handle_response(self, response):
         try:
-            r.raise_for_status()
+            response.raise_for_status()
         except requests.RequestException:
-            if r.status_code >= 400 and r.status_code < 500:
+            if response.status_code >= 400 and response.status_code < 500:
 
                 # Status Code 400 Refers to Checkpoint Required
-                if r.status_code == 400:
-                    result = InstagramResult.from_response(r)
+                result = InstagramResult.from_response(response, expect_valid_json=False)
+                if result:
                     if result.has_error:
-                        result.raise_client_exception(status_code=400)
-                    return result
+                        result.raise_client_exception(status_code=response.status_code)
+                        return result
+                    # Error is still raised if message="checkpoint_required", but that
+                    # means the password was correct.
+                    elif result.accessed:
+                        return result
+                    else:
+                        # If we hit this point, that means that the API response
+                        # had content and we are not associating the error correctly.
+                        raise exceptions.ApiException(
+                            message="The result should have an error "
+                            "if capable of being converted to JSON at this point."
+                        )
 
-                exc = self.__status_code_exceptions__.get(r.status_code,
-                    exceptions.ApiClientException)
-                raise exc(status_code=r.status_code)
+                exc = self.__status_code_exceptions__.get(
+                    response.status_code,
+                    exceptions.ApiClientException
+                )
+                raise exc(status_code=response.status_code)
             else:
                 raise self.__server_exception__(
-                    status_code=r.status_code
+                    status_code=response.status_code
                 )
         else:
-            result = InstagramResult.from_response(r)
+            result = InstagramResult.from_response(response)
             if result.has_error:
                 result.raise_client_exception(status_code=400)
             return result
@@ -165,13 +180,13 @@ class InstagramSession(requests.Session):
             return self._handle_response(response)
 
 
-class Api(object):
+class ProxyApi(object):
 
     __client_exception__ = exceptions.ApiClientException
     __server_exception__ = exceptions.ApiServerException
 
-    def __init__(self):
-        pass
+    def __init__(self, link):
+        self.link = link
 
     def post(self, endpoint, **data):
         resp = self.session.post(endpoint, data=data, timeout=settings.FETCH_TIME)
@@ -195,12 +210,6 @@ class Api(object):
                 raise self.__server_exception__(response.status_code)
         else:
             return response
-
-
-class ProxyApi(Api):
-
-    def __init__(self, link):
-        self.link = link
 
     def get_proxies(self):
         response = self.get(self.link)
@@ -230,7 +239,7 @@ class ProxyApi(Api):
             yield Proxy.from_text_file(proxy_string)
 
 
-class InstagramApi(Api):
+class InstagramApi(object):
 
     def __init__(self, username, proxy=None, token=None):
         self.username = username
@@ -240,14 +249,16 @@ class InstagramApi(Api):
         )
 
     def update_proxy(self, proxy):
-        print("Updating Proxy")
         self.session.update_proxy(proxy)
 
     def update_token(self, token):
         self.session.update_token(token)
 
-    def fetch_token(self):
-        return self.session.get_token()
+    def fetch_token(self, session, proxy):
+        session.update_proxy(proxy)
+        token = session.get_token()
+        print(f"Token {token}")
+        return token
 
     def login(self, password, token=None):
         print(f"Logging in with {password}.")
