@@ -1,80 +1,64 @@
 from __future__ import absolute_import
 
-from argparse import ArgumentParser
 import os
-import queue
-import threading
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-from app import settings
-from app.exceptions import (ApiBadProxyException, ApiClientException,
-    ApiTimeoutException, ApiMaxRetryError, ApiException, ApiSSLException)
-from app.lib.users import User, Users
-from app.lib.api import ProxyApi, InstagramApi, InstagramSession
+import logging
+import sys
 
 import asyncio
 import concurrent.futures
-import logging
-import sys
-import time
-import aiohttp
-import app.settings as settings
-import app.exceptions as exceptions
-from app.lib.api import ProxyApi
-import requests
 
-def blocks(proxy):
-    log = logging.getLogger('blocks({})'.format(proxy.url))
+from app import settings
+from app import exceptions
+from app.lib.api import ProxyApi, InstagramSession
+
+
+def get_token_for_proxy(proxy):
+
+    log = logging.getLogger('get_token_for_proxy({})'.format(proxy.ip))
     log.info('running')
-    # session = aiohttp.ClientSession(
-    #     connector=aiohttp.TCPConnector(verify_ssl=False, limit=1)
-    # )
-    session = requests.Session()
-    session.proxies.update(
-        http=proxy.address,
-        https=proxy.address
-    )
+
+    session = InstagramSession(proxy=proxy)
     try:
-        # response = session.get(settings.INSTAGRAM_URL, proxy=proxy.url())
-        response = session.get(settings.INSTAGRAM_URL)
-    except:
-        log.info('response error')
+        return session.get_token()
+    except exceptions.ApiBadProxyException:
+        log.info('Bad Proxy...')
         return None
-    else:
-        cookies = response.cookies.get_dict()
-        if 'csrftoken' not in cookies:
-            # raise exceptions.ApiBadProxyException(proxy=proxy)
-            return None
-        return cookies['csrftoken']
-        # print(response.cookies['csrftoken'].value)
-        # log.info('done')
-        # return response.cookies['csrftoken'].value
 
 
-async def run_token_tasks(executor):
-    log = logging.getLogger('run_blocking_tasks')
-    log.info('starting')
+async def run_token_tasks(executor, loop):
+
+    log = logging.getLogger('run_token_tasks')
+    log.info('Retrieving Tokens...')
 
     proxy_api = ProxyApi(settings.PROXY_LINKS[0])
-    proxies = list(proxy_api.get_proxies())[:4]
+    proxies = list(proxy_api.get_proxies())[:10]
 
-    log.info('creating executor tasks')
+    log.info('Creating Executor Tasks...')
     loop = asyncio.get_event_loop()
-    blocking_tasks = [
-        loop.run_in_executor(executor, blocks, proxy)
+    token_tasks = [
+        loop.run_in_executor(executor, get_token_for_proxy, proxy)
         for proxy in proxies
     ]
-    log.info('waiting for executor tasks')
-    completed, pending = await asyncio.wait(blocking_tasks)
-    results = [t.result() for t in completed]
-    print(results)
-    log.info('results: {!r}'.format(results))
 
-    log.info('exiting')
+    log.info('Waiting for Executor Tasks...')
+    completed, pending = await asyncio.wait(token_tasks,
+        return_when=asyncio.FIRST_COMPLETED)
+
+    [task.cancel() for task in token_tasks]
+    tokens = []
+    tokens = [task.result() for task in completed]
+    tokens = [token for token in tokens if token is not None]
+    if len(tokens) != 0:
+        log.info(f"Found token: {tokens[0]}!")
+        await loop.shutdown_asyncgens()
 
 
 if __name__ == '__main__':
+
+    abspath = os.path.abspath(__file__)
+    dname = os.path.dirname(abspath)
+    os.chdir(dname)
+
     # Configure logging to show the name of the thread
     # where the log message originates.
     logging.basicConfig(
@@ -91,26 +75,7 @@ if __name__ == '__main__':
     event_loop = asyncio.get_event_loop()
     try:
         event_loop.run_until_complete(
-            run_token_tasks(executor)
+            run_token_tasks(executor, event_loop)
         )
     finally:
         event_loop.close()
-
-
-def get_args():
-    args = ArgumentParser()
-    args.add_argument('method', help='Test method to run.')
-    return args.parse_args()
-
-
-if __name__ == '__main__':
-
-    abspath = os.path.abspath(__file__)
-    dname = os.path.dirname(abspath)
-    os.chdir(dname)
-
-    arugments = get_args()
-
-    # Probably not the best way to do this, but we'll worry about that later.
-    method = eval(arugments.method)
-    method.__call__()

@@ -20,20 +20,20 @@ def ensure_safe_http(func):
     return wrapper
 
 
-def set_token(func):
-    def wrapper(instance, *args, **kwargs):
-        if kwargs.get('token'):
-            instance.update_token(kwargs['token'])
-        return func(instance, *args, **kwargs)
-    return wrapper
+# def set_token(func):
+#     def wrapper(instance, *args, **kwargs):
+#         if kwargs.get('token'):
+#             instance.update_token(kwargs['token'])
+#         return func(instance, *args, **kwargs)
+#     return wrapper
 
 
-def ensure_token(func):
-    def wrapper(instance, *args, **kwargs):
-        if not instance.headers.get('x-csrftoken'):
-            raise exceptions.MissingTokenException()
-        return func(instance, *args, **kwargs)
-    return wrapper
+# def ensure_token(func):
+#     def wrapper(instance, *args, **kwargs):
+#         if not instance.headers.get('x-csrftoken'):
+#             raise exceptions.MissingTokenException()
+#         return func(instance, *args, **kwargs)
+#     return wrapper
 
 
 class InstagramSession(requests.Session):
@@ -64,8 +64,6 @@ class InstagramSession(requests.Session):
             http=self.proxy.address,
             https=self.proxy.address
         )
-        # token = self.get_token()
-        # self.update_token(token)
 
     def update_token(self, token):
         self.token = token
@@ -146,9 +144,9 @@ class InstagramSession(requests.Session):
                 raise exceptions.ApiBadProxyException(proxy=self.proxy)
             return cookies['csrftoken']
 
-    @set_token
+    # @set_token
+    # @ensure_token
     @ensure_safe_http
-    @ensure_token
     def post(self, endpoint, fetch_time=None, token=None, **data):
         fetch_time = fetch_time or settings.FETCH_TIME
 
@@ -163,8 +161,8 @@ class InstagramSession(requests.Session):
         else:
             return self._handle_response(response)
 
+    # @set_token
     @ensure_safe_http
-    @set_token
     def get(self, endpoint, fetch_time=None, token=None, **data):
         fetch_time = fetch_time or settings.FETCH_TIME
 
