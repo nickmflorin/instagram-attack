@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from app import settings
 from app.lib import exceptions
+from app.lib.logging import Styles
 
 
 __all__ = ('InstagramResult', 'Proxy', )
@@ -69,6 +70,12 @@ class InstagramResult:
     errors: InstagramResultErrors = None
     error_type: Optional[str] = None
     showAccountRecoveryModal: Optional[bool] = False
+
+    def __str__(self):
+        string_rep = f"Authenticated: {self.accessed}"
+        if self.accessed:
+            return Styles.GREEN.encode(string_rep)
+        return Styles.RED.encode(string_rep)
 
     @classmethod
     def from_dict(cls, data):

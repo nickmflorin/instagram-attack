@@ -27,17 +27,23 @@ class password_generator(object):
         for pw in self.raw_passwords:
             for alteration in self.alterations:
                 password = pw + alteration
-                yield password
+                if password not in self.attempts:
+                    yield password
 
     def yield_numbered_passwords(self):
         for pw in self.raw_passwords:
             for alteration in self.common_numbers:
                 password = pw + alteration
-                yield password
+                if password not in self.attempts:
+                    yield password
 
     def yield_combined_passwords(self):
         for pw in self.raw_passwords:
             for alteration in self.alterations:
                 for num_alteration in self.common_numbers:
-                    yield pw + alteration + num_alteration
-                    yield pw + num_alteration + alteration
+                    option1 = pw + alteration + num_alteration
+                    if option1 not in self.attempts:
+                        yield option1
+                    option2 = pw + num_alteration + alteration
+                    if option2 not in self.attempts:
+                        yield option2

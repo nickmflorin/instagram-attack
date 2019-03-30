@@ -1,56 +1,69 @@
 from __future__ import absolute_import
 
-import logging
-
 import asyncio
 import queue
 
 from app import settings
 from app.lib.api import ProxyApi
+from app.lib.utils import auto_logger
 
 
 __all__ = ('QueueManagerSync', 'QueueManagerAsync', )
 
 
-class QueueManagerSync(object):
+class QueueManager(object):
+
+    __loggers__ = {
+        'populate_proxies': 'Populating Proxy Queue',
+        'populate_passwords': 'Populating Passwords',
+    }
 
     def __init__(self, user):
         self.user = user
 
-        self.proxies = queue.LifoQueue()
-        self.tokens = queue.Queue()
-        self.passwords = queue.Queue()
+        self.proxies = self.__queues_cls__['proxies']()
+        self.tokens = self.__queues_cls__['tokens']()
+        self.passwords = self.__queues_cls__['passwords']()
+        self.attempts = self.__queues_cls__['attempts']()
 
     @property
     def queues(self):
         return {
             'proxy': self.proxies,
             'token': self.tokens,
-            'password': self.passwords
+            'password': self.passwords,
+            'attempt': self.attempts
         }
+
+
+class QueueManagerSync(QueueManager):
+
+    __queues_cls__ = {
+        'proxies': queue.LifoQueue,
+        'tokens': queue.Queue,
+        'passwords': queue.Queue,
+        'attempts': queue.Queue,
+    }
 
     def put(self, des, obj):
         queue = self.queues[des]
         queue.put(obj)
 
-    def get(self, des, obj):
+    def get(self, des):
         queue = self.queues[des]
-        queue.get(obj)
+        return queue.get()
 
-    def populate_passwords(self):
-        log = logging.getLogger('Populating Passwords')
-        log.info("Running...")
-
+    @auto_logger
+    def populate_passwords(self, log):
         for password in self.user.get_new_attempts():
             self.put('password', password)
-
+        if self.queues['password'].empty():
+            log.exit("No new passwords to try.")
         log.info("Done Populating Passwords")
 
-    def populate_proxies(self):
-
+    @auto_logger
+    def populate_proxies(self, log):
         found_proxies = []
-        log = logging.getLogger('Populating Proxy Queue')
-        log.info("Running...")
 
         for link in settings.PROXY_LINKS:
             log.info(f"Scraping Proxies at {link}")
@@ -72,29 +85,27 @@ class QueueManagerSync(object):
         log.info("Done Populating Proxy Queue")
 
 
-class QueueManagerAsync(QueueManagerSync):
+class QueueManagerAsync(QueueManager):
 
-    def __init__(self, user):
-        self.user = user
-
-        self.proxies = asyncio.LifoQueue()
-        self.tokens = asyncio.Queue()
-        self.passwords = asyncio.Queue()
+    __queues_cls__ = {
+        'proxies': asyncio.LifoQueue,
+        'tokens': asyncio.Queue,
+        'passwords': asyncio.Queue,
+        'attempts': asyncio.Queue,
+    }
 
     def put(self, des, obj):
         queue = self.queues[des]
         queue.put_nowait(obj)
 
-    def get(self, des, obj):
+    def get(self, des):
         queue = self.queues[des]
-        queue.get_nowait(obj)
+        return queue.get_nowait()
 
-    async def populate_proxies(self):
+    @auto_logger
+    async def populate_proxies(self, log):
 
         found_proxies = []
-        log = logging.getLogger('Populating Proxy Queue')
-        log.info("Running...")
-
         for link in settings.PROXY_LINKS:
             log.info(f"Scraping Proxies at {link}")
             proxy_api = ProxyApi(link)
@@ -114,14 +125,10 @@ class QueueManagerAsync(QueueManagerSync):
 
         log.info("Done Populating Proxy Queue")
 
-    async def populate_passwords(self):
-
-        log = logging.getLogger('Populating Passwords')
-        log.info("Running...")
-
+    @auto_logger
+    async def populate_passwords(self, log):
         for password in self.user.get_new_attempts():
             self.put('password', password)
-
+        if self.queues['password'].empty():
+            log.exit("No new passwords to try.")
         log.info("Done Populating Passwords")
-
-
