@@ -3,25 +3,20 @@ from __future__ import absolute_import
 import os
 from platform import python_version
 
-from app import settings
+import asyncio
 from argparse import ArgumentParser
 
-from app.engine import Engine
-from app.validation import validate_mode
+from app.engine import EngineAsync, EngineSync
 
 
 def get_args():
     args = ArgumentParser()
     args.add_argument('username',
         help='email or username')
-    args.add_argument('-nc', '--no-color',
-        dest='color',
+    args.add_argument('-sync', '--sync',
+        dest='sync',
         action='store_true',
-        help='disable colors')
-    args.add_argument('-m', '--mode',
-        default=2,
-        type=validate_mode,
-        help='modes: 0 => 32 bots; 1 => 16 bots; 2 => 8 bots; 3 => 4 bots')
+        help='Test attack synchronously.')
     return args.parse_args()
 
 
@@ -37,9 +32,10 @@ if __name__ == '__main__':
 
     arugments = get_args()
 
-    engine = Engine(
-        arugments.username,
-        settings.MODES[arugments.mode],
-        is_color=True if not arugments.color else False,
-    )
-    engine.start()
+    if not arugments.sync:
+        event_loop = asyncio.get_event_loop()
+        e = EngineAsync(arugments.username, event_loop)
+        e.run()
+    else:
+        e = EngineSync(arugments.username)
+        e.run()

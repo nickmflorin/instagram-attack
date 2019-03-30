@@ -1,8 +1,5 @@
 from __future__ import absolute_import
 
-DEBUG = False
-CREDENTIALS = 'accounts.txt'
-MODES = {0: 512, 1: 256, 2: 128, 3: 64}
 
 USER_AGENTS = [
     'Googlebot/2.1 (+http://www.google.com/bot.html)',
@@ -42,14 +39,9 @@ INSTAGRAM_PASSWORD_FIELD = 'password'
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
-FETCH_TIME = (6, 10)
+DEFAULT_FETCH_TIME = (6, 10)
+LOGIN_FETCH_TIME = (5, 7)
 TOKEN_FETCH_TIME = (5, 7)
-
-RESPONSE_CODES = {'succeed': 0, 'failed': 1, 'locked': -1}
-
-MAX_BAD_PROXIES = 128
-MAX_TIME_TO_WAIT = 18
-MAX_BOTS_PER_PROXY = 16
 
 PROXY_LINKS = [
     'https://sslproxies.org',
@@ -63,3 +55,6 @@ ATTEMPTS_FILENAME = "attempts"
 ALTERATIONS_FILENAME = "alterations"
 NUMBERS_FILENAME = "common_numbers"
 USER_DIRECTORY = "users"
+
+CHECKPOINT_REQUIRED = "checkpoint_required"
+GENERIC_REQUEST_ERROR = 'generic_request_error'

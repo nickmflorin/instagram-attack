@@ -5,14 +5,11 @@ from dacite import from_dict
 from dataclasses import dataclass
 from typing import List, Optional
 
-import app.exceptions as exceptions
+from app import settings
+from app.lib import exceptions
 
 
 __all__ = ('InstagramResult', 'Proxy', )
-
-
-CHECKPOINT_REQUIRED = "checkpoint_required"
-GENERIC_REQUEST_ERROR = 'generic_request_error'
 
 
 @dataclass
@@ -79,7 +76,7 @@ class InstagramResult:
 
     @property
     def accessed(self):
-        return self.authenticated or self.message == CHECKPOINT_REQUIRED
+        return self.authenticated or self.message == settings.CHECKPOINT_REQUIRED
 
     @property
     def invalid_user(self):
