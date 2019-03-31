@@ -1,11 +1,13 @@
 from __future__ import absolute_import
 
 import logging
-import sys
 
 from enum import Enum
 from colorama import init
 from colorama import Fore, Style
+
+
+__all__ = ('SessionLogger', 'EngineLogger', )
 
 
 RESET_SEQ = "\033[0m"
@@ -31,6 +33,7 @@ class LoggingLevelColors(Enum):
     CRITICAL = (50, Styles.YELLOW)
     ERROR = (40, Styles.RED)
     WARNING = (30, Styles.RED)
+    SUCCESS = (20, Styles.GREEN)
     INFO = (20, Styles.CYAN)
     DEBUG = (10, Styles.BLUE)
 
@@ -97,7 +100,7 @@ class LogRecordWrapper(dict):
         return tuple(data)
 
 
-class EngineFormatter(logging.Formatter):
+class AppLogFormatter(logging.Formatter):
 
     def __init__(self, msg, datefmt=None):
         logging.Formatter.__init__(self, msg, datefmt=datefmt)
@@ -108,26 +111,71 @@ class EngineFormatter(logging.Formatter):
         except KeyError:
             pass
         else:
+            if record.levelname in ("SUCCESS", "ERROR"):
+                record.msg = color.style.encode(record.msg)
+
             record.levelname = color.style.encode(record.levelname)
+            record.levelname = Styles.BOLD.encode(record.levelname)
+
         record.threadName = LoggingColors.THREADNAME.style.encode(record.threadName)
         return logging.Formatter.format(self, record)
 
 
-class EngineLogger(logging.Logger):
+class SessionLogFormatter(logging.Formatter):
 
-    FORMAT = (
-        "[%(asctime)s] "
-        "%(levelname)s "
-        "%(threadName)5s - %(name)5s: %(message)s"
-    )
+    def __init__(self, msg, datefmt=None):
+        logging.Formatter.__init__(self, msg, datefmt=datefmt)
+
+    def format_thread_name(self, record):
+        record.threadName = LoggingColors.THREADNAME.style.encode(record.threadName)
+
+    def format_level(self, record):
+        color = LoggingLevelColors[record.levelname]
+
+        record.levelname = color.style.encode(record.levelname)
+        record.levelname = Styles.BOLD.encode(record.levelname)
+
+    def format_message(self, record):
+        color = LoggingLevelColors[record.levelname]
+
+        if record.levelname in ("ERROR", 'SUCCESS'):
+            record.msg = color.style.encode(record.msg)
+
+        if hasattr(record, 'url'):
+            record.msg += f" ({Styles.UNDERLINE.encode(record.url)})"
+
+        if hasattr(record, 'status_code'):
+            record.msg += Styles.BOLD.encode(f" [{record.status_code}]")
+
+    def format(self, record):
+        if getattr(record, 'isSuccess', None):
+            record.levelname = 'SUCCESS'
+
+        try:
+            LoggingLevelColors[record.levelname]
+        except KeyError:
+            pass
+        else:
+            self.format_message(record)
+            self.format_level(record)
+
+        self.format_thread_name(record)
+        return logging.Formatter.format(self, record)
+
+
+class AppLogger(logging.Logger):
 
     DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+    __formatter__ = AppLogFormatter
 
     def __init__(self, name):
         init(autoreset=True)
         logging.Logger.__init__(self, name, logging.INFO)
 
-        self.formatter = EngineFormatter(self.FORMAT, datefmt=self.DATE_FORMAT)
+        logging.SUCCESS = 25  # between WARNING and INFO
+        logging.addLevelName(logging.SUCCESS, 'SUCCESS')
+
+        self.formatter = self.__formatter__(self.FORMAT, datefmt=self.DATE_FORMAT)
 
         handler = logging.StreamHandler()
         handler.setFormatter(self.formatter)
@@ -137,14 +185,24 @@ class EngineLogger(logging.Logger):
     def makeRecord(self, *args, **kwargs):
         wrapper = LogRecordWrapper(*args)
         wrapper.format()
-        return super(EngineLogger, self).makeRecord(*wrapper.args)
+        return super(AppLogger, self).makeRecord(*wrapper.args)
 
-    def success(self, message):
-        print(Styles.GREEN.encode(message))
+    def success(self, message, extra=None):
+        extra = extra or {}
+        extra['isSuccess'] = True
+        self.info(message, extra=extra)
 
-    def exit(self, message):
-        print(Styles.RED.encode(message))
-        sys.exit()
+
+class EngineLogger(AppLogger):
+    """
+    These might not necessarily need to be treated differently right now but
+    we are eventually going to want to treat them slightly differently.
+    """
+    FORMAT = (
+        "[%(asctime)s] "
+        "%(levelname)s "
+        "%(threadName)5s - %(name)5s: %(message)s"
+    )
 
     def stringify_item(self, key, val):
         bold_value = Styles.BOLD.encode(val)
@@ -157,3 +215,22 @@ class EngineLogger(logging.Logger):
 
     def items(self, **items):
         self.info(self.stringify_items(**items))
+
+
+class SessionLogger(AppLogger):
+    """
+    These might not necessarily need to be treated differently right now but
+    we are eventually going to want to treat them slightly differently.
+    """
+    __formatter__ = SessionLogFormatter
+
+    FORMAT = (
+        "[%(asctime)s] "
+        "%(levelname)s "
+        "%(threadName)5s - %(name)5s: %(message)s"
+    )
+
+    def makeRecord(self, *args, **kwargs):
+        wrapper = LogRecordWrapper(*args)
+        wrapper.format()
+        return super(AppLogger, self).makeRecord(*wrapper.args)

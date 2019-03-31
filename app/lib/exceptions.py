@@ -7,6 +7,10 @@ class UserDoesNotExist(Exception):
         super(UserDoesNotExist, self).__init__(message)
 
 
+class EngineException(Exception):
+    pass
+
+
 class ApiException(Exception):
     __sleep__ = False
 
