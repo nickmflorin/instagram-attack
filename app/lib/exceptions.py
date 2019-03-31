@@ -8,6 +8,7 @@ class UserDoesNotExist(Exception):
 
 
 class ApiException(Exception):
+    __sleep__ = False
 
     def __init__(self, message=None):
         self.message = message
@@ -85,8 +86,8 @@ class ApiBadProxyException(ApiRequestsException):
         return f"The proxy {self.proxy} is invalid."
 
 
-class ApiMaxRetryError(ApiBadProxyException):
-    pass
+class ApiMaxRetryError(ApiRequestsException):
+    __sleep__ = True
 
 
 class ApiTimeoutException(ApiBadProxyException):
@@ -110,6 +111,7 @@ class ApiClientBadProxyException(ApiBadProxyException):
 
 
 class ApiTooManyRequestsException(ApiClientBadProxyException):
+    __sleep__ = True
 
     def __init__(self, **kwargs):
         kwargs.setdefault('status_code', 429)

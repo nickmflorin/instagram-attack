@@ -41,12 +41,14 @@ class case_alteration_generator(abstract_password_generator):
         yield word.upper()
         yield first_char_upper(word)
 
-        if len(word) >= 2:
-            # Yields with just the second character uppercase and the first & second
-            # character uppercased.
-            yield second_char_upper(word)
-            first_upper = first_char_upper(word)
-            yield second_char_upper(first_upper)
+        # Skipping for Now to Make Faster
+
+        # if len(word) >= 2:
+        #     # Yields with just the second character uppercase and the first & second
+        #     # character uppercased.
+        #     yield second_char_upper(word)
+        #     first_upper = first_char_upper(word)
+        #     yield second_char_upper(first_upper)
 
 
 class character_replacement_generator(abstract_password_generator):
@@ -171,7 +173,9 @@ class numeric_core_generator(core_password_generator):
 
     def alterations_before_after(self, word, numeric_alteration):
         yield "%s%s" % (word, numeric_alteration)
-        yield "%s%s" % (numeric_alteration, word)
+
+        # Skipping for now to make faster
+        # yield "%s%s" % (numeric_alteration, word)
 
 
 class alteration_core_generator(core_password_generator):

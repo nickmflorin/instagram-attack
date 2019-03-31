@@ -25,6 +25,7 @@ class QueueManager(object):
         self.tokens = self.__queues_cls__['tokens']()
         self.passwords = self.__queues_cls__['passwords']()
         self.attempts = self.__queues_cls__['attempts']()
+        self.proxy_list = []
 
     @property
     def queues(self):
@@ -66,26 +67,25 @@ class QueueManagerSync(QueueManager):
 
     @auto_logger
     def populate_proxies(self, log):
-        found_proxies = []
 
         for link in settings.PROXY_LINKS:
             log.info(f"Scraping Proxies at {link}")
             proxy_api = ProxyApi(link)
 
             for proxy in proxy_api.get_proxies():
-                if proxy.ip not in found_proxies:
+                if proxy not in self.proxy_list:
                     self.put('proxy', proxy)
-                    found_proxies.append(proxy.ip)
+                    self.proxy_list.append(proxy)
 
         log.info(f"Scraping Extra Proxies at {settings.EXTRA_PROXY}")
         proxy_api = ProxyApi(settings.EXTRA_PROXY)
 
         for proxy in proxy_api.get_extra_proxies():
-            if proxy.ip not in found_proxies:
+            if proxy not in self.proxy_list:
                 self.put('proxy', proxy)
-                found_proxies.append(proxy.ip)
+                self.proxy_list.append(proxy)
 
-        log.info(f"Populated {len(found_proxies)} Proxies")
+        log.info(f"Populated {len(self.proxy_list)} Proxies")
 
 
 class QueueManagerAsync(QueueManager):
@@ -108,25 +108,24 @@ class QueueManagerAsync(QueueManager):
     @auto_logger
     async def populate_proxies(self, log):
 
-        found_proxies = []
         for link in settings.PROXY_LINKS:
             log.info(f"Scraping Proxies at {link}")
             proxy_api = ProxyApi(link)
 
             for proxy in proxy_api.get_proxies():
-                if proxy.ip not in found_proxies:
+                if proxy not in self.proxy_list:
                     self.put('proxy', proxy)
-                    found_proxies.append(proxy.ip)
+                    self.proxy_list.append(proxy)
 
         log.info(f"Scraping Extra Proxies at {settings.EXTRA_PROXY}")
         proxy_api = ProxyApi(settings.EXTRA_PROXY)
 
         for proxy in proxy_api.get_extra_proxies():
-            if proxy.ip not in found_proxies:
+            if proxy not in self.proxy_list:
                 self.put('proxy', proxy)
-                found_proxies.append(proxy.ip)
+                self.proxy_list.append(proxy)
 
-        log.info(f"Populated {len(found_proxies)} Proxies")
+        log.info(f"Populated {len(self.proxy_list)} Proxies")
 
     @auto_logger
     async def populate_passwords(self, log):
