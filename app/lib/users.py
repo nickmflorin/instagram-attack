@@ -184,6 +184,13 @@ class User(object):
         with self.open_attempts_file():
             pass
 
+    def add_password_attempt(self, attempt):
+        current = self.get_password_attempts()
+        if attempt not in current:
+            current.append(attempt)
+            current = sorted(current)
+            self._write_password_attempts(current)
+
     def update_password_attempts(self, attempts):
 
         current = self.get_password_attempts()

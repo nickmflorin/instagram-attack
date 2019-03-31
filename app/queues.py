@@ -55,11 +55,14 @@ class QueueManagerSync(QueueManager):
 
     @auto_logger
     def populate_passwords(self, log):
+        count = 1
         for password in self.user.get_new_attempts():
+            count += 1
             self.put('password', password)
+
         if self.queues['password'].empty():
             log.exit("No new passwords to try.")
-        log.info("Done Populating Passwords")
+        log.info(f"Populated {count} Passwords")
 
     @auto_logger
     def populate_proxies(self, log):
@@ -82,7 +85,7 @@ class QueueManagerSync(QueueManager):
                 self.put('proxy', proxy)
                 found_proxies.append(proxy.ip)
 
-        log.info("Done Populating Proxy Queue")
+        log.info(f"Populated {len(found_proxies)} Proxies")
 
 
 class QueueManagerAsync(QueueManager):
@@ -123,12 +126,15 @@ class QueueManagerAsync(QueueManager):
                 self.put('proxy', proxy)
                 found_proxies.append(proxy.ip)
 
-        log.info("Done Populating Proxy Queue")
+        log.info(f"Populated {len(found_proxies)} Proxies")
 
     @auto_logger
     async def populate_passwords(self, log):
+        count = 1
         for password in self.user.get_new_attempts():
+            count += 1
             self.put('password', password)
+
         if self.queues['password'].empty():
             log.exit("No new passwords to try.")
-        log.info("Done Populating Passwords")
+        log.info(f"Populated {count} Passwords")
