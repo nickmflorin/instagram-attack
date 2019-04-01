@@ -57,7 +57,7 @@ ALTERATIONS_FILENAME = "alterations"
 NUMBERS_FILENAME = "common_numbers"
 USER_DIRECTORY = "users"
 
-TOKEN_REQUEST_LIMIT = 20
+TOKEN_REQUEST_LIMIT = 50
 
 CHECKPOINT_REQUIRED = "checkpoint_required"
 GENERIC_REQUEST_ERROR = 'generic_request_error'

