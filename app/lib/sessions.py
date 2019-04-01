@@ -42,7 +42,7 @@ class ProxySession(CustomAioSession):
 
     async def get_proxies(self, link):
         proxy_list = []
-        async with self.get(link, timeout=settings.DEFAULT_AIO_FETCH_TIME) as response:
+        async with self.get(link, timeout=settings.DEFAULT_FETCH_TIME) as response:
 
             response = self._handle_response(response)
             self.log.success(f"Received Response", extra={
@@ -64,7 +64,7 @@ class ProxySession(CustomAioSession):
     async def get_extra_proxies(self):
         proxy_list = []
         async with self.get(settings.EXTRA_PROXY,
-                timeout=settings.DEFAULT_AIO_FETCH_TIME) as response:
+                timeout=settings.DEFAULT_FETCH_TIME) as response:
 
             response = self._handle_response(response)
 
@@ -93,75 +93,67 @@ class ProxySession(CustomAioSession):
 
 class InstagramSession(CustomAioSession):
 
-    # __status_code_exceptions__ = {
-    #     429: exceptions.ApiTooManyRequestsException
-    # }
+    __status_code_exceptions__ = {
+        429: exceptions.TooManyRequestsException
+    }
 
-    # def _handle_response(self, response):
-    #     try:
-    #         response.raise_for_status()
-    #     except requests.RequestException:
-    #         if response.status_code >= 400 and response.status_code < 500:
+    def _handle_login_response(self, response):
+        result = InstagramResult.from_response(response)
+        if not result:
+            return self._handle_response(response)
 
-    #             # Status Code 400 Refers to Checkpoint Required
-    #             result = InstagramResult.from_response(response, expect_valid_json=False)
-    #             if result:
-    #                 if result.has_error:
-    #                     result.raise_client_exception(status_code=response.status_code)
-    #                     return result
-    #                 # Error is still raised if message="checkpoint_required", but that
-    #                 # means the password was correct.
-    #                 elif result.accessed:
-    #                     return result
-    #                 else:
-    #                     # If we hit this point, that means that the API response
-    #                     # had content and we are not associating the error correctly.
-    #                     raise exceptions.ApiException(
-    #                         message="The result should have an error "
-    #                         "if capable of being converted to JSON at this point."
-    #                     )
+        if result.has_error:
+            result.raise_client_exception(status_code=response.status_code)
+        elif result.accessed:
+            # Error is still raised if message="checkpoint_required", but that
+            # means the password was correct.
+            return result
+        else:
+            # If we hit this point, that means that the API response
+            # had content and we are not associating the error correctly.
+            raise exceptions.ApiException(
+                message="The result should have an error "
+                "if capable of being converted to JSON at this point."
+            )
 
-    #             exc = self.__status_code_exceptions__.get(
-    #                 response.status_code,
-    #                 exceptions.ApiClientException
-    #             )
-    #             raise exc(status_code=response.status_code)
-    #         else:
-    #             raise self.__server_exception__(
-    #                 status_code=response.status_code
-    #             )
-    #     else:
-    #         result = InstagramResult.from_response(response)
-    #         if result.has_error:
-    #             result.raise_client_exception(status_code=400)
-    #         return result
+    def _handle_response(self, response):
+        try:
+            response.raise_for_status()
+        except aiohttp.ClientResponseError:
+            if response.status_code >= 400 and response.status_code < 500:
+                exc = self.__status_code_exceptions__.get(
+                    response.status_code,
+                    exceptions.ClientResponseException
+                )
+                raise exc(status_code=response.status_code)
+            else:
+                raise exceptions.ServerResponseException(
+                    message=response.reason,
+                    status_code=response.status_code
+                )
+        else:
+            return response
 
-    def _handle_response_error(self, e, details):
-        if isinstance(e, aiohttp.ClientHttpProxyError):
-            raise exceptions.ApiBadProxyException(**details)
-
-    def _handle_request_error(self, e, details):
-        # FOR NOW, just treat them all as bad proxies
+    def _handle_request_error(self, e, **details):
+        """
+        TimeoutError is more general form of ServerTimeoutError, which exists
+        for asyncio but not aiohttp, so for now we will treat them the same until
+        the difference is determined.
+        """
         if isinstance(e, aiohttp.ClientConnectorError):
-            raise exceptions.ApiBadProxyException(**details)
+            raise exceptions.RequestsConnectionException(**details)
         elif isinstance(e, aiohttp.ServerTimeoutError):
-            raise exceptions.ApiBadProxyException(**details)
-
-        # TimeoutError is more general form of ServerTimeoutError, we should
-        # probably just stick to that one since it does indicate slow connections
-        # to proxies which slow down search.
+            raise exceptions.RequestsTimeoutException(**details)
         elif isinstance(e, asyncio.TimeoutError):
-            raise exceptions.ApiBadProxyException(**details)
-
-    def _handle_session_error(self, e, proxy, method, endpoint):
-        details = {
-            'method': method,
-            'endpoint': endpoint,
-            'proxy': proxy
-        }
-        self._handle_request_error(e, details=details)
-        self._handle_response_error(e, details=details)
-        raise e
+            raise exceptions.RequestsTimeoutException(**details)
+        elif isinstance(e, aiohttp.ClientOSError):
+            raise exceptions.RequestsOSError(**details)
+        elif isinstance(e, aiohttp.ServerDisconnectedError):
+            raise exceptions.RequestsDisconnectError(**details)
+        elif isinstance(e, aiohttp.ClientHttpProxyError):
+            raise exceptions.ClientHttpProxyException(**details)
+        else:
+            raise e
 
     async def get_token(self, proxy):
 
@@ -170,44 +162,40 @@ class InstagramSession(CustomAioSession):
 
         self.log.info(f"Fetching Token with {proxy.ip}")
         try:
-            async with self.get(settings.INSTAGRAM_URL,
-                    proxy=proxy.url(),
-                    timeout=settings.DEFAULT_AIO_FETCH_TIME) as response:
+            async with self.get(
+                settings.INSTAGRAM_URL,
+                proxy=proxy.url(),
+                timeout=settings.DEFAULT_TOKEN_FETCH_TIME
+            ) as response:
+                response = self._handle_response(response)
+                if not response.cookies.get('csrftoken'):
+                    raise exceptions.TokenNotInResponse(proxy=proxy)
 
-                return response.cookies
+                return response.cookies['csrftoken'].value
+
         except Exception as exc:
-            self._handle_session_error(exc, proxy, 'GET', settings.INSTAGRAM_URL)
-        # except requests.exceptions.RequestException as e:
-        #     self._handle_request_error(e, 'GET', settings.INSTAGRAM_URL)
-        # else:
-        #     cookies = response.cookies.get_dict()
-        #     if 'csrftoken' not in cookies:
-        #         raise exceptions.ApiBadProxyException(proxy=self.proxy)
-        #     return cookies['csrftoken']
+            self._handle_request_error(exc, proxy=proxy)
 
-    def post(self, endpoint, token, fetch_time=None, **data):
-        fetch_time = fetch_time or settings.DEFAULT_FETCH_TIME
+    async def login(self, username, password, token, proxy):
+        data = {
+            settings.INSTAGRAM_USERNAME_FIELD: username,
+            settings.INSTAGRAM_PASSWORD_FIELD: password
+        }
+
+        self.log.info(f"Logging in with {password} {proxy.ip}")
+
+        self.headers = settings.HEADER.copy()
+        self.headers['user-agent'] = random.choice(settings.USER_AGENTS)
         self.headers['x-csrftoken'] = token
 
         try:
-            response = super(InstagramSession, self).post(
-                endpoint,
-                data=data,
-                timeout=fetch_time
-            )
-        except requests.exceptions.RequestException as e:
-            self._handle_request_error(e, 'POST', endpoint)
-        else:
-            return self._handle_response(response)
+            async with self.post(
+                settings.INSTAGRAM_LOGIN_URL,
+                proxy=proxy.url(),
+                timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
+                **data
+            ) as response:
+                return self._handle_login_response(response)
 
-    def login(self, password, token, proxy=None):
-        data = {
-            settings.INSTAGRAM_USERNAME_FIELD: self.user.username,
-            settings.INSTAGRAM_PASSWORD_FIELD: password
-        }
-        return self.post(
-            settings.INSTAGRAM_LOGIN_URL,
-            token=token,
-            fetch_time=settings.LOGIN_FETCH_TIME,
-            **data
-        )
+        except Exception as exc:
+            self._handle_request_error(exc, proxy=proxy)

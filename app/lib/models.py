@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
+import aiohttp
 from dacite import from_dict
 from dataclasses import dataclass
 from typing import List, Optional
@@ -110,7 +111,7 @@ class InstagramResult:
             return cls.from_dict(json)
 
     def raise_client_exception(self, status_code=None):
-        raise exceptions.ApiClientException(
+        raise exceptions.InstagramResponseException(
             status_code=status_code,
             message=self.error_message,
             error_type=self.error_type

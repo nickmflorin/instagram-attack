@@ -39,7 +39,10 @@ INSTAGRAM_PASSWORD_FIELD = 'password'
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
-DEFAULT_AIO_FETCH_TIME = 6
+DEFAULT_FETCH_TIME = 6
+DEFAULT_TOKEN_FETCH_TIME = 4
+DEFAULT_LOGIN_FETCH_TIME = 8
+
 
 PROXY_LINKS = [
     'https://sslproxies.org',

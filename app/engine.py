@@ -79,27 +79,6 @@ class EngineAsync(Engine):
             else:
                 raise e
 
-    async def handle_exception(self, coro, loop):
-        try:
-            await coro
-        except Exception as e:
-            self.log.error(str(e))
-            loop.stop()
-
-    async def shutdown(self, signal, loop):
-
-        self.log.info(f'Received exit signal {signal.name}...')
-        tasks = [t for t in asyncio.all_tasks() if t is not
-            asyncio.current_task()]
-
-        [task.cancel() for task in tasks]
-
-        self.log.info('Canceling outstanding tasks...')
-        await asyncio.gather(*tasks)
-
-        loop.stop()
-        self.log.success('Shutdown complete.')
-
     @auto_logger
     async def populate_passwords(self, queue, log):
         """
@@ -185,14 +164,12 @@ class EngineAsync(Engine):
         stop_event = asyncio.Event()
         lock = asyncio.Lock()
 
-        mutated_proxy_list = self.proxy_list[:]
-
         def callback(fut):
             exc = fut.exception()
             if exc:
-                self.log.warn(str(exc))
-                if isinstance(exc, exceptions.ApiBadProxyException):
-                    mutated_proxy_list.remove(proxy)
+                if isinstance(exc, exceptions.BadProxyException):
+                    self.log.warn(str(exc))
+                    self.proxy_list.remove(proxy)
 
                     # Storing temporarily to make sure we are removing them and not
                     # using them again.
@@ -201,9 +178,7 @@ class EngineAsync(Engine):
                     raise exc
             else:
                 if not self.token:
-                    result = fut.result()
-                    self.token = result.get('csrftoken').value
-
+                    self.token = fut.result()
                     log.success(f"Found Token {self.token}")
 
                     stop_event.set()
@@ -211,9 +186,9 @@ class EngineAsync(Engine):
 
         async with InstagramSession() as session:
             index = 0
-            while not stop_event.is_set() and len(mutated_proxy_list) != 0 and not self.token:
+            while not stop_event.is_set() and len(self.proxy_list) != 0 and not self.token:
                 async with lock:
-                    proxy = mutated_proxy_list[index]
+                    proxy = self.proxy_list[index]
 
                 task = asyncio.ensure_future(session.get_token(proxy))
                 task.add_done_callback(callback)
@@ -322,3 +297,24 @@ class EngineAsync(Engine):
                     else:
                         self.attempts.put_nowait(password)
                     return results
+
+    async def handle_exception(self, coro, loop):
+        try:
+            await coro
+        except Exception as e:
+            self.log.error(str(e))
+            loop.stop()
+
+    async def shutdown(self, signal, loop):
+
+        self.log.info(f'Received exit signal {signal.name}...')
+        tasks = [t for t in asyncio.all_tasks() if t is not
+            asyncio.current_task()]
+
+        [task.cancel() for task in tasks]
+
+        self.log.info('Canceling outstanding tasks...')
+        await asyncio.gather(*tasks)
+
+        loop.stop()
+        self.log.success('Shutdown complete.')
