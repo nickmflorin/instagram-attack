@@ -153,7 +153,15 @@ class InstagramSession(CustomAioSession):
         elif isinstance(e, aiohttp.ClientHttpProxyError):
             raise exceptions.ClientHttpProxyException(**details)
         else:
-            raise e
+            self.log.error(str(e))
+
+    async def get_token_from_response(self, response, proxy):
+        if not response.cookies.get('csrftoken'):
+            raise exceptions.TokenNotInResponse(proxy=proxy)
+        token = response.cookies['csrftoken'].value
+        if not token:
+            raise exceptions.TokenNotInResponse(proxy=proxy)
+        return token
 
     async def get_token(self, proxy):
 
@@ -167,11 +175,7 @@ class InstagramSession(CustomAioSession):
                 proxy=proxy.url(),
                 timeout=settings.DEFAULT_TOKEN_FETCH_TIME
             ) as response:
-                response = self._handle_response(response)
-                if not response.cookies.get('csrftoken'):
-                    raise exceptions.TokenNotInResponse(proxy=proxy)
-
-                return response.cookies['csrftoken'].value
+                return await self.get_token_from_response(response, proxy)
 
         except Exception as exc:
             self._handle_request_error(exc, proxy=proxy)
