@@ -29,8 +29,8 @@ USER_AGENTS = [
 
 
 HEADER = {
-    'referer': 'https://www.instagram.com/',
-    'content-type': 'application/x-www-form-urlencoded'
+    'Referer': 'https://www.instagram.com/',
+    'Content-Type': 'application/x-www-form-urlencoded',
 }
 
 INSTAGRAM_USERNAME_FIELD = 'username'
@@ -41,7 +41,7 @@ INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
 DEFAULT_FETCH_TIME = 6
 DEFAULT_TOKEN_FETCH_TIME = 4
-DEFAULT_LOGIN_FETCH_TIME = 8
+DEFAULT_LOGIN_FETCH_TIME = 10
 
 
 PROXY_LINKS = [

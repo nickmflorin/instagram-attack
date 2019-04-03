@@ -5,6 +5,7 @@ import aiohttp
 from dacite import from_dict
 from dataclasses import dataclass
 from typing import List, Optional
+import json
 
 from app import settings
 from app.lib import exceptions
@@ -98,21 +99,3 @@ class InstagramResult:
     @property
     def has_error(self):
         return self.error_type is not None
-
-    @classmethod
-    def from_response(cls, response, expect_valid_json=True):
-        try:
-            json = response.json()
-        except ValueError as e:
-            if expect_valid_json:
-                raise e
-            return None
-        else:
-            return cls.from_dict(json)
-
-    def raise_client_exception(self, status_code=None):
-        raise exceptions.InstagramResponseException(
-            status_code=status_code,
-            message=self.error_message,
-            error_type=self.error_type
-        )

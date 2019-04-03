@@ -2,15 +2,15 @@ from __future__ import absolute_import
 
 import aiohttp
 import asyncio
+
 from bs4 import BeautifulSoup
 import logging
 import random
-import requests
 
 from app import settings
 from app.lib import exceptions
-from app.lib.logging import SessionLogger
-from app.lib.models import InstagramResult, Proxy
+from app.lib.logging import AppLogger
+from app.lib.models import Proxy
 
 
 __all__ = ('InstagramSession', 'ProxySession', )
@@ -18,37 +18,55 @@ __all__ = ('InstagramSession', 'ProxySession', )
 
 class CustomAioSession(aiohttp.ClientSession):
 
-    def __init__(self):
-        super(CustomAioSession, self).__init__(
-            connector=aiohttp.TCPConnector(verify_ssl=False)
-        )
+    __status_code_exceptions__ = {
+        429: exceptions.TooManyRequestsException,
+        403: exceptions.ForbiddenException,
+    }
 
-        logging.setLoggerClass(SessionLogger)
+    def __init__(self, **kwargs):
+        kwargs['connector'] = aiohttp.TCPConnector(verify_ssl=False)
+        kwargs['headers'] = settings.HEADER.copy()
+        kwargs['headers']['user-agent'] = random.choice(settings.USER_AGENTS)
+        super(CustomAioSession, self).__init__(**kwargs)
+
+        logging.setLoggerClass(AppLogger)
         self.log = logging.getLogger(self.__class__.__name__)
 
-    def _handle_response(self, response):
+    async def _handle_response(self, response, proxy=None):
         try:
             response.raise_for_status()
-        except requests.RequestException:
-            if response.status_code >= 400 and response.status_code < 500:
-                raise exceptions.ApiClientException(response.status_code)
+        except aiohttp.ClientResponseError:
+            if response.status >= 400 and response.status < 500:
+                exc = self.__status_code_exceptions__.get(
+                    response.status,
+                    self.__client_exception__,
+                )
+                raise exc(
+                    response.reason,
+                    proxy=proxy,
+                    status_code=response.status
+                )
             else:
-                raise exceptions.ApiServerException(response.status_code)
+                raise exceptions.ServerResponseException(
+                    proxy=proxy,
+                    message=response.reason,
+                    status_code=response.status
+                )
         else:
             return response
 
 
 class ProxySession(CustomAioSession):
 
+    __client_exception__ = exceptions.ClientApiException
+    __server_exception__ = exceptions.ServerApiException
+
     async def get_proxies(self, link):
         proxy_list = []
         async with self.get(link, timeout=settings.DEFAULT_FETCH_TIME) as response:
 
-            response = self._handle_response(response)
-            self.log.success(f"Received Response", extra={
-                'url': link,
-                'status_code': response.status,
-            })
+            response = await self._handle_response(response)
+            self.log.success(f"Received Response", extra={'response': response})
 
             response_text = await response.text()
             body = BeautifulSoup(response_text, 'html.parser')
@@ -66,12 +84,8 @@ class ProxySession(CustomAioSession):
         async with self.get(settings.EXTRA_PROXY,
                 timeout=settings.DEFAULT_FETCH_TIME) as response:
 
-            response = self._handle_response(response)
-
-            self.log.success(f"Received Response", extra={
-                'url': settings.EXTRA_PROXY,
-                'status_code': response.status,
-            })
+            response = await self._handle_response(response)
+            self.log.success(f"Received Response", extra={'response': response})
 
             def filter_ip_address(line):
                 if line.strip() != "":
@@ -93,113 +107,97 @@ class ProxySession(CustomAioSession):
 
 class InstagramSession(CustomAioSession):
 
-    __status_code_exceptions__ = {
-        429: exceptions.TooManyRequestsException
-    }
+    __client_exception__ = exceptions.InstagramClientApiException
+    __server_exception__ = exceptions.InstagramServerApiException
 
-    def _handle_login_response(self, response):
-        result = InstagramResult.from_response(response)
-        if not result:
-            return self._handle_response(response)
+    async def _handle_login_response(self, response, proxy):
+        return await self._handle_response(response, proxy)
+        # try:
+        #     data = await response.read()
+        # except aiohttp.ClientConnectionError:
+        #     raise exceptions.BadProxyClientException(
+        #         proxy=proxy,
+        #         status_code=response.status,
+        #         # Automate the combination of bad proxy and specific messages
+        #         message="Client Connection Error - Bad Proxy",
+        #     )
+        # else:
+        #     try:
+        #         data = json.loads(data)
+        #     except ValueError:
+        #         return self._handle_response(response, proxy)
+        #     else:
+        #         result = InstagramResult.from_dict(**data)
+        #         if result.has_error:
+        #             raise exceptions.InstagramResponseException(result=result)
+        #         elif not result.accessed:
+        #             self.log.warn("Result did not have error but was not accessed.",
+        #                 extra={'result': result})
+        #         return response
 
-        if result.has_error:
-            result.raise_client_exception(status_code=response.status_code)
-        elif result.accessed:
-            # Error is still raised if message="checkpoint_required", but that
-            # means the password was correct.
-            return result
-        else:
-            # If we hit this point, that means that the API response
-            # had content and we are not associating the error correctly.
-            raise exceptions.ApiException(
-                message="The result should have an error "
-                "if capable of being converted to JSON at this point."
-            )
-
-    def _handle_response(self, response):
-        try:
-            response.raise_for_status()
-        except aiohttp.ClientResponseError:
-            if response.status_code >= 400 and response.status_code < 500:
-                exc = self.__status_code_exceptions__.get(
-                    response.status_code,
-                    exceptions.ClientResponseException
-                )
-                raise exc(status_code=response.status_code)
-            else:
-                raise exceptions.ServerResponseException(
-                    message=response.reason,
-                    status_code=response.status_code
-                )
-        else:
-            return response
-
-    def _handle_request_error(self, e, **details):
+    def _handle_client_error(self, e, proxy):
         """
         TimeoutError is more general form of ServerTimeoutError, which exists
         for asyncio but not aiohttp, so for now we will treat them the same until
         the difference is determined.
+
+        TODO:
+        This is not a good way to handle this, we should rely on the aiohttp
+        exceptions more instead of ours and have the proxy passed in another
+        way.
         """
-        if isinstance(e, aiohttp.ClientConnectorError):
-            raise exceptions.RequestsConnectionException(**details)
-        elif isinstance(e, aiohttp.ServerTimeoutError):
-            raise exceptions.RequestsTimeoutException(**details)
-        elif isinstance(e, asyncio.TimeoutError):
-            raise exceptions.RequestsTimeoutException(**details)
+        if isinstance(e, aiohttp.ServerTimeoutError):
+            raise exceptions.ServerTimeoutError(e.message, proxy=proxy)
+
+        # ClientOSError does not have message attribute.
         elif isinstance(e, aiohttp.ClientOSError):
-            raise exceptions.RequestsOSError(**details)
+            raise exceptions.ClientOSError(str(e), proxy=proxy)
+
+        elif isinstance(e, asyncio.TimeoutError):
+            raise exceptions.ServerTimeoutError(e.message, proxy=proxy)
+
         elif isinstance(e, aiohttp.ServerDisconnectedError):
-            raise exceptions.RequestsDisconnectError(**details)
+            raise exceptions.ServerDisconnectedError(e.message, proxy=proxy)
+
         elif isinstance(e, aiohttp.ClientHttpProxyError):
-            raise exceptions.ClientHttpProxyException(**details)
+            raise exceptions.ClientHttpProxyError(e.message, proxy=proxy)
+
+        elif isinstance(e, aiohttp.ClientProxyConnectionError):
+            raise exceptions.ClientProxyConnectionError(e.message, proxy=proxy)
         else:
-            self.log.error(str(e))
+            raise e
 
-    async def get_token_from_response(self, response, proxy):
-        if not response.cookies.get('csrftoken'):
-            raise exceptions.TokenNotInResponse(proxy=proxy)
-        token = response.cookies['csrftoken'].value
-        if not token:
-            raise exceptions.TokenNotInResponse(proxy=proxy)
-        return token
+    async def prepare_for_request(self, **kwargs):
+        if 'token' in kwargs:
+            self._default_headers.update({'x-csrftoken': kwargs['token']})
 
-    async def get_token(self, proxy):
-
-        self.headers = settings.HEADER.copy()
-        self.headers['user-agent'] = random.choice(settings.USER_AGENTS)
-
-        self.log.info(f"Fetching Token with {proxy.ip}")
+    async def get_base_response(self, proxy, as_token=False, as_cookies=False):
+        await self.prepare_for_request()
         try:
-            async with self.get(
+            async with await self.get(
                 settings.INSTAGRAM_URL,
                 proxy=proxy.url(),
                 timeout=settings.DEFAULT_TOKEN_FETCH_TIME
             ) as response:
-                return await self.get_token_from_response(response, proxy)
+                response = await self._handle_response(response, proxy=proxy)
+                return (proxy, response)
 
-        except Exception as exc:
-            self._handle_request_error(exc, proxy=proxy)
+        except aiohttp.ClientError as exc:
+            self._handle_client_error(exc, proxy)
 
-    async def login(self, username, password, token, proxy):
+    async def login(self, username, password, token, proxy, as_response=False):
+        await self.prepare_for_request(token=token)
         data = {
-            settings.INSTAGRAM_USERNAME_FIELD: username,
-            settings.INSTAGRAM_PASSWORD_FIELD: password
+            'username': username,
+            'password': password,
         }
-
-        self.log.info(f"Logging in with {password} {proxy.ip}")
-
-        self.headers = settings.HEADER.copy()
-        self.headers['user-agent'] = random.choice(settings.USER_AGENTS)
-        self.headers['x-csrftoken'] = token
-
         try:
             async with self.post(
                 settings.INSTAGRAM_LOGIN_URL,
                 proxy=proxy.url(),
                 timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
-                **data
+                json=data,
             ) as response:
-                return self._handle_login_response(response)
-
-        except Exception as exc:
-            self._handle_request_error(exc, proxy=proxy)
+                return await self._handle_login_response(response, proxy)
+        except aiohttp.ClientError as exc:
+            self._handle_client_error(exc, proxy=proxy)

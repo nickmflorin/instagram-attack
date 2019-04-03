@@ -5,7 +5,13 @@ class InstagramAttackException(Exception):
     """
     Base exception class for all custom exceptions.
     """
-    pass
+
+    def __init__(self, message):
+        self.message = message
+        super(InstagramAttackException, self).__init__(message)
+
+    def __str__(self):
+        return self.message
 
 
 class UserDoesNotExist(InstagramAttackException):
@@ -16,38 +22,3 @@ class UserDoesNotExist(InstagramAttackException):
 
 class EngineException(InstagramAttackException):
     pass
-
-
-class ApiException(InstagramAttackException):
-
-    def __init__(self, message=None, endpoint=None, proxy=None):
-        self.message = message or getattr(self, 'message', None)
-        self.endpoint = endpoint
-        self.proxy = proxy
-
-    @property
-    def parts(self):
-        return [
-            self._message,
-            self._endpoint,
-            self._proxy,
-        ]
-
-    @property
-    def _message(self):
-        if getattr(self, 'message', None):
-            return f"Error: {self.message}"
-
-    @property
-    def _endpoint(self):
-        if getattr(self, 'endpoint', None):
-            return f"({self.endpoint})"
-
-    @property
-    def _proxy(self):
-        if getattr(self, 'proxy', None):
-            return f"<{self.proxy.ip}>"
-
-    def __str__(self):
-        parts = list(filter(lambda x: x, self.parts))
-        return "; ".join(parts)

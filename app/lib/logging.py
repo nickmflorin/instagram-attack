@@ -6,71 +6,99 @@ from enum import Enum
 from colorama import init
 from colorama import Fore, Style
 
+import app.lib.exceptions as exceptions
+from app.lib.utils import ensure_iterable
 
-__all__ = ('SessionLogger', 'EngineLogger', )
+
+__all__ = ('AppLogger', )
 
 
 RESET_SEQ = "\033[0m"
 
 
-class Styles(Enum):
+class FormatEnum(Enum):
 
-    BOLD = "\033[1m"
-    UNDERLINE = '\033[4m'
+    def encode(self, value, reset=True):
+        reset_seq = RESET_SEQ if reset else ""
+        return "%s%s%s" % (self.value, value, reset_seq)
+
+
+class Colors(FormatEnum):
+
     CYAN = Fore.CYAN
     YELLOW = Fore.YELLOW
     RED = Fore.RED
-    DIM = Style.DIM
     BLUE = Fore.BLUE
     GREEN = Fore.GREEN
+    BLACK = Fore.BLACK
+    GRAY = "\033[90m"
 
-    def encode(self, value):
-        return "%s%s%s" % (self.value, value, RESET_SEQ)
+
+class Styles(FormatEnum):
+
+    DIM = Style.DIM
+    NORMAL = Style.NORMAL
+    BRIGHT = Style.BRIGHT
+    BOLD = "\033[1m"
+    UNDERLINE = '\033[4m'
 
 
-class LoggingLevelColors(Enum):
+class Format(object):
+    def __init__(self, color=Colors.BLACK, styles=None):
+        self.styles = ensure_iterable(styles or [])
+        self.color = color
 
-    CRITICAL = (50, Styles.YELLOW)
-    ERROR = (40, Styles.RED)
-    WARNING = (30, Styles.RED)
-    SUCCESS = (20, Styles.GREEN)
-    INFO = (20, Styles.CYAN)
-    DEBUG = (10, Styles.BLUE)
+    @classmethod
+    def reset(cls, text):
+        return "%s%s" % (text, RESET_SEQ)
 
-    def __init__(self, code, style):
+    def __call__(self, text):
+        if self.color or self.styles:
+            if self.color:
+                text = self.color.encode(text, reset=False)
+            for style in self.styles:
+                text = style.encode(text, reset=False)
+            text = Format.reset(text)
+        return text
+
+
+class LoggingLevels(Enum):
+
+    CRITICAL = (50, Format(color=Colors.RED, styles=[Styles.BRIGHT, Styles.UNDERLINE]))
+    ERROR = (40, Format(color=Colors.RED, styles=[Styles.NORMAL, Styles.BRIGHT]))
+    WARNING = (30, Format(color=Colors.YELLOW, styles=Styles.NORMAL))
+    SUCCESS = (20, Format(color=Colors.GREEN, styles=Styles.NORMAL))
+    INFO = (20, Format(color=Colors.CYAN, styles=Styles.DIM))
+    DEBUG = (10, Format(color=Colors.BLACK, styles=Styles.NORMAL))
+
+    def __init__(self, code, format):
         self.code = code
-        self.style = style
+        self.format = format
 
     @classmethod
     def for_code(cls, code):
-        for color in cls:
-            if color.code == code:
-                return color
+        try:
+            return [color for color in cls if color.code == code][0]
+        except IndexError:
+            raise ValueError(f"Invalid log level code {code}.")
 
 
-class LoggingColors(Enum):
+class RecordAttributes(Enum):
 
-    NAME = ('name', Styles.YELLOW)
-    THREADNAME = ('threadName', Styles.DIM)
+    NAME = ('name', Format(color=Colors.GRAY, styles=Styles.BOLD))
+    THREADNAME = ('threadName', Format(color=Colors.GRAY))
     # FILENAME = ('fn', Styles.BOLD)
 
-    def __init__(self, record_name, style):
-        self.record_name = record_name
-        self.style = style
+    def __init__(self, code, format):
+        self.code = code
+        self.format = format
 
     @classmethod
-    def find_for_record_value(cls, record_name):
-        for color in cls:
-            if color.record_name == record_name:
-                return color
-
-    @classmethod
-    def format_arg(cls, name, val):
-        color = cls.find_for_record_value(name)
-        if color:
-            return color.style.encode(val)
-        else:
-            return val
+    def for_code(cls, code):
+        try:
+            return [attr for attr in cls if attr.code == code][0]
+        except IndexError:
+            raise ValueError(f"Invalid log level code {code}.")
 
 
 class LogRecordWrapper(dict):
@@ -82,15 +110,20 @@ class LogRecordWrapper(dict):
         data = self._convert_args_to_dict(*args)
         super(LogRecordWrapper, self).__init__(data)
 
+    def format(self):
+        for key, val in self.items():
+            try:
+                attribute = RecordAttributes.for_code(key)
+            except ValueError:
+                pass
+            else:
+                self[key] = attribute.format(val)
+
     def _convert_args_to_dict(self, *args):
         data = {}
         for i, arg in enumerate(args):
             data[self.arg_names[i]] = arg
         return data
-
-    def format(self):
-        for key, val in self.items():
-            self[key] = LoggingColors.format_arg(key, val)
 
     @property
     def args(self):
@@ -105,67 +138,44 @@ class AppLogFormatter(logging.Formatter):
     def __init__(self, msg, datefmt=None):
         logging.Formatter.__init__(self, msg, datefmt=datefmt)
 
-    def format(self, record):
-        try:
-            color = LoggingLevelColors[record.levelname]
-        except KeyError:
-            pass
-        else:
-            if record.levelname in ("SUCCESS", "ERROR"):
-                record.msg = color.style.encode(record.msg)
-
-            record.levelname = color.style.encode(record.levelname)
-            record.levelname = Styles.BOLD.encode(record.levelname)
-
-        record.threadName = LoggingColors.THREADNAME.style.encode(record.threadName)
-        return logging.Formatter.format(self, record)
-
-
-class SessionLogFormatter(logging.Formatter):
-
-    def __init__(self, msg, datefmt=None):
-        logging.Formatter.__init__(self, msg, datefmt=datefmt)
-
-    def format_thread_name(self, record):
-        record.threadName = LoggingColors.THREADNAME.style.encode(record.threadName)
-
-    def format_level(self, record):
-        color = LoggingLevelColors[record.levelname]
-
-        record.levelname = color.style.encode(record.levelname)
-        record.levelname = Styles.BOLD.encode(record.levelname)
-
     def format_message(self, record):
-        color = LoggingLevelColors[record.levelname]
-
         if record.levelname in ("ERROR", 'SUCCESS'):
-            record.msg = color.style.encode(record.msg)
-
-        if hasattr(record, 'url'):
-            record.msg += f" ({Styles.UNDERLINE.encode(record.url)})"
-
-        if hasattr(record, 'status_code'):
-            record.msg += Styles.BOLD.encode(f" [{record.status_code}]")
+            record.msg = LoggingLevels[record.levelname].format(record.msg)
 
     def format(self, record):
         if getattr(record, 'isSuccess', None):
             record.levelname = 'SUCCESS'
 
-        try:
-            LoggingLevelColors[record.levelname]
-        except KeyError:
-            pass
-        else:
-            self.format_message(record)
-            self.format_level(record)
+        level = LoggingLevels[record.levelname]
 
-        self.format_thread_name(record)
+        self.format_message(record)
+
+        record.levelname = level.format(record.levelname)
+        record.threadName = RecordAttributes.THREADNAME.format(record.threadName)
+
+        if hasattr(record, 'status_code'):
+            record.msg += Styles.BOLD.encode(f" [{record.status_code}]")
+
+        if hasattr(record, 'proxy'):
+            record.msg += f" <{Styles.BOLD.encode(record.proxy.ip)}>"
+
+        if hasattr(record, 'result'):
+            record.msg += f" ({Styles.BOLD.encode(record.result.error_type)})"
+            record.msg += f" ({Styles.BOLD.encode(record.result.error_message)})"
+
         return logging.Formatter.format(self, record)
 
 
 class AppLogger(logging.Logger):
 
     DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+    FORMAT = (
+        "[%(asctime)s] "
+        "%(levelname)s "
+        "%(threadName)5s - %(name)5s: %(message)s"
+    )
+
     __formatter__ = AppLogFormatter
 
     def __init__(self, name):
@@ -187,23 +197,6 @@ class AppLogger(logging.Logger):
         wrapper.format()
         return super(AppLogger, self).makeRecord(*wrapper.args)
 
-    def success(self, message, extra=None):
-        extra = extra or {}
-        extra['isSuccess'] = True
-        self.info(message, extra=extra)
-
-
-class EngineLogger(AppLogger):
-    """
-    These might not necessarily need to be treated differently right now but
-    we are eventually going to want to treat them slightly differently.
-    """
-    FORMAT = (
-        "[%(asctime)s] "
-        "%(levelname)s "
-        "%(threadName)5s - %(name)5s: %(message)s"
-    )
-
     def stringify_item(self, key, val):
         bold_value = Styles.BOLD.encode(val)
         return f"{key}: {bold_value}"
@@ -216,21 +209,43 @@ class EngineLogger(AppLogger):
     def items(self, **items):
         self.info(self.stringify_items(**items))
 
+    def _handle_api_exception(self, exc):
+        extra = {
+            'proxy': exc.proxy,
+        }
+        if isinstance(exc, exceptions.ClientApiException):
+            extra['status_code'] = exc.status_code
+            if isinstance(exc, exceptions.InstagramClientApiException):
+                extra['result'] = exc.result
 
-class SessionLogger(AppLogger):
-    """
-    These might not necessarily need to be treated differently right now but
-    we are eventually going to want to treat them slightly differently.
-    """
-    __formatter__ = SessionLogFormatter
+        return extra
 
-    FORMAT = (
-        "[%(asctime)s] "
-        "%(levelname)s "
-        "%(threadName)5s - %(name)5s: %(message)s"
-    )
+    def _handle_exception(self, exc, extra=None):
+        if isinstance(exc, exceptions.InstagramAttackException):
+            msg = exc.message
+            if isinstance(exc, exceptions.ApiException):
+                new_extra = self._handle_api_exception(exc)
+                extra.update(**new_extra)
+            return msg, extra
+        else:
+            msg = str(exc)
+            return msg, extra
 
-    def makeRecord(self, *args, **kwargs):
-        wrapper = LogRecordWrapper(*args)
-        wrapper.format()
-        return super(AppLogger, self).makeRecord(*wrapper.args)
+    def _log(self, level, msg, args, exc_info=None, extra=None):
+        extra = extra or {}
+
+        if extra.get('response'):
+            extra['status_code'] = extra['response'].status
+
+        if isinstance(msg, Exception):
+            msg, extra = self._handle_exception(msg, extra=extra)
+        super(AppLogger, self)._log(level, msg, args, exc_info, extra)
+
+    def success(self, message, *args, **kwargs):
+        kwargs.setdefault('extra', {})
+        kwargs['extra']['isSuccess'] = True
+
+        if kwargs['extra'].get('response'):
+            kwargs['extra']['url'] = kwargs['extra']['response'].url
+
+        super(AppLogger, self).info(message, *args, **kwargs)
