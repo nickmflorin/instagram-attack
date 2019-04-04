@@ -47,7 +47,7 @@ class InstagramSession(aiohttp.ClientSession):
                     status_code=response.status
                 )
             else:
-                raise exceptions.ServerResponseException(
+                raise self.__server_exception__(
                     message=response.reason,
                     status_code=response.status
                 )
