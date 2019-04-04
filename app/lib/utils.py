@@ -3,8 +3,6 @@ from __future__ import absolute_import
 from collections import Iterable
 import logging
 
-import app.lib.exceptions as exceptions
-
 
 __all__ = ('auto_logger', 'ensure_iterable', 'get_token_from_cookies')
 
@@ -37,35 +35,17 @@ def auto_logger(*args, **kwargs):
         return _auto_logger
 
 
-def get_token_from_cookies(cookies, proxy=None, strict=False):
+def get_token_from_cookies(cookies):
     cookie = cookies.get('csrftoken')
-    if not cookie:
-        if strict:
-            raise exceptions.TokenNotInResponse(proxy=proxy)
-        else:
-            return None
-    token = cookie.value
-    if not token:
-        if strict:
-            raise exceptions.TokenNotInResponse(proxy=proxy)
-        else:
-            return None
-    return token
+    if cookie:
+        return cookie.value
 
 
-def get_cookies_from_response(response, proxy=None, strict=False):
-    if not response.cookies:
-        if strict:
-            raise exceptions.CookiesNotInResponse(proxy=proxy)
-        else:
-            return None
+def get_cookies_from_response(response):
     return response.cookies
 
 
-def get_token_from_response(response, proxy=None, strict=False):
-    try:
-        cookies = get_cookies_from_response(response, proxy=proxy, strict=strict)
-    except exceptions.CookiesNotInResponse:
-        raise exceptions.TokenNotInResponse(proxy=proxy)
-    else:
+def get_token_from_response(response):
+    cookies = get_cookies_from_response(response)
+    if cookies:
         return get_token_from_cookies(cookies)

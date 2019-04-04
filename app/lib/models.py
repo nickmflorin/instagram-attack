@@ -12,41 +12,7 @@ from app.lib import exceptions
 from app.lib.logging import Styles
 
 
-__all__ = ('InstagramResult', 'Proxy', )
-
-
-@dataclass
-class Proxy:
-
-    ip: str
-    port: int
-    country: str
-
-    def url(self, scheme="http"):
-        return f"{scheme}://{self.ip}:{self.port}/"
-
-    @property
-    def address(self):
-        return f'{self.ip}:{self.port}'
-
-    @classmethod
-    def from_text_file(cls, proxy_string):
-        parts = proxy_string.split(' ')
-        return Proxy(
-            ip=parts[0].split(':')[0],
-            port=int(parts[0].split(':')[1]),
-            country=parts[1].split('-')[0]
-        )
-
-    @classmethod
-    def from_scraped_tr(cls, row):
-        td = row.find_all('td')
-        if 'transparent' not in (td[4].string, td[5].string):
-            return Proxy(
-                ip=td[0].string,
-                port=td[1].string,
-                country=td[3].string
-            )
+__all__ = ('InstagramResult', )
 
 
 @dataclass

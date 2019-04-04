@@ -6,10 +6,6 @@ from .base import InstagramAttackException
 class ApiException(InstagramAttackException):
 
     def __init__(self, *args, **kwargs):
-        if not kwargs.get('proxy'):
-            raise RuntimeError("Must initialize ApiException with proxy.")
-        self.proxy = kwargs['proxy']
-
         if len(args) == 1:
             self.message = args[0]
         elif kwargs.get('message'):
@@ -70,12 +66,7 @@ class ServerDisconnectedError(ServerApiException, BadProxyException):
 
 
 class InstagramApiException(ApiException):
-
-    def __init__(self, *args, **kwargs):
-        super(InstagramApiException, self).__init__(*args, **kwargs)
-        if not kwargs.get('proxy'):
-            raise RuntimeError("Must initialize InstagramApiException with proxy.")
-        self.proxy = kwargs['proxy']
+    pass
 
 
 class InstagramClientApiException(InstagramApiException):

@@ -6,7 +6,6 @@ from enum import Enum
 from colorama import init
 from colorama import Fore, Style
 
-import app.lib.exceptions as exceptions
 from app.lib.utils import ensure_iterable
 
 
@@ -44,15 +43,18 @@ class Styles(FormatEnum):
 
 
 class Format(object):
-    def __init__(self, color=Colors.BLACK, styles=None):
+    def __init__(self, color=Colors.BLACK, styles=None, wrapper=None):
         self.styles = ensure_iterable(styles or [])
         self.color = color
+        self.wrapper = wrapper
 
     @classmethod
     def reset(cls, text):
         return "%s%s" % (text, RESET_SEQ)
 
     def __call__(self, text):
+        if self.wrapper:
+            text = self.wrapper % text
         if self.color or self.styles:
             if self.color:
                 text = self.color.encode(text, reset=False)
@@ -76,61 +78,52 @@ class LoggingLevels(Enum):
         self.format = format
 
     @classmethod
-    def for_code(cls, code):
-        try:
-            return [color for color in cls if color.code == code][0]
-        except IndexError:
-            raise ValueError(f"Invalid log level code {code}.")
+    def format_record(cls, record):
+        level = cls[record.levelname]
+        if level in (cls.SUCCESS, cls.ERROR):
+            record.msg = level.format(record.msg)
+        record.levelname = level.format(record.levelname)
 
 
 class RecordAttributes(Enum):
 
-    NAME = ('name', Format(color=Colors.GRAY, styles=Styles.BOLD))
-    THREADNAME = ('threadName', Format(color=Colors.GRAY))
-    # FILENAME = ('fn', Styles.BOLD)
+    NAME = ('name', None,
+        Format(color=Colors.GRAY, styles=Styles.BOLD))
+    THREADNAME = ('threadName', None,
+        Format(color=Colors.GRAY))
+    PROXY = ('proxy', 'host',
+        Format(styles=Styles.BOLD, wrapper="<%s>"))
+    RESPONSE = ('response', 'status',
+        Format(styles=Styles.BOLD, wrapper="[%s]"))
+    STATUS_CODE = ('status_code', None,
+        Format(styles=Styles.BOLD, wrapper="[%s]"))
+    TASK = ('task', 'name',
+        Format(color=Colors.GRAY, styles=Styles.DIM, wrapper="(%s)"))
 
-    def __init__(self, code, format):
+    def __init__(self, code, attr, format):
         self.code = code
+        self.attr = attr
         self.format = format
 
     @classmethod
-    def for_code(cls, code):
-        try:
-            return [attr for attr in cls if attr.code == code][0]
-        except IndexError:
-            raise ValueError(f"Invalid log level code {code}.")
+    def format_record(cls, record):
+        for attribute in cls:
+            name = attribute.code
+            if hasattr(record, name):
+                value = getattr(record, name)
 
-
-class LogRecordWrapper(dict):
-
-    arg_names = ['name', 'lvl', 'fn', 'lno', 'msg', 'args', 'exc_info', 'func',
-        'extra', 'sinfo']
-
-    def __init__(self, *args):
-        data = self._convert_args_to_dict(*args)
-        super(LogRecordWrapper, self).__init__(data)
-
-    def format(self):
-        for key, val in self.items():
-            try:
-                attribute = RecordAttributes.for_code(key)
-            except ValueError:
-                pass
-            else:
-                self[key] = attribute.format(val)
-
-    def _convert_args_to_dict(self, *args):
-        data = {}
-        for i, arg in enumerate(args):
-            data[self.arg_names[i]] = arg
-        return data
-
-    @property
-    def args(self):
-        data = []
-        for arg_name in self.arg_names:
-            data.append(self[arg_name])
-        return tuple(data)
+                if not attribute.attr:
+                    formatted = attribute.format(value)
+                    setattr(record, name, formatted)
+                else:
+                    if hasattr(value, attribute.attr):
+                        value = getattr(value, attribute.attr)
+                        if value:
+                            formatted = attribute.format(value)
+                            setattr(record, name, formatted)
+                    else:
+                        if type(value) is str or type(value) is int:
+                            formatted = attribute.format(value)
 
 
 class AppLogFormatter(logging.Formatter):
@@ -138,32 +131,34 @@ class AppLogFormatter(logging.Formatter):
     def __init__(self, msg, datefmt=None):
         logging.Formatter.__init__(self, msg, datefmt=datefmt)
 
-    def format_message(self, record):
-        if record.levelname in ("ERROR", 'SUCCESS'):
-            record.msg = LoggingLevels[record.levelname].format(record.msg)
+    def flatten_items(self, items):
+        items = [item for item in items if item]
+        items = ["%s" % item for item in items]
+        return ' '.join(items)
 
     def format(self, record):
         if getattr(record, 'isSuccess', None):
             record.levelname = 'SUCCESS'
 
-        level = LoggingLevels[record.levelname]
+        LoggingLevels.format_record(record)
+        RecordAttributes.format_record(record)
 
-        self.format_message(record)
+        suffix = self.flatten_items([
+            getattr(record, 'status_code', None),
+            record.msg,
+            getattr(record, 'proxy', None),
+        ])
 
-        record.levelname = level.format(record.levelname)
-        record.threadName = RecordAttributes.THREADNAME.format(record.threadName)
+        time_prefix = logging.Formatter.format(self, record)
 
-        if hasattr(record, 'status_code'):
-            record.msg += Styles.BOLD.encode(f" [{record.status_code}]")
+        body = self.flatten_items([
+            time_prefix,
+            record.levelname,
+            record.threadName,
+            record.name,
+        ])
 
-        if hasattr(record, 'proxy'):
-            record.msg += f" <{Styles.BOLD.encode(record.proxy.ip)}>"
-
-        if hasattr(record, 'result'):
-            record.msg += f" ({Styles.BOLD.encode(record.result.error_type)})"
-            record.msg += f" ({Styles.BOLD.encode(record.result.error_message)})"
-
-        return logging.Formatter.format(self, record)
+        return f"{body} : {suffix} ({record.filename}, {Styles.BOLD.encode(record.lineno)})"
 
 
 class AppLogger(logging.Logger):
@@ -171,9 +166,7 @@ class AppLogger(logging.Logger):
     DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
     FORMAT = (
-        "[%(asctime)s] "
-        "%(levelname)s "
-        "%(threadName)5s - %(name)5s: %(message)s"
+        "[%(asctime)s]"
     )
 
     __formatter__ = AppLogFormatter
@@ -192,10 +185,13 @@ class AppLogger(logging.Logger):
 
         self.addHandler(handler)
 
-    def makeRecord(self, *args, **kwargs):
-        wrapper = LogRecordWrapper(*args)
-        wrapper.format()
-        return super(AppLogger, self).makeRecord(*wrapper.args)
+    def makeRecord(self, name, lvl, fn, lno, msg, args, exc_info, func, extra, sinfo):
+        record = super(AppLogger, self).makeRecord(name, lvl, fn, lno, msg, args,
+            exc_info, func, extra, sinfo)
+        extra = extra or {}
+        for key, val in extra.items():
+            setattr(record, key, val)
+        return record
 
     def stringify_item(self, key, val):
         bold_value = Styles.BOLD.encode(val)
@@ -209,43 +205,7 @@ class AppLogger(logging.Logger):
     def items(self, **items):
         self.info(self.stringify_items(**items))
 
-    def _handle_api_exception(self, exc):
-        extra = {
-            'proxy': exc.proxy,
-        }
-        if isinstance(exc, exceptions.ClientApiException):
-            extra['status_code'] = exc.status_code
-            if isinstance(exc, exceptions.InstagramClientApiException):
-                extra['result'] = exc.result
-
-        return extra
-
-    def _handle_exception(self, exc, extra=None):
-        if isinstance(exc, exceptions.InstagramAttackException):
-            msg = exc.message
-            if isinstance(exc, exceptions.ApiException):
-                new_extra = self._handle_api_exception(exc)
-                extra.update(**new_extra)
-            return msg, extra
-        else:
-            msg = str(exc)
-            return msg, extra
-
-    def _log(self, level, msg, args, exc_info=None, extra=None):
-        extra = extra or {}
-
-        if extra.get('response'):
-            extra['status_code'] = extra['response'].status
-
-        if isinstance(msg, Exception):
-            msg, extra = self._handle_exception(msg, extra=extra)
-        super(AppLogger, self)._log(level, msg, args, exc_info, extra)
-
     def success(self, message, *args, **kwargs):
         kwargs.setdefault('extra', {})
         kwargs['extra']['isSuccess'] = True
-
-        if kwargs['extra'].get('response'):
-            kwargs['extra']['url'] = kwargs['extra']['response'].url
-
         super(AppLogger, self).info(message, *args, **kwargs)
