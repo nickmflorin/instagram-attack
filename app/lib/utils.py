@@ -36,9 +36,13 @@ def auto_logger(*args, **kwargs):
 
 
 def get_token_from_cookies(cookies):
+    # aiohttp ClientResponse cookies have .value attribute.
     cookie = cookies.get('csrftoken')
     if cookie:
-        return cookie.value
+        try:
+            return cookie.value
+        except AttributeError:
+            return cookie
 
 
 def get_cookies_from_response(response):

@@ -102,7 +102,10 @@ class TokenNotInResponse(InstagramClientApiException, BadProxyException):
     Thrown if we receive a response with valid cookies but the xcrsftoken
     cookie is not in the response cookies.
     """
-    __message__ = "Token was not in the response coookies."
+    __message__ = "Token was not in the response cookies."
+
+    def __init__(self, response):
+        self.response = response
 
 
 class CookiesNotInResponse(InstagramClientApiException, BadProxyException):

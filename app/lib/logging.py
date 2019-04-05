@@ -5,6 +5,7 @@ import logging
 from enum import Enum
 from colorama import init
 from colorama import Fore, Style
+import traceback
 
 from app.lib.utils import ensure_iterable
 
@@ -93,6 +94,8 @@ class RecordAttributes(Enum):
         Format(color=Colors.GRAY))
     PROXY = ('proxy', 'host',
         Format(styles=Styles.BOLD, wrapper="<%s>"))
+    TOKEN = ('token', None,
+        Format(color=Colors.RED, wrapper="%s"))
     RESPONSE = ('response', 'status',
         Format(styles=Styles.BOLD, wrapper="[%s]"))
     STATUS_CODE = ('status_code', None,
@@ -147,6 +150,7 @@ class AppLogFormatter(logging.Formatter):
             getattr(record, 'status_code', None),
             record.msg,
             getattr(record, 'proxy', None),
+            getattr(record, 'token', None),
         ])
 
         time_prefix = logging.Formatter.format(self, record)
@@ -209,3 +213,19 @@ class AppLogger(logging.Logger):
         kwargs.setdefault('extra', {})
         kwargs['extra']['isSuccess'] = True
         super(AppLogger, self).info(message, *args, **kwargs)
+
+    def exception(self, exc):
+        if hasattr(exc, 'message') and exc.message != "":
+            content = exc.message
+        elif str(exc) != "":
+            content = str(exc)
+        else:
+            content = exc.__class__.__name__
+
+        # NOTE: We can also log the exception directly here with super().exception()
+        # but it will still not raise the exception.
+        super(AppLogger, self).error(content)
+
+        raise exc.__class__(
+            f"{content}"
+        )
