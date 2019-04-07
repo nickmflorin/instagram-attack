@@ -42,16 +42,6 @@ LoginTaskContext = collections.namedtuple('LoginTaskContext',
 
 class request_handler(object):
 
-    # Not currently being used but keep for now
-    __client_exception__ = exceptions.InstagramClientApiException
-    __server_exception__ = exceptions.InstagramServerApiException
-
-    # Not currently being used but keep for now
-    __status_code_exceptions__ = {
-        429: exceptions.TooManyRequestsException,
-        403: exceptions.ForbiddenException,
-    }
-
     def __init__(self, global_stop_event, queues):
         self.global_stop_event = global_stop_event
         self.silenced = False
