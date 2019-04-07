@@ -36,8 +36,9 @@ class Users(object):
 
 class User(object):
 
-    def __init__(self, username):
+    def __init__(self, username, password=None):
         self.username = username
+        self.password = password
         self.create_files()
 
     @classmethod

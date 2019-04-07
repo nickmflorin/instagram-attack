@@ -9,7 +9,7 @@ import json
 
 from app import settings
 from app.lib import exceptions
-from app.lib.logging import Styles
+from app.lib.logging.constants import Colors
 
 
 __all__ = ('InstagramResult', )
@@ -42,8 +42,8 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.accessed}"
         if self.accessed:
-            return Styles.GREEN.encode(string_rep)
-        return Styles.RED.encode(string_rep)
+            return Colors.GREEN.encode(string_rep)
+        return Colors.RED.encode(string_rep)
 
     @classmethod
     def from_dict(cls, data):

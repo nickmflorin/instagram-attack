@@ -1,17 +1,37 @@
 from __future__ import absolute_import
 
-from .base import InstagramAttackException
+
+class InstagramAttackException(Exception):
+    """
+    Base exception class for all custom exceptions.
+    """
+
+    def __init__(self, *args):
+        if len(args) == 1:
+            self.message = args[0]
+        else:
+            self.message = self.__message__
+
+    def __str__(self):
+        return self.message
+
+
+class FatalException(InstagramAttackException):
+    """
+    Used for checks where we need to make sure something is available or operating
+    properly, and if not, the system should shut down.
+    """
+    pass
+
+
+class UserDoesNotExist(InstagramAttackException):
+    def __init__(self, username):
+        message = "The user %s does not exist." % username
+        super(UserDoesNotExist, self).__init__(message)
 
 
 class ApiException(InstagramAttackException):
-
-    def __init__(self, *args, **kwargs):
-        if len(args) == 1:
-            self.message = args[0]
-        elif kwargs.get('message'):
-            self.message = kwargs['message']
-        else:
-            self.message = self.__message__
+    pass
 
 
 class ServerApiException(ApiException):
@@ -20,12 +40,9 @@ class ServerApiException(ApiException):
 
 class ClientApiException(ApiException):
 
-    def __init__(self, message, status_code=None, **kwargs):
-        super(ClientApiException, self).__init__(message, **kwargs)
-        if not hasattr(self, '__status__'):
-            self.status_code = status_code
-        else:
-            self.status_code = self.__status__
+    def __init__(self, *args, **kwargs):
+        super(ClientApiException, self).__init__(*args)
+        self.status_code = kwargs.get('status_code') or getattr(self, '__status__', None)
 
 
 class BadProxyException(object):
@@ -39,6 +56,7 @@ class ForbiddenException(ClientApiException):
 
 
 class TooManyRequestsException(ServerApiException, BadProxyException):
+
     __status__ = 429
     __message__ = "Too many requests"
 
@@ -72,12 +90,6 @@ class InstagramApiException(ApiException):
 class InstagramClientApiException(InstagramApiException):
     __message__ = "Instagram Client Error"
 
-    def __init__(self, status_code=None, **kwargs):
-        if not hasattr(self, '__status__'):
-            self.status_code = status_code
-        else:
-            self.status_code = self.__status__
-
 
 class InstagramServerApiException(InstagramApiException):
     pass
@@ -90,12 +102,6 @@ class InstagramResponseException(InstagramClientApiException):
     """
     __message__ = "Instagram Response Error"
 
-    def __init__(self, result=None, **kwargs):
-        self.result = result
-        if 'message' not in kwargs:
-            kwargs['message'] = self.result.error_message
-        super(InstagramResponseException, self).__init__(**kwargs)
-
 
 class TokenNotInResponse(InstagramClientApiException, BadProxyException):
     """
@@ -104,8 +110,14 @@ class TokenNotInResponse(InstagramClientApiException, BadProxyException):
     """
     __message__ = "Token was not in the response cookies."
 
-    def __init__(self, response):
-        self.response = response
+
+class ResultNotInResponse(InstagramClientApiException, BadProxyException):
+    """
+    Thrown if we receive a response when trying to login that does not raise
+    a client exception but we cannot parse the JSON from the response to get
+    the result.
+    """
+    __message__ = "The login result could not be obtained from the response."
 
 
 class CookiesNotInResponse(InstagramClientApiException, BadProxyException):
