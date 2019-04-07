@@ -1,41 +1,89 @@
 from __future__ import absolute_import
 
+import requests
+
 from app.lib import exceptions
 
 from .constants import LoggingLevels, RecordAttributes, Styles
 
 
-class RecordWrapper(object):
+def get_status_code_from_exception(exc, formatted=False):
+    if isinstance(exc, requests.exceptions.RequestException):
+        if exc.response and exc.response.status_code:
+            if formatted:
+                return RecordAttributes.STATUS_CODE.format(exc.response.status_code)
+            return exc.response.status_code
+
+
+def get_method_from_exception(exc, formatted=False):
+    if isinstance(exc, requests.exceptions.RequestException):
+        if exc.request and exc.request.method:
+            if formatted:
+                return RecordAttributes.METHOD.format(exc.request.method)
+            return exc.request.method
+
+
+def format_exception_message(exc, level):
+    if isinstance(exc, requests.exceptions.RequestException):
+        parts = []
+
+        method = get_method_from_exception(exc, formatted=True)
+        if method:
+            parts.append(method)
+
+        parts.append(level.format_message(exc.__class__.__name__))
+
+        status_code = get_status_code_from_exception(exc, formatted=True)
+        if status_code:
+            parts.append(status_code)
+
+        return ' '.join(parts)
+    elif level:
+        return level.format_message(str(exc))
+    else:
+        return str(exc)
+
+
+def format_log_message(msg, level):
+    if isinstance(msg, Exception):
+        return format_exception_message(msg, level)
+    else:
+        msg = level.format_message(msg)
+        return RecordAttributes.MESSAGE.format(msg)
+
+
+class RecordFormatter(object):
 
     def __init__(self, record):
         self.record = record
+        self.level = LoggingLevels[self.levelname]
 
     def __getattr__(self, key):
         if key == 'levelname' and self.isSuccess:
             return 'SUCCESS'
         return getattr(self.record, key, None)
 
-    def _msg(self, formatted=False):
-        if formatted:
-            return LoggingLevels[self.levelname].format_message(self.msg)
-        return self.msg
+    @property
+    def _msg(self):
+        return format_log_message(self.msg, self.level)
 
-    def _task(self, formatted=False):
-        if not self.task:
-            return None
+    @property
+    def _password(self):
+        if self.password:
+            return RecordAttributes.PASSWORD.format(self.password)
 
-        task = None
-        if isinstance(self.task, str):
-            task = self.task
-        elif hasattr(self.task, 'name'):
-            task = self.task.name
-        else:
-            raise exceptions.FatalException('Invalid task supplied to logger.')
+    @property
+    def _task(self):
+        if self.task:
+            if isinstance(self.task, str):
+                return RecordAttributes.TASK.format(self.task)
+            elif hasattr(self.task, 'name'):
+                return RecordAttributes.TASK.format(self.task.name)
+            else:
+                raise exceptions.FatalException('Invalid task supplied to logger.')
 
-        if task and formatted:
-            return RecordAttributes.TASK.format(task)
-
-    def _traceback(self, formatted=False):
+    @property
+    def _traceback(self):
         # See note in AppLogger.makeRecord()
         # If line_no and file_name not explicitly provided, or we are not in
         # DEBUG, CRITICAL or ERROR levels, don't include in message.
@@ -48,62 +96,47 @@ class RecordWrapper(object):
         lineno = self.line_no or self.lineno
         filename = self.file_name or self.filename
         if lineno and filename:
-            if formatted:
-                return f"({filename}, {Styles.BOLD.encode(lineno)})"
-            return f"{filename}, {lineno}"
+            return f"({filename}, {Styles.BOLD.format(lineno)})"
 
-    def _proxy(self, formatted=False):
-        proxy = None
+    @property
+    def _proxy(self):
         if self.proxy:
             if isinstance(self.proxy, str):
-                proxy = self.proxy
+                return RecordAttributes.PROXY.format(self.proxy)
             else:
-                proxy = f"{self.proxy.host}:{self.proxy.port}"
-        if proxy and formatted:
-            return RecordAttributes.PROXY.format(proxy)
-        return proxy
+                return RecordAttributes.PROXY.format(
+                    f"{self.proxy.host}:{self.proxy.port}"
+                )
 
-    def _threadName(self, formatted=False):
-        if not formatted:
-            return self.threadName
+    @property
+    def _threadName(self):
         if self.threadName:
             return RecordAttributes.THREADNAME.format(self.threadName)
-        return None
 
-    def _name(self, formatted=False):
-        if not formatted:
-            return self.name
+    @property
+    def _name(self):
         if self.name:
             return RecordAttributes.NAME.format(self.name)
-        return None
 
-    def _token(self, formatted=False):
-        if not formatted:
-            return self.token
+    @property
+    def _token(self):
         if self.token:
             return RecordAttributes.TOKEN.format(self.token)
-        return None
 
-    def _levelname(self, formatted=False):
-        if not formatted:
-            return self.levelname
+    @property
+    def _levelname(self):
         return LoggingLevels[self.levelname].format(self.levelname)
 
-    def _url(self, formatted=False):
-        url = self.url
-        if self.response:
-            url = url or getattr(self.response, 'url', None)
-        if url and formatted:
-            return RecordAttributes.URL.format(url)
-        return url
+    @property
+    def _status_code(self):
+        if get_status_code_from_exception(self.msg):
+            return None
 
-    def _status_code(self, formatted=False):
-        status_code = self.status_code
-        if self.response:
-            status_code = status_code or (
+        if self.response and not self.status_code:
+            status_code = (
                 getattr(self.response, 'status_code', None) or
                 getattr(self.response, 'status', None)
             )
-        if status_code and formatted:
             return RecordAttributes.STATUS_CODE.format(status_code)
-        return status_code
+        elif self.status_code:
+            return RecordAttributes.STATUS_CODE.format(self.status_code)

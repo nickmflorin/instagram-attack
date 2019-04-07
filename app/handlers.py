@@ -51,9 +51,9 @@ class ExceptionHandlerMixin(object):
                     exception occured (unless the context manager isn't properly
                     used for nested points of failure) - but for now, this is fine.
                     """
-                    self.log.critical(str(exc_value), extra=self.log_context(tb))
+                    self.log.critical(exc_value, extra=self.log_context(tb))
 
-                    self.log.critical(str(exc_value), extra=self.log_context(tb))
+                    self.log.critical(exc_value, extra=self.log_context(tb))
                     self.log.info('Shutting Down')
 
                     # if shutdown:
@@ -69,10 +69,10 @@ class ExceptionHandlerMixin(object):
                     raise exc_value
 
                 elif issubclass(exc_type, exceptions.InstagramAttackException):
-                    self.log.error(str(exc_value), extra=self.log_context(tb))
+                    self.log.error(exc_value, extra=self.log_context(tb))
                     return True
                 else:
-                    self.log.error(str(exc_value), extra=self.log_context(tb))
+                    self.log.error(exc_value, extra=self.log_context(tb))
                     self.log.info(traceback.format_exc())
         else:
             return True

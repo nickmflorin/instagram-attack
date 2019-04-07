@@ -17,7 +17,7 @@ def ensure_iterable(arg):
 
 class FormatEnum(Enum):
 
-    def encode(self, value, reset=True):
+    def format(self, value, reset=True):
         reset_seq = RESET_SEQ if reset else ""
         return "%s%s%s" % (self.value, value, reset_seq)
 
@@ -58,9 +58,9 @@ class Format(object):
             text = self.wrapper % text
         if self.color or self.styles:
             if self.color:
-                text = self.color.encode(text, reset=False)
+                text = self.color.format(text, reset=False)
             for style in self.styles:
-                text = style.encode(text, reset=False)
+                text = style.format(text, reset=False)
             text = Format.reset(text)
         return text
 
@@ -86,13 +86,16 @@ class LoggingLevels(Enum):
 
 class RecordAttributes(Enum):
 
+    MESSAGE = Format(color=Colors.BLACK, styles=Styles.BOLD)
+    HEADER = Format(color=Colors.GRAY, styles=[Styles.DIM, Styles.UNDERLINE])
     NAME = Format(color=Colors.GRAY, styles=Styles.BOLD)
     THREADNAME = Format(color=Colors.GRAY)
-    PROXY = Format(styles=Styles.BOLD, wrapper="<%s>")
-    TOKEN = Format(color=Colors.RED, wrapper="%s")
-    URL = Format(styles=Styles.NORMAL, wrapper="(%s)")
+    PROXY = Format(styles=Styles.NORMAL, wrapper="<%s>")
+    TOKEN = Format(color=Colors.RED)
     STATUS_CODE = Format(styles=Styles.BOLD, wrapper="[%s]")
-    TASK = Format(color=Colors.BLACK, styles=Styles.BOLD, wrapper="(%s)")
+    METHOD = Format(color=Colors.GRAY, styles=Styles.BOLD)
+    TASK = Format(color=Colors.CYAN, styles=Styles.NORMAL, wrapper="(%s)")
+    PASSWORD = Format(color=Colors.RED, styles=Styles.NORMAL)
 
     def __init__(self, format):
         self.format = format
