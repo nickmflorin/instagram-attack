@@ -228,7 +228,7 @@ class async_login_handler(login_handler):
         pass
 
     @auto_logger("Login")
-    def request(self, session, proxy, token, task_name, log):
+    async def request(self, session, proxy, token, task_name, log):
         """
         Note
         -----

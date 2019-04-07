@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 
-from collections import Iterable
 import functools
 import logging
 
@@ -8,15 +7,7 @@ from app.lib.logging import AppLogger
 
 
 __all__ = ('auto_logger', 'format_proxy', 'get_token_from_cookies',
-    'get_cookies_from_response', 'get_token_from_response', 'ensure_iterable')
-
-
-def ensure_iterable(arg):
-    if isinstance(arg, str):
-        return [arg]
-    elif not isinstance(arg, Iterable):
-        return [arg]
-    return arg
+    'get_cookies_from_response', 'get_token_from_response')
 
 
 def format_proxy(proxy, scheme='http'):

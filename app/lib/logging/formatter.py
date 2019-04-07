@@ -1,11 +1,18 @@
 from __future__ import absolute_import
 
 import logging
-
-from app.lib.utils import ensure_iterable
+from collections import Iterable
 
 from .utils import RecordWrapper
 from .constants import RESET_SEQ
+
+
+def ensure_iterable(arg):
+    if isinstance(arg, str):
+        return [arg]
+    elif not isinstance(arg, Iterable):
+        return [arg]
+    return arg
 
 
 class LogLineItem(object):

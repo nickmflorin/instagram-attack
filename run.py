@@ -21,7 +21,8 @@ SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 logging.setLoggerClass(AppLogger)
 
-log = logging.getLogger(__file__).setLevel(logging.INFO)
+log = logging.getLogger(__file__)
+log.setLevel(logging.INFO)
 logging.getLogger("proxybroker").setLevel(logging.CRITICAL)
 
 
@@ -62,6 +63,7 @@ def main(arguments):
         engine_runner(user, global_stop_event, proxies, loop,
             mode=mode, test=arguments.test)
     ]))
+    loop.run_until_complete(shutdown(loop))
     loop.close()
 
 

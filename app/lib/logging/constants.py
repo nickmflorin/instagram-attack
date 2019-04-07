@@ -2,11 +2,17 @@ from __future__ import absolute_import
 
 from enum import Enum
 from colorama import Fore, Style
-
-from app.lib.utils import ensure_iterable
-
+from collections import Iterable
 
 RESET_SEQ = "\033[0m"
+
+
+def ensure_iterable(arg):
+    if isinstance(arg, str):
+        return [arg]
+    elif not isinstance(arg, Iterable):
+        return [arg]
+    return arg
 
 
 class FormatEnum(Enum):
@@ -38,6 +44,7 @@ class Styles(FormatEnum):
 
 class Format(object):
     def __init__(self, color=Colors.BLACK, styles=None, wrapper=None):
+
         self.styles = ensure_iterable(styles or [])
         self.color = color
         self.wrapper = wrapper
