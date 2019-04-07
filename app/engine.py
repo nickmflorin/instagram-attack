@@ -91,8 +91,7 @@ class EngineAsync(object):
 
     @auto_logger('Attacking')
     async def login(self, loop, log, mode='async'):
-        # TODO: Be able to select the login type based on mode, just using futures
-        # for now.
+
         login_handler = FuturesLogin(
             self.user,
             self.global_stop_event,
@@ -114,7 +113,6 @@ class EngineAsync(object):
         consumers.
         """
         while not self.global_stop_event.is_set():
-            # time.sleep(1.0)
             proxy = await self.queues.proxies.generated.get()
             if proxy:
                 log.debug('Got Proxy', extra={'proxy': proxy})
