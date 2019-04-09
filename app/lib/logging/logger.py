@@ -4,7 +4,7 @@ import logging
 
 from colorama import init
 
-from .constants import Format, Colors, Styles
+from app.lib.utils import Format, Colors, Styles
 from .formatter import AppLogFormatter
 
 

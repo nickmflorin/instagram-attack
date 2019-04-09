@@ -9,7 +9,7 @@ import json
 
 from app import settings
 from app.lib import exceptions
-from app.lib.logging.constants import Colors
+from app.lib.utils import Colors
 
 
 __all__ = ('InstagramResult', )

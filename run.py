@@ -10,7 +10,8 @@ from argparse import ArgumentParser
 
 from proxybroker import Broker
 
-from app.engine import EngineAsync
+from app.engine import Engine
+from app.lib import exceptions
 from app.lib.users import User
 from app.lib.logging import AppLogger
 
@@ -26,6 +27,24 @@ log.setLevel(logging.INFO)
 logging.getLogger("proxybroker").setLevel(logging.CRITICAL)
 
 
+class Configuration(object):
+
+    def __init__(self, arguments):
+
+        self.a_sync = arguments.a_sync or not arguments.sync
+        self.sync = arguments.sync
+        self.futures = arguments.futures
+        self.test = arguments.test
+
+        self.password = arguments.password
+        if self.test and not self.password:
+            raise exceptions.FatalException(
+                "Must provide password if in test mode."
+            )
+
+        self.user = User(arguments.username, password=arguments.password)
+
+
 async def proxy_broker(global_stop_event, proxies, loop):
     broker = Broker(proxies, timeout=6, max_conn=200, max_tries=1)
     while not global_stop_event.is_set():
@@ -33,7 +52,7 @@ async def proxy_broker(global_stop_event, proxies, loop):
 
 
 async def engine_runner(user, global_stop_event, proxies, loop, **kwargs):
-    engine = EngineAsync(
+    engine = Engine(
         user,
         global_stop_event,
         proxies,
@@ -44,11 +63,10 @@ async def engine_runner(user, global_stop_event, proxies, loop, **kwargs):
         await engine.run(loop)
 
 
-def main(arguments):
+def main(config):
 
     global_stop_event = asyncio.Event()
     proxies = asyncio.Queue()
-    user = User(arguments.username, password=arguments.password)
 
     loop = asyncio.get_event_loop()
 
@@ -56,12 +74,9 @@ def main(arguments):
         loop.add_signal_handler(
             s, lambda s=s: asyncio.create_task(shutdown(loop, signal=s)))
 
-    mode = 'sync' if arguments.sync else 'async'
-
     loop.run_until_complete(asyncio.gather(*[
         proxy_broker(global_stop_event, proxies, loop),
-        engine_runner(user, global_stop_event, proxies, loop,
-            mode=mode, test=arguments.test)
+        engine_runner(config, global_stop_event, proxies, loop)
     ]))
     loop.run_until_complete(shutdown(loop))
     loop.close()
@@ -80,18 +95,21 @@ async def shutdown(loop, signal=None):
     loop.stop()
 
 
-def get_args():
+def get_configuration():
     args = ArgumentParser()
     args.add_argument('username', help='email or username')
     args.add_argument('-p', '--password', default=None)
     args.add_argument('-sync', '--sync', dest='sync', action='store_true')
+    args.add_argument('-async', '--async', dest='a_sync', action='store_true')
+    args.add_argument('-futures', '--futures', dest='futures', action='store_true')
     args.add_argument('-test', '--test', dest='test', action='store_true')
-    return args.parse_args()
+    parsed = args.parse_args()
+    return Configuration(parsed)
 
 
 if __name__ == '__main__':
 
-    arguments = get_args()
+    arguments = get_configuration()
 
     abspath = os.path.abspath(__file__)
     dname = os.path.dirname(abspath)

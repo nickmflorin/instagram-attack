@@ -1,47 +1,72 @@
 from __future__ import absolute_import
 
 import requests
+import aiohttp
 
 from app.lib import exceptions
 
-from .constants import LoggingLevels, RecordAttributes, Styles
+from .formatting import LoggingLevels, RecordAttributes, Styles
+from .misc import array_string
 
 
-def get_status_code_from_exception(exc, formatted=False):
+__all__ = ('RecordFormatter', )
+
+
+def get_exception_status_code(exc, formatted=False):
+
     if isinstance(exc, requests.exceptions.RequestException):
         if exc.response and exc.response.status_code:
             if formatted:
                 return RecordAttributes.STATUS_CODE.format(exc.response.status_code)
             return exc.response.status_code
+    elif isinstance(exc, aiohttp.ClientError):
+        if formatted:
+            return RecordAttributes.STATUS_CODE.format(exc.status)
+        return exc.status
+    else:
+        return None
 
 
-def get_method_from_exception(exc, formatted=False):
+def get_exception_request_method(exc, formatted=False):
     if isinstance(exc, requests.exceptions.RequestException):
         if exc.request and exc.request.method:
             if formatted:
                 return RecordAttributes.METHOD.format(exc.request.method)
             return exc.request.method
+    elif isinstance(exc, aiohttp.ClientError):
+        if exc.request_info.method:
+            if formatted:
+                return RecordAttributes.METHOD.format(exc.request_info.method)
+            return exc.request_info.method
+    return None
+
+
+def get_exception_message(exc, level, formatted=False):
+    if isinstance(level, str):
+        level = LoggingLevels[level]
+
+    if (isinstance(exc, requests.exceptions.RequestException) or
+            isinstance(exc, aiohttp.ClientError)):
+        message = getattr(exc, 'message', None) or exc.__class__.__name__
+        if formatted:
+            return level.format_message(message)
+        return message
+
+    # Although these are the same for now, we might want to treat our exceptions
+    # differently in the future.
+    # Maybe return str(exc) if the string length isn't insanely long.
+    message = getattr(exc, 'message', None) or str(exc)
+    if formatted:
+        return level.format_message(message)
+    return message
 
 
 def format_exception_message(exc, level):
-    if isinstance(exc, requests.exceptions.RequestException):
-        parts = []
-
-        method = get_method_from_exception(exc, formatted=True)
-        if method:
-            parts.append(method)
-
-        parts.append(level.format_message(exc.__class__.__name__))
-
-        status_code = get_status_code_from_exception(exc, formatted=True)
-        if status_code:
-            parts.append(status_code)
-
-        return ' '.join(parts)
-    elif level:
-        return level.format_message(str(exc))
-    else:
-        return str(exc)
+    return array_string(
+        get_exception_request_method(exc, formatted=True),
+        get_exception_message(exc, level, formatted=True),
+        get_exception_status_code(exc, formatted=True)
+    )
 
 
 def format_log_message(msg, level):
@@ -129,7 +154,7 @@ class RecordFormatter(object):
 
     @property
     def _status_code(self):
-        if get_status_code_from_exception(self.msg):
+        if get_exception_status_code(self.msg):
             return None
 
         if self.response and not self.status_code:

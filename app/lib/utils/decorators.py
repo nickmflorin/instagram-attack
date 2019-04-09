@@ -3,38 +3,13 @@ from __future__ import absolute_import
 import functools
 import logging
 
-from app.lib.logging import AppLogger
 
-
-__all__ = ('auto_logger', 'format_proxy', 'get_token_from_cookies',
-    'get_cookies_from_response', 'get_token_from_response')
-
-
-def format_proxy(proxy, scheme='http'):
-    return f"{scheme}://{proxy.host}:{proxy.port}/"
-
-
-def get_token_from_cookies(cookies):
-    # aiohttp ClientResponse cookies have .value attribute.
-    cookie = cookies.get('csrftoken')
-    if cookie:
-        try:
-            return cookie.value
-        except AttributeError:
-            return cookie
-
-
-def get_cookies_from_response(response):
-    return response.cookies
-
-
-def get_token_from_response(response):
-    cookies = get_cookies_from_response(response)
-    if cookies:
-        return get_token_from_cookies(cookies)
+__all__ = ('auto_logger', )
 
 
 def create_auto_log(func, name=None, level=None):
+    from app.lib.logging import AppLogger
+
     name = name or func.__name__
     level = level or logging.INFO
 

@@ -1,22 +1,14 @@
 from __future__ import absolute_import
 
 import logging
-from collections import Iterable
 
-from .utils import RecordFormatter
-from .constants import RESET_SEQ, RecordAttributes
-
-
-def ensure_iterable(arg):
-    if isinstance(arg, str):
-        return [arg]
-    elif not isinstance(arg, Iterable):
-        return [arg]
-    return arg
+from app.lib.utils import RecordFormatter, RESET_SEQ, RecordAttributes
 
 
 class LogLineItem(object):
     def __init__(self, *items, separator=' '):
+        from app.lib.utils import ensure_iterable
+
         self.items = ensure_iterable(items)
         self.separator = separator
 
@@ -41,6 +33,8 @@ class LogLineItem(object):
 class LogLine(object):
 
     def __init__(self, *items, indent=0, newline=False, header=None):
+        from app.lib.utils import ensure_iterable
+
         self.indent = indent
         self.newline = newline
         self.header = header
@@ -78,6 +72,8 @@ class LogLine(object):
 
 class LogLines(object):
     def __init__(self, *items, newlines=False, newline=False, indent=None):
+        from app.lib.utils import ensure_iterable
+
         self.items = ensure_iterable(items)
         self.newlines = newlines
         self.newline = newline

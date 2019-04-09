@@ -7,11 +7,11 @@ import asyncio
 
 from app.lib import exceptions
 from app.lib.utils import auto_logger
-from app.requests import FuturesLogin
+from app.requests import FuturesLogin, AsyncLogin
 from app.handlers import AysncExceptionHandler
 
 
-__all__ = ('EngineAsync', )
+__all__ = ('Engine', )
 
 
 log = logging.getLogger(__file__).setLevel(logging.INFO)
@@ -46,34 +46,13 @@ class QueueManager(object):
         self.passwords = PasswordManager(**kwargs.get('passwords', {}))
 
 
-class Configuration(object):
+class Engine(object):
 
-    def __init__(self, mode, test=False):
-        self.mode = mode
-        self.test = test
+    def __init__(self, config, global_stop_event, proxies):
 
-    @property
-    def a_sync(self):
-        return self.mode == 'async'
-
-    @property
-    def sync(self):
-        return self.mode == 'sync'
-
-
-class EngineAsync(object):
-
-    def __init__(self, user, global_stop_event, proxies, mode='async', test=False):
-        self.user = user
+        self.config = config
         self.global_stop_event = global_stop_event
-
-        self.config = Configuration(mode, test=test)
         self.queues = QueueManager(proxies={'generated': proxies})
-
-        if self.config.test and not self.user.password:
-            raise exceptions.FatalException(
-                "Must provide password to test attack."
-            )
 
     @auto_logger("Populating Passwords")
     async def populate_passwords(self, log):
@@ -81,7 +60,7 @@ class EngineAsync(object):
         Retrieves passwords generated passwords that have not been attempted
         from the User object and populates the password queue.
         """
-        for password in self.user.get_new_attempts():
+        for password in self.config.user.get_new_attempts():
             self.queues.passwords.generated.put_nowait(password)
 
         if self.queues.passwords.generated.empty():
@@ -92,11 +71,14 @@ class EngineAsync(object):
     @auto_logger('Attacking')
     async def login(self, loop, log, mode='async'):
 
-        login_handler = FuturesLogin(
-            self.user,
+        handler_cls = AsyncLogin
+        if self.config.futures:
+            handler_cls = FuturesLogin
+
+        login_handler = handler_cls(
+            self.config,
             self.global_stop_event,
             self.queues,
-            self.config,
         )
 
         async with AysncExceptionHandler(log=log):

