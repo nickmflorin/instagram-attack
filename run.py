@@ -33,7 +33,6 @@ class Configuration(object):
 
         self.a_sync = arguments.a_sync or not arguments.sync
         self.sync = arguments.sync
-        self.futures = arguments.futures
         self.test = arguments.test
 
         self.proxysleep = None
@@ -111,7 +110,6 @@ def get_args():
     args.add_argument('-sleep', '--proxysleep', default=None, type=validate_proxy_sleep)
     args.add_argument('-sync', '--sync', dest='sync', action='store_true')
     args.add_argument('-async', '--async', dest='a_sync', action='store_true')
-    args.add_argument('-futures', '--futures', dest='futures', action='store_true')
     args.add_argument('-test', '--test', dest='test', action='store_true')
     args.add_argument('-level', '--level', default='INFO', type=validate_log_level)
     return args.parse_args()

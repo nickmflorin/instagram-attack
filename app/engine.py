@@ -9,7 +9,7 @@ import time
 from app.lib import exceptions
 from app.lib.utils import AysncExceptionHandler, AsyncTaskManager, auto_logger
 
-from .entry import AsyncEntryPoint, FuturesEntryPoint
+from .attack import Attacker
 from .managers import QueueManager
 
 
@@ -61,20 +61,16 @@ class Engine(object):
             else:
                 log.debug('No New Proxies')
 
-    @auto_logger('Attacking')
+    @auto_logger('Running')
     async def run(self, loop, log):
 
-        entry_cls = AsyncEntryPoint
-        if self.config.futures:
-            entry_cls = FuturesEntryPoint
-
-        entry_point = entry_cls(self.config, self.global_stop_event, self.queues)
+        attacker = Attacker(self.config, self.global_stop_event, self.queues)
 
         await self.populate_passwords()
 
         tasks = [
             asyncio.create_task(self.pass_on_proxies()),
-            asyncio.create_task(entry_point.login(loop)),
+            asyncio.create_task(attacker.attack(loop)),
         ]
 
         async with AsyncTaskManager(self.global_stop_event, log=log, tasks=tasks) as task_manager:

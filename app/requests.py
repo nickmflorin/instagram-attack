@@ -25,7 +25,8 @@ future = session.get('https://api.ipify.org?format=json')
 
 class request_handler(object):
 
-    def __init__(self, global_stop_event, queues):
+    def __init__(self, config, global_stop_event, queues):
+        self.config = config
         self.global_stop_event = global_stop_event
         self.user_agent = random.choice(settings.USER_AGENTS)
         self.stop_event = asyncio.Event()

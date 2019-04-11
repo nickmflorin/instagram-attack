@@ -5,8 +5,6 @@ import logging
 
 import aiohttp
 import asyncio
-import concurrent.futures
-import requests
 
 from app import settings
 from app.lib import exceptions
@@ -41,6 +39,29 @@ class token_handler(request_handler):
     # We are going to have to adjust these probably - it might take more than
     # 10 attempts to retrieve a result if we have bad proxies.
     ATTEMPT_LIMIT = settings.TOKEN_ATTEMPT_LIMIT
+    CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
+
+    @property
+    def connector(self):
+        """
+        TCPConnector
+        -------------
+        keepalive_timeout (float) – timeout for connection reusing aftet
+            releasing
+        limit_per_host (int) – limit simultaneous connections to the same
+            endpoint (default is 0)
+        """
+        return aiohttp.TCPConnector(
+            ssl=False,
+            keepalive_timeout=self.CONNECTOR_KEEP_ALIVE_TIMEOUT,
+            enable_cleanup_closed=True,
+        )
+
+    @property
+    def timeout(self):
+        return aiohttp.ClientTimeout(
+            total=settings.DEFAULT_TOKEN_FETCH_TIME
+        )
 
     def _get_token_from_response(self, response):
         token = get_token_from_response(response)
@@ -73,33 +94,6 @@ class token_handler(request_handler):
             })
 
             yield _context
-
-
-class async_token_handler(token_handler):
-
-    CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
-
-    @property
-    def connector(self):
-        """
-        TCPConnector
-        -------------
-        keepalive_timeout (float) – timeout for connection reusing aftet
-            releasing
-        limit_per_host (int) – limit simultaneous connections to the same
-            endpoint (default is 0)
-        """
-        return aiohttp.TCPConnector(
-            ssl=False,
-            keepalive_timeout=self.CONNECTOR_KEEP_ALIVE_TIMEOUT,
-            enable_cleanup_closed=True,
-        )
-
-    @property
-    def timeout(self):
-        return aiohttp.ClientTimeout(
-            total=settings.DEFAULT_TOKEN_FETCH_TIME
-        )
 
     async def request(self, session, context, retry=1):
 
@@ -153,8 +147,8 @@ class async_token_handler(token_handler):
             raise exceptions.FatalException(
                 f'Uncaught Exception: {str(e)}', extra=self._log_context(context))
 
-    @auto_logger("Getting Token")
-    async def __call__(self, log):
+    @auto_logger("Fetching Token")
+    async def fetch(self, log):
         """
         Asyncio Docs:
 
@@ -185,83 +179,3 @@ class async_token_handler(token_handler):
                     if earliest_future:
                         await task_manager.stop()
                         return earliest_future
-
-
-class futures_token_handler(token_handler):
-
-    # Not sure if this is going to be applicable for asynchronous case.
-    THREAD_LIMIT = settings.TOKEN_THREAD_LIMIT
-
-    def _handle_client_response(self, response, log, extra=None):
-        extra = extra or {}
-        extra.update(response=response)
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            log.warning(e, extra=extra)
-            return None
-        else:
-            try:
-                token = self._get_token_from_response(response)
-            except exceptions.TokenNotInResponse as e:
-                log.warning(e, extra=extra)
-                return None
-            else:
-                return token
-
-    @auto_logger("Token Task")
-    def request(self, session, context, log):
-        """
-        TODO: We are going to want to start putting proxies back in the queue
-        if they resulted in successful requests.
-        """
-        self.log_get_request(context, log)
-
-        try:
-            response = session.get(
-                settings.INSTAGRAM_URL,
-                headers=self._headers(),
-                timeout=settings.DEFAULT_TOKEN_FETCH_TIME,
-                proxies={
-                    'http': format_proxy(context.proxy),
-                    'https': format_proxy(context.proxy, scheme='https'),
-                }
-            )
-        except requests.exceptions.ConnectionError as e:
-            log.error(e, extra=self._log_context(context))
-            return None
-        else:
-            token = self._handle_client_response(
-                response, log, extra=self._log_context(context))
-            if token:
-                self.queues.proxies.good.put_nowait(context.proxy)
-            return token
-
-    @auto_logger("Getting Token")
-    async def __call__(self, log):
-        """
-        TODO: We are going to want to start putting proxies back in the queue
-        if they resulted in successful requests.
-        """
-        async with AsyncTaskManager(self.stop_event, log=log) as task_manager:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.THREAD_LIMIT) as executor:
-                session = requests.Session()
-
-                async for context in self.task_generator(log):
-                    log.debug("Submitting Task", extra={
-                        'task': context.name
-                    })
-                    token_future = executor.submit(self.request, session, context)
-                    setattr(token_future, '__context__', context)
-                    task_manager.add(token_future)
-
-                for future in concurrent.futures.as_completed(task_manager.tasks):
-                    log.debug("Finished Task", extra={
-                        'task': future.__context__.name,
-                        'proxy': future.__context__.proxy,
-                    })
-                    result = future.result()
-                    if result is not None:
-                        await task_manager.stop()
-                        executor.shutdown()
-                        return result

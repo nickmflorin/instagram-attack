@@ -5,14 +5,10 @@ import logging
 
 import aiohttp
 import asyncio
-import concurrent.futures
-import requests
 
 from app import settings
 from app.lib import exceptions
-from app.lib.utils import (
-    AysncExceptionHandler, SyncExceptionHandler, auto_logger, format_proxy,
-    cancel_remaining_tasks, AsyncTaskManager)
+from app.lib.utils import AsyncTaskManager, auto_logger, format_proxy
 from app.lib.models import InstagramResult
 
 from .requests import request_handler
@@ -28,10 +24,11 @@ class login_handler(request_handler):
     # 10 attempts to retrieve a result if we have bad proxies.
     # This might not be as appropriate for async cases.
     ATTEMPT_LIMIT = settings.LOGIN_ATTEMPT_LIMIT
+    CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
 
-    def __init__(self, user, global_stop_event, queues):
-        super(login_handler, self).__init__(global_stop_event, queues)
-        self.user = user
+    def __init__(self, config, global_stop_event, queues):
+        super(login_handler, self).__init__(config, global_stop_event, queues)
+        self.user = self.config.user
 
     def login_data(self, password):
         return {
@@ -72,11 +69,6 @@ class login_handler(request_handler):
             })
 
             yield _context
-
-
-class async_login_handler(login_handler):
-    ATTEMPT_LIMIT = 5
-    CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
 
     @property
     def connector(self):
@@ -211,8 +203,8 @@ class async_login_handler(login_handler):
         except Exception as e:
             raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
 
-    @auto_logger("Synchronous Asyncio Login")
-    async def run_synchronous(self, token, password, log):
+    @auto_logger("Sync Login")
+    async def login_synchronously(self, token, password, log):
 
         async with aiohttp.ClientSession(
             connector=self.connector,
@@ -237,8 +229,8 @@ class async_login_handler(login_handler):
                                 self.stop_event.set()
                                 return result
 
-    @auto_logger("Asychronous Asyncio Login")
-    async def run_asynchronous(self, token, password, log):
+    @auto_logger("Async Login")
+    async def login_asynchronously(self, token, password, log):
         """
         Asyncio Docs:
 
@@ -291,125 +283,7 @@ class async_login_handler(login_handler):
                             await task_manager.stop()
                             return result
 
-
-class futures_login_handler(login_handler):
-    THREAD_LIMIT = settings.LOGIN_THREAD_LIMIT
-
-    def _get_result_from_response(self, response):
-        try:
-            result = response.json()
-        except ValueError:
-            raise exceptions.ResultNotInResponse()
-        else:
-            return InstagramResult.from_dict(result)
-
-    def _handle_client_response(self, response, log, extra=None):
-        extra = extra or {}
-        extra.update(response=response)
-
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 400:
-                try:
-                    return self._get_result_from_response(response)
-                except exceptions.ResultNotInResponse:
-                    log.error(e, extra=extra)
-                    return None
-            else:
-                log.error(e, extra=extra)
-                return None
-        else:
-            try:
-                return self._get_result_from_response(response)
-            except exceptions.ResultNotInResponse:
-                log.critical("Unexpected behavior, result should be in response.")
-                return None
-
-    @auto_logger("Login")
-    def request(self, session, context, log):
-
-        self.log_post_request(context, log)
-
-        try:
-            response = session.post(
-                settings.INSTAGRAM_LOGIN_URL,
-                headers=self._headers(context.token),
-                data=self.login_data(context.password),
-                timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
-                proxies={
-                    'http': format_proxy(context.proxy),
-                    'https': format_proxy(context.proxy, scheme='https'),
-                },
-            )
-        except requests.exceptions.ConnectionError as e:
-            log.error(e, extra=self._log_context(context))
-            return None
-        except Exception as e:
-            raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
-        else:
-            # TODO: For client responses, we might want to raise a harder exception
-            # if we get a 403.
-            return self._handle_client_response(response, context, log)
-
-    @auto_logger("Sychronous Futures Login")
-    async def run_synchronous(self, token, password, log):
-
-        session = requests.Session()
-        async with AsyncTaskManager(self.stop_event, log=log) as task_manager:
-            # We probably want this block to run synchronously because this represents
-            # a series of attempts for a single password over a range of proxies.
-            async for context in self.task_generator(log, password, token=token):
-                result = self.request(session, context)
-                if result:
-                    if result.has_error:
-                        log.warning(result.error_message, extra={
-                            'token': token,
-                            'password': password,
-                            'task': context.name,
-                        })
-                    else:
-                        self.queues.proxies.good.put_nowait(context.proxy)
-                        if result.conclusive:
-                            task_manager.stop()
-                            return result
-
-    @auto_logger("Asychronous Futures Login")
-    async def run_asynchronous(self, token, password, log):
-        """
-        TODO: We are going to want to start putting proxies back in the queue
-        if they resulted in successful requests.
-        """
-        async with AsyncTaskManager(self.stop_event, log=log) as task_manager:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=self.THREAD_LIMIT) as executor:
-                session = requests.Session()
-
-                # We probably want this block to run synchronously because this represents
-                # a series of attempts for a single password over a range of proxies.
-                async for context in self.task_generator(log, password, token=token):
-                    log.debug("Submitting Task", extra={
-                        'task': context.name
-                    })
-                    login_future = executor.submit(self.request, session, context)
-                    setattr(login_future, '__context__', context)
-                    task_manager.add(login_future)
-
-                for future in concurrent.futures.as_completed(task_manager.tasks):
-                    log.debug("Finished Task", extra={
-                        'task': future.__context__.name,
-                        'proxy': future.__context__.proxy,
-                    })
-                    result = future.result()
-                    if result:
-                        if result.has_error:
-                            log.warning(result.error_message, extra={
-                                'token': token,
-                                'password': password,
-                                'task': future.__context__.name,
-                            })
-                        else:
-                            self.queues.proxies.good.put_nowait(future.__context__.proxy)
-                            if result.conclusive:
-                                await task_manager.stop()
-                                executor.shutdown()
-                                return result
+        async def login(self, token, password):
+            if self.config.sync:
+                return await self.login_synchronously(token, password)
+            return await self.login_asynchronously(token, password)
