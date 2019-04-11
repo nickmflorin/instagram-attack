@@ -42,12 +42,12 @@ class InstagramClientApiException(InstagramApiException):
     __message__ = "Instagram Client Error"
 
 
-class InstagramResponseException(InstagramClientApiException):
+class InstagramResultError(InstagramClientApiException):
     """
     Used when we have received a valid response that we can get JSON from but
     the response data indicates that there was an error.
     """
-    __message__ = "Instagram Response Error"
+    __message__ = "Instagram Result Error"
 
 
 class TokenNotInResponse(InstagramClientApiException):

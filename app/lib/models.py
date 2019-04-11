@@ -44,8 +44,8 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return Colors.GREEN.encode(string_rep)
-        return Colors.RED.encode(string_rep)
+            return Colors.GREEN.format(string_rep)
+        return Colors.RED.format(string_rep)
 
     @classmethod
     def from_dict(cls, data):

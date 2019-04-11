@@ -14,6 +14,7 @@ from app.engine import Engine
 from app.lib import exceptions
 from app.lib.users import User
 from app.lib.logging import AppLogger
+from app.lib.utils import validate_proxy_sleep, validate_log_level
 
 # May want to catch other signals too - these are not currently being
 # used, but could probably be expanded upon.
@@ -23,7 +24,6 @@ SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 logging.setLoggerClass(AppLogger)
 
 log = logging.getLogger(__file__)
-log.setLevel(logging.INFO)
 logging.getLogger("proxybroker").setLevel(logging.CRITICAL)
 
 
@@ -36,6 +36,10 @@ class Configuration(object):
         self.futures = arguments.futures
         self.test = arguments.test
 
+        self.proxysleep = None
+        if arguments.proxysleep:
+            self.proxysleep = arguments.proxysleep
+
         self.password = arguments.password
         if self.test and not self.password:
             raise exceptions.FatalException(
@@ -46,9 +50,14 @@ class Configuration(object):
 
 
 async def proxy_broker(global_stop_event, proxies, loop):
-    broker = Broker(proxies, timeout=6, max_conn=200, max_tries=1)
+    broker = Broker(proxies, timeout=6, max_conn=50, max_tries=1)
     while not global_stop_event.is_set():
-        await broker.find(types=['HTTP'])
+        try:
+            await broker.find(types=['HTTP'])
+        # Proxy Broker will get hung up on tasks as we are trying to shut down
+        # if we do not do this.
+        except RuntimeError:
+            break
 
 
 async def engine_runner(user, global_stop_event, proxies, loop, **kwargs):
@@ -95,21 +104,20 @@ async def shutdown(loop, signal=None):
     loop.stop()
 
 
-def get_configuration():
+def get_args():
     args = ArgumentParser()
     args.add_argument('username', help='email or username')
     args.add_argument('-p', '--password', default=None)
+    args.add_argument('-sleep', '--proxysleep', default=None, type=validate_proxy_sleep)
     args.add_argument('-sync', '--sync', dest='sync', action='store_true')
     args.add_argument('-async', '--async', dest='a_sync', action='store_true')
     args.add_argument('-futures', '--futures', dest='futures', action='store_true')
     args.add_argument('-test', '--test', dest='test', action='store_true')
-    parsed = args.parse_args()
-    return Configuration(parsed)
+    args.add_argument('-level', '--level', default='INFO', type=validate_log_level)
+    return args.parse_args()
 
 
 if __name__ == '__main__':
-
-    arguments = get_configuration()
 
     abspath = os.path.abspath(__file__)
     dname = os.path.dirname(abspath)
@@ -119,4 +127,9 @@ if __name__ == '__main__':
         print('[!] Please use Python 3')
         exit()
 
-    main(arguments)
+    arguments = get_args()
+    config = Configuration(arguments)
+
+    os.environ['INSTAGRAM_LEVEL'] = arguments.level
+    log.setLevel(getattr(logging, arguments.level))
+    main(config)

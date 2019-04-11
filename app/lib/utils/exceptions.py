@@ -15,9 +15,7 @@ class ExceptionHandlerMixin(object):
 
     def upstream_traceback(self, tb):
         extracted = traceback.extract_tb(tb)
-        if len(extracted) > 1:
-            return traceback.extract_tb(tb)[1]
-        return traceback.extract_tb(tb)[0]
+        return traceback.extract_tb(tb)[len(extracted) - 1]
 
     def log_context(self, tb):
         """

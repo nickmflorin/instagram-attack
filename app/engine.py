@@ -4,46 +4,19 @@ import logging
 import logging.config
 
 import asyncio
+import time
 
 from app.lib import exceptions
-from app.lib.utils import auto_logger
-from app.requests import FuturesLogin, AsyncLogin
-from app.handlers import AysncExceptionHandler
+from app.lib.utils import AysncExceptionHandler, AsyncTaskManager, auto_logger
+
+from .entry import AsyncEntryPoint, FuturesEntryPoint
+from .managers import QueueManager
 
 
 __all__ = ('Engine', )
 
 
 log = logging.getLogger(__file__).setLevel(logging.INFO)
-
-
-class ProxyManager(object):
-
-    def __init__(self, generated=None, good=None, handled=None):
-        self.generated = generated or asyncio.Queue()
-        self.good = good or asyncio.Queue()
-        self.handled = handled or asyncio.Queue()
-
-    async def get_best(self):
-        # We could run into race conditions here - we may want to have a try
-        # except.
-        if not self.good.empty():
-            return await self.good.get()
-        return await self.handled.get()
-
-
-class PasswordManager(object):
-
-    def __init__(self, generated=None, attempted=None):
-        self.generated = generated or asyncio.Queue()
-        self.attempted = attempted or asyncio.Queue()
-
-
-class QueueManager(object):
-
-    def __init__(self, **kwargs):
-        self.proxies = ProxyManager(**kwargs.get('proxies', {}))
-        self.passwords = PasswordManager(**kwargs.get('passwords', {}))
 
 
 class Engine(object):
@@ -68,22 +41,6 @@ class Engine(object):
 
         log.info(f"Populated {self.queues.passwords.generated.qsize()} Passwords")
 
-    @auto_logger('Attacking')
-    async def login(self, loop, log, mode='async'):
-
-        handler_cls = AsyncLogin
-        if self.config.futures:
-            handler_cls = FuturesLogin
-
-        login_handler = handler_cls(
-            self.config,
-            self.global_stop_event,
-            self.queues,
-        )
-
-        async with AysncExceptionHandler(log=log):
-            return await login_handler.login(loop)
-
     @auto_logger('Proxy Handler')
     async def pass_on_proxies(self, log):
         """
@@ -97,6 +54,8 @@ class Engine(object):
         while not self.global_stop_event.is_set():
             proxy = await self.queues.proxies.generated.get()
             if proxy:
+                if self.config.proxysleep:
+                    time.sleep(self.config.proxysleep)
                 log.debug('Got Proxy', extra={'proxy': proxy})
                 self.queues.proxies.handled.put_nowait(proxy)
             else:
@@ -104,12 +63,21 @@ class Engine(object):
 
     @auto_logger('Attacking')
     async def run(self, loop, log):
+
+        entry_cls = AsyncEntryPoint
+        if self.config.futures:
+            entry_cls = FuturesEntryPoint
+
+        entry_point = entry_cls(self.config, self.global_stop_event, self.queues)
+
         await self.populate_passwords()
 
         tasks = [
             asyncio.create_task(self.pass_on_proxies()),
-            asyncio.create_task(self.login(loop, mode='futures')),
+            asyncio.create_task(entry_point.login(loop)),
         ]
 
-        async with AysncExceptionHandler(log=log):
-            await asyncio.gather(*tasks, loop=loop)
+        async with AsyncTaskManager(self.global_stop_event, log=log, tasks=tasks) as task_manager:
+            async with AysncExceptionHandler(log=log):
+                await asyncio.gather(*tasks, loop=loop)
+                task_manager.stop()

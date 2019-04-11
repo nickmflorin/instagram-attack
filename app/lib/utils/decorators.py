@@ -2,32 +2,30 @@ from __future__ import absolute_import
 
 import functools
 import logging
-
+import os
 
 __all__ = ('auto_logger', )
 
 
-def create_auto_log(func, name=None, level=None):
+def create_auto_log(func, name):
     from app.lib.logging import AppLogger
-
-    name = name or func.__name__
-    level = level or logging.INFO
 
     logging.setLoggerClass(AppLogger)
     log = logging.getLogger(name)
-    log.setLevel(level)
     return log
 
 
 def auto_logger(*args):
-
-    def _auto_logger(func, name=None, level=None):
+    def _auto_logger(func, name=None):
         name = name or func.__name__
-        level = level or logging.INFO
-        log = create_auto_log(func, name=name, level=level)
+        log = create_auto_log(func, name)
 
         def wrapper(instance, *args, **kwargs):
             args = args + (log, )
+            level = os.environ.get('INSTAGRAM_LEVEL', 'INFO')
+            level = getattr(logging, level)
+            log.setLevel(level)
+
             return func(instance, *args, **kwargs)
         return wrapper
 
