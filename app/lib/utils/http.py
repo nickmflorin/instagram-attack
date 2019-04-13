@@ -13,10 +13,7 @@ def get_token_from_cookies(cookies):
     # aiohttp ClientResponse cookies have .value attribute.
     cookie = cookies.get('csrftoken')
     if cookie:
-        try:
-            return cookie.value
-        except AttributeError:
-            return cookie
+        return cookie.value
 
 
 def get_cookies_from_response(response):

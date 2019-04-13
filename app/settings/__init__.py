@@ -1,5 +1,11 @@
 from __future__ import absolute_import
 
+# User Management
+PASSWORD_FILENAME = "passwords"
+ATTEMPTS_FILENAME = "attempts"
+ALTERATIONS_FILENAME = "alterations"
+NUMBERS_FILENAME = "common_numbers"
+USER_DIRECTORY = "users"
 
 USER_AGENTS = [
     'Googlebot/2.1 (+http://www.google.com/bot.html)',
@@ -28,41 +34,60 @@ USER_AGENTS = [
 ]
 
 
+# Instagram Requests
 HEADER = {
     'Referer': 'https://www.instagram.com/',
     'Content-Type': 'application/x-www-form-urlencoded',
 }
-
-INSTAGRAM_USERNAME_FIELD = 'username'
-INSTAGRAM_PASSWORD_FIELD = 'password'
+TOKEN_HEADER = 'x-csrftoken'
 
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
+INSTAGRAM_USERNAME_FIELD = 'username'
+INSTAGRAM_PASSWORD_FIELD = 'password'
 
-DEFAULT_FETCH_TIME = 6
-DEFAULT_TOKEN_FETCH_TIME = 4
-DEFAULT_LOGIN_FETCH_TIME = 4
-
-
-PROXY_LINKS = [
-    'https://sslproxies.org',
-    'https://free-proxy-list.net',
-    'https://free-proxy-list.net/anonymous-proxy.html'
-]
-EXTRA_PROXY = 'http://spys.me/proxy.txt'
-
-PASSWORD_FILENAME = "passwords"
-ATTEMPTS_FILENAME = "attempts"
-ALTERATIONS_FILENAME = "alterations"
-NUMBERS_FILENAME = "common_numbers"
-USER_DIRECTORY = "users"
-
-TOKEN_ATTEMPT_LIMIT = 10
-TOKEN_THREAD_LIMIT = 5
-
-LOGIN_ATTEMPT_LIMIT = 4
-LOGIN_THREAD_LIMIT = 2
-
+# Instagram Response
 CHECKPOINT_REQUIRED = "checkpoint_required"
 GENERIC_REQUEST_ERROR = 'generic_request_error'
+
+
+"""
+FIRST_ATTEMPT_LIMIT
+
+The number of initial requests we make asynchronously each with a separate
+proxy before incrementing and trying new proxies.
+
+For Login -  The number of initial requests we make asynchronously, for a single
+password/user, with each request having a different proxy, before we start trying
+new proxies.
+
+The FIRST_ATTEMPT_LIMIT for tokens can be much higher since we only make these
+requests at the beginning.
+"""
+
+
+class LOGIN(object):
+    FETCH_TIME = 4
+    FIRST_ATTEMPT_LIMIT = 2
+
+
+class TOKEN(object):
+    FETCH_TIME = 4
+
+
+class REQUESTS(object):
+    FETCH_TIME = 6
+    MAX_REQUEST_RETRY_LIMIT = 2
+    CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
+    FIRST_ATTEMPT_LIMIT = 5
+
+    token = TOKEN
+    login = LOGIN
+
+    @classmethod
+    def value(cls, name, handler_name=None):
+        default = getattr(cls, name)
+        if handler_name:
+            return getattr(getattr(cls, handler_name), name, default)
+        return default

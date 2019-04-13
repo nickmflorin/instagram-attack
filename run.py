@@ -59,18 +59,6 @@ async def proxy_broker(global_stop_event, proxies, loop):
             break
 
 
-async def engine_runner(user, global_stop_event, proxies, loop, **kwargs):
-    engine = Engine(
-        user,
-        global_stop_event,
-        proxies,
-        **kwargs
-    )
-
-    while not global_stop_event.is_set():
-        await engine.run(loop)
-
-
 def main(config):
 
     global_stop_event = asyncio.Event()
@@ -82,10 +70,17 @@ def main(config):
         loop.add_signal_handler(
             s, lambda s=s: asyncio.create_task(shutdown(loop, signal=s)))
 
+    engine = Engine(
+        config,
+        global_stop_event,
+        proxies,
+    )
+
     loop.run_until_complete(asyncio.gather(*[
         proxy_broker(global_stop_event, proxies, loop),
-        engine_runner(config, global_stop_event, proxies, loop)
+        engine.run(loop)
     ]))
+
     loop.run_until_complete(shutdown(loop))
     loop.close()
 
@@ -94,6 +89,7 @@ async def shutdown(loop, signal=None):
     if signal:
         log.info(f'Received exit signal {signal.name}...')
 
+    log.critical('Shutting down in run.py')
     tasks = [task for task in asyncio.Task.all_tasks() if task is not
          asyncio.tasks.Task.current_task()]
 

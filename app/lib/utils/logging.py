@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 
-import requests
 import aiohttp
 
 from app.lib import exceptions
@@ -14,12 +13,7 @@ __all__ = ('RecordFormatter', )
 
 def get_exception_status_code(exc, formatted=False):
 
-    if isinstance(exc, requests.exceptions.RequestException):
-        if exc.response and exc.response.status_code:
-            if formatted:
-                return RecordAttributes.STATUS_CODE.format(exc.response.status_code)
-            return exc.response.status_code
-    elif isinstance(exc, aiohttp.ClientError):
+    if isinstance(exc, aiohttp.ClientError):
         if formatted:
             return RecordAttributes.STATUS_CODE.format(exc.status)
         return exc.status
@@ -28,12 +22,8 @@ def get_exception_status_code(exc, formatted=False):
 
 
 def get_exception_request_method(exc, formatted=False):
-    if isinstance(exc, requests.exceptions.RequestException):
-        if exc.request and exc.request.method:
-            if formatted:
-                return RecordAttributes.METHOD.format(exc.request.method)
-            return exc.request.method
-    elif isinstance(exc, aiohttp.ClientError):
+
+    if isinstance(exc, aiohttp.ClientError):
         if exc.request_info.method:
             if formatted:
                 return RecordAttributes.METHOD.format(exc.request_info.method)
@@ -45,8 +35,7 @@ def get_exception_message(exc, level, formatted=False):
     if isinstance(level, str):
         level = LoggingLevels[level]
 
-    if (isinstance(exc, requests.exceptions.RequestException) or
-            isinstance(exc, aiohttp.ClientError)):
+    if isinstance(exc, aiohttp.ClientError):
         message = getattr(exc, 'message', None) or exc.__class__.__name__
         if formatted:
             return level.format_message(message)
@@ -158,10 +147,7 @@ class RecordFormatter(object):
             return None
 
         if self.response and not self.status_code:
-            status_code = (
-                getattr(self.response, 'status_code', None) or
-                getattr(self.response, 'status', None)
-            )
+            status_code = self.response.status
             return RecordAttributes.STATUS_CODE.format(status_code)
         elif self.status_code:
             return RecordAttributes.STATUS_CODE.format(self.status_code)

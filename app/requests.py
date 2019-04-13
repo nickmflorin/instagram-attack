@@ -1,7 +1,9 @@
 from __future__ import absolute_import
 
-import random
 import asyncio
+import aiohttp
+
+import random
 import traceback
 
 from app import settings
@@ -23,7 +25,33 @@ future = session.get('https://api.ipify.org?format=json')
 """
 
 
-class request_handler(object):
+class HandlerSettings(object):
+
+    # TODO
+    # ATTEMPT_LIMIT = settings.REQUESTS.ATTEMPT_LIMIT.login
+
+    @property
+    def FIRST_ATTEMPT_LIMIT(self):
+        return settings.REQUESTS.value(
+            'FIRST_ATTEMPT_LIMIT', self.__handlername__)
+
+    @property
+    def CONNECTOR_KEEP_ALIVE_TIMEOUT(self):
+        return settings.REQUESTS.value(
+            'CONNECTOR_KEEP_ALIVE_TIMEOUT', self.__handlername__)
+
+    @property
+    def FETCH_TIME(self):
+        return settings.REQUESTS.value(
+            'FETCH_TIME', self.__handlername__)
+
+    @property
+    def MAX_REQUEST_RETRY_LIMIT(self):
+        return settings.REQUESTS.value(
+            'MAX_REQUEST_RETRY_LIMIT', self.__handlername__)
+
+
+class request_handler(HandlerSettings):
 
     def __init__(self, config, global_stop_event, queues):
         self.config = config
@@ -36,6 +64,36 @@ class request_handler(object):
         headers = settings.HEADER.copy()
         headers['user-agent'] = self.user_agent
         return headers
+
+    def _log_context(self, context, **kwargs):
+        context = {
+            'task': context.name,
+            'proxy': context.proxy,
+        }
+        context.update(**kwargs)
+        return context
+
+    @property
+    def connector(self):
+        """
+        TCPConnector
+        -------------
+        keepalive_timeout (float) – timeout for connection reusing aftet
+            releasing
+        limit_per_host (int) – limit simultaneous connections to the same
+            endpoint (default is 0)
+        """
+        return aiohttp.TCPConnector(
+            ssl=False,
+            keepalive_timeout=self.CONNECTOR_KEEP_ALIVE_TIMEOUT,
+            enable_cleanup_closed=True,
+        )
+
+    @property
+    def timeout(self):
+        return aiohttp.ClientTimeout(
+            total=self.FETCH_TIME
+        )
 
     def log_request(self, context, log, retry=1, method="GET"):
         stack = traceback.extract_stack()
