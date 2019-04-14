@@ -40,18 +40,12 @@ class TokenContext(TaskContext):
     index: int = 0
 
     @property
+    def context_id(self):
+        return 'token'
+
+    @property
     def name(self):
         return f'Token Task - Attempt {self.index}'
-
-    def new(self, proxy):
-        """
-        Creates a copy of the current context with an incremented index
-        and a new proxy.
-        """
-        return self.__class__(
-            proxy=proxy,
-            index=self.index + 1
-        )
 
 
 @dataclass
@@ -62,19 +56,12 @@ class LoginContext(TaskContext):
     index: int = 0
 
     @property
+    def context_id(self):
+        return 'login'
+
+    @property
     def name(self):
         return f'Login Task'
-
-    def new(self, password):
-        """
-        Creates a copy of the current context with an incremented index
-        and a new password.
-        """
-        return self.__class__(
-            password=password,
-            token=self.token,
-            index=self.index + 1
-        )
 
 
 @dataclass
@@ -85,17 +72,9 @@ class LoginAttemptContext(TaskContext):
     proxy: Proxy
     index: int = 0
 
-    def new(self, proxy):
-        """
-        Creates a copy of the current context with an incremented index
-        and a new proxy.
-        """
-        return self.__class__(
-            password=self.password,
-            token=self.token,
-            proxy=proxy,
-            index=self.index + 1
-        )
+    @property
+    def context_id(self):
+        return 'attempt'
 
     @property
     def name(self):

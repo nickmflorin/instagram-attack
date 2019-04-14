@@ -1,7 +1,5 @@
 from __future__ import absolute_import
 
-from app.lib.utils import Styles
-
 
 class LogItem(str):
 
@@ -33,7 +31,9 @@ class LogFormattedLine(LogItem):
 
 class LogLabeledItem(LogItem):
     def __new__(cls, item, label=None, formatter=None, indent=0):
-        prefix = "%s: " % Styles.BOLD.format(label)
+        from .formats import RecordAttributes
+        prefix = RecordAttributes.LABEL.format(label)
+        prefix = "%s: " % prefix
         return LogFormattedLine.__new__(cls, item, prefix=prefix,
             formatter=formatter, indent=indent)
 

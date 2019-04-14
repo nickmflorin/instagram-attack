@@ -4,8 +4,6 @@ import os
 from platform import python_version
 import signal
 import logging
-import logbook
-import sys
 
 import asyncio
 from argparse import ArgumentParser
@@ -14,9 +12,9 @@ from proxybroker import Broker
 
 from app.engine import Engine
 from app.lib import exceptions
-from app.lib.logging import AppLogger, BASE_FORMAT
+from app.lib.logging import AppLogger, create_handlers
 from app.lib.users import User
-from app.lib.utils import (shutdown,
+from app.lib.utils import (
     validate_proxy_sleep, validate_log_level, validate_limit)
 
 # May want to catch other signals too - these are not currently being
@@ -52,9 +50,9 @@ class Configuration(object):
         self.user = User(arguments.username, password=arguments.password)
 
 
-async def proxy_broker(global_stop_event, proxies, loop):
+async def proxy_broker(proxies, loop):
     broker = Broker(proxies, timeout=6, max_conn=50, max_tries=1)
-    while not global_stop_event.is_set():
+    while True:
         try:
             await broker.find(types=['HTTP'])
         # Proxy Broker will get hung up on tasks as we are trying to shut down
@@ -65,24 +63,34 @@ async def proxy_broker(global_stop_event, proxies, loop):
 
 def main(config):
 
-    global_stop_event = asyncio.Event()
     proxies = asyncio.Queue()
+    passwords = asyncio.Queue()
+    attempts = asyncio.Queue()
+    results = asyncio.Queue()
 
     loop = asyncio.get_event_loop()
+    engine = Engine(config, proxies)
 
     for s in SIGNALS:
         loop.add_signal_handler(
-            s, lambda s=s: asyncio.create_task(shutdown(loop, signal=s, log=log)))
+            s, lambda s=s: asyncio.create_task(
+                engine.shutdown(loop, attempts, signal=s, log=log)
+            )
+        )
 
-    engine = Engine(config, global_stop_event, proxies)
+    try:
+        loop.run_until_complete(asyncio.gather(*[
+            proxy_broker(proxies, loop),
+            engine.run(loop, passwords, attempts, results)
+        ]))
 
-    loop.run_until_complete(asyncio.gather(*[
-        proxy_broker(global_stop_event, proxies, loop),
-        engine.run(loop)
-    ]))
-
-    loop.run_until_complete(shutdown(loop, log=log))
-    loop.close()
+        engine.shutdown(loop, attempts, log=log)
+    except KeyboardInterrupt:
+        log.critical('Keyboard Interrupt')
+        engine.shutdown(loop, attempts, force=True, log=log)
+        loop.close()
+    else:
+        loop.close()
 
 
 def get_args():
@@ -109,12 +117,8 @@ if __name__ == '__main__':
         exit()
 
     arguments = get_args()
+    os.environ['INSTAGRAM_LEVEL'] = arguments.level
     config = Configuration(arguments)
 
-    log_handler = logbook.StreamHandler(sys.stdout, level=arguments.level)
-    log_handler.format_string = BASE_FORMAT
-    log_handler.push_application()
-
-    os.environ['INSTAGRAM_LEVEL'] = arguments.level
-
-    main(config)
+    with create_handlers(arguments):
+        main(config)

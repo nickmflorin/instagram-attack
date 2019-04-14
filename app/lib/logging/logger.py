@@ -1,26 +1,17 @@
 from __future__ import absolute_import
 
 import aiohttp
+import contextlib
 import logbook
 import inspect
+import sys
 
-from .formats import LoggingLevels, RecordAttributes, LOGIN_ATTEMPT_FORMAT, TOKEN_TASK_FORMAT
+from .formats import (LoggingLevels, RecordAttributes, APP_FORMAT,
+    LOGIN_TASK_FORMAT, LOGIN_ATTEMPT_FORMAT, TOKEN_TASK_FORMAT)
 from .formatter import LogItem
 
 
-__all__ = ('AppLogger', 'log_attempt_context', 'log_token_context', )
-
-
-# log = logbook.Logger('Main')
-
-# logger_group = logbook.LoggerGroup()
-# logger_group.level = logbook.WARNING
-
-# log1 = logbook.Logger('First')
-# log2 = logbook.Logger('Second')
-
-# logger_group.add_logger(log1)
-# logger_group.add_logger(log2)
+__all__ = ('AppLogger', 'create_handlers', 'contextual_log', )
 
 
 def get_exception_status_code(exc):
@@ -46,14 +37,13 @@ def get_exception_request_method(exc):
 
 
 def get_exception_message(exc):
-    if isinstance(exc, aiohttp.ClientError):
-        message = getattr(exc, 'message', None) or exc.__class__.__name__
-        return message
+    if isinstance(exc, OSError):
+        if hasattr(exc, 'strerror'):
+            return exc.strerror
 
-    # Although these are the same for now, we might want to treat our exceptions
-    # differently in the future.
-    # Maybe return str(exc) if the string length isn't insanely long.
     message = getattr(exc, 'message', None) or str(exc)
+    if message == "":
+        return exc.__class__.__name__
     return message
 
 
@@ -75,36 +65,70 @@ def format_log_message(msg, level):
         return RecordAttributes.MESSAGE.format(msg)
 
 
-def contextual_log(task_format):
-    def _contextual_log(func):
-        arguments = inspect.getargspec(func).args
+def contextual_log(func):
 
-        def wrapper(*args, **kwargs):
-            handler = logbook.StderrHandler()
-            handler.format_string = task_format
+    arguments = inspect.getargspec(func).args
+    try:
+        context_index = arguments.index('context')
+    except IndexError:
+        raise NotImplementedError(
+            "Cannot use decorator on a method that does not take context "
+            "as a positional argument."
+        )
 
-            try:
-                ind = arguments.index('context')
-            except IndexError:
-                raise NotImplementedError(
-                    "Cannot use decorator on a method that does not take context "
-                    "as a positional argument."
-                )
+    def wrapper(*args, **kwargs):
+        context = args[context_index]
 
-            context = args[ind]
+        def inject_context(record):
+            record.extra['context'] = context
 
-            def inject_context(record):
-                record.extra['context'] = context
+        with logbook.Processor(inject_context).threadbound():
+            return func(*args, **kwargs)
 
-            with logbook.Processor(inject_context).threadbound():
-                with handler.threadbound():
-                    return func(*args, **kwargs)
-        return wrapper
-    return _contextual_log
+    return wrapper
 
 
-log_token_context = contextual_log(TOKEN_TASK_FORMAT)
-log_attempt_context = contextual_log(LOGIN_ATTEMPT_FORMAT)
+@contextlib.contextmanager
+def create_handlers(arguments):
+
+    def filter_token_context(r, h):
+        return r.extra['context'] and r.extra['context'].context_id == 'token'
+
+    def filter_login_context(r, h):
+        return r.extra['context'] and r.extra['context'].context_id == 'login'
+
+    def filter_attempt_context(r, h):
+        return r.extra['context'] and r.extra['context'].context_id == 'attempt'
+
+    base_handler = logbook.StreamHandler(sys.stdout, level=arguments.level, bubble=True)
+    base_handler.format_string = APP_FORMAT
+
+    token_handler = logbook.StreamHandler(
+        sys.stdout,
+        level=arguments.level,
+        filter=filter_token_context
+    )
+
+    token_handler.format_string = TOKEN_TASK_FORMAT
+
+    login_handler = logbook.StreamHandler(
+        sys.stdout,
+        level=arguments.level,
+        filter=filter_login_context
+    )
+
+    login_handler.format_string = LOGIN_TASK_FORMAT
+
+    attempt_handler = logbook.StreamHandler(
+        sys.stdout,
+        level=arguments.level,
+        filter=filter_attempt_context
+    )
+
+    attempt_handler.format_string = LOGIN_ATTEMPT_FORMAT
+
+    with base_handler, token_handler, login_handler, attempt_handler:
+        yield
 
 
 class AppLogger(logbook.Logger):
@@ -112,6 +136,7 @@ class AppLogger(logbook.Logger):
     def process_record(self, record):
         logbook.Logger.process_record(self, record)
         level = LoggingLevels[record.level_name]
+
         record.extra['formatted_level_name'] = level.format(record.level_name)
         record.extra['formatted_message'] = format_log_message(
             record.message, level)

@@ -68,16 +68,15 @@ requests at the beginning.
 
 
 class LOGIN(object):
-    FETCH_TIME = 4
-    FIRST_ATTEMPT_LIMIT = 2
+    FETCH_TIME = 8
 
 
 class TOKEN(object):
-    FETCH_TIME = 4
+    FETCH_TIME = 8
 
 
 class REQUESTS(object):
-    FETCH_TIME = 6
+    FETCH_TIME = 8
     MAX_REQUEST_RETRY_LIMIT = 2
     CONNECTOR_KEEP_ALIVE_TIMEOUT = 3.0
     FIRST_ATTEMPT_LIMIT = 5

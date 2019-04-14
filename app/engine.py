@@ -1,6 +1,7 @@
 from __future__ import absolute_import
 
 import time
+import signal
 import sys
 
 import asyncio
@@ -15,14 +16,13 @@ from .handlers import login_handler, token_handler
 __all__ = ('Engine', )
 
 
-log = AppLogger(__file__)
+log = AppLogger('Engine')
 
 
 class proxy_handler(object):
 
-    def __init__(self, config, global_stop_event, generated):
+    def __init__(self, config, generated):
         self.config = config
-        self.global_stop_event = global_stop_event
 
         self.generated = generated
         self.good = asyncio.Queue()
@@ -51,7 +51,7 @@ class proxy_handler(object):
         """
         log.notice('Starting...')
 
-        while not self.global_stop_event.is_set():
+        while True:
             proxy = await self.generated.get()
             if proxy:
                 if self.config.proxysleep:
@@ -65,14 +65,44 @@ class proxy_handler(object):
 
 class Engine(object):
 
-    def __init__(self, config, global_stop_event, proxies):
+    def __init__(self, config, proxies):
 
         self.config = config
-        self.global_stop_event = global_stop_event
 
-        self.proxy_handler = proxy_handler(config, global_stop_event, proxies)
-        self.login_handler = login_handler(config, global_stop_event, self.proxy_handler)
-        self.token_handler = token_handler(config, global_stop_event, self.proxy_handler)
+        self.proxy_handler = proxy_handler(config, proxies)
+        self.login_handler = login_handler(config, self.proxy_handler)
+        self.token_handler = token_handler(config, self.proxy_handler)
+
+        self.consumers = []
+        self.total = None
+
+    async def slowdown(self):
+        log.info(f'Shutting Down {len(self.consumers)} Consumers...')
+        for consumer in self.consumers:
+            consumer.cancel()
+
+    async def shutdown(self, loop, attempts, forced=False, signal=None):
+        log.info("Shutting Down...")
+
+        # We have to do this for now for when we find a successful login,
+        # otherwise we hit an error in run.py about the loop being closed
+        # before all futures finished - being caused by the proxy_broker.
+        if forced:
+            await self.dump_attempts(attempts)
+            sys.exit()
+
+        if signal:
+            log.info(f'Received exit signal {signal.name}...')
+
+        tasks = [task for task in asyncio.Task.all_tasks() if task is not
+             asyncio.tasks.Task.current_task()]
+
+        list(map(lambda task: task.cancel(), tasks))
+        await asyncio.gather(*tasks, return_exceptions=True)
+        log.info('Finished awaiting cancelled tasks, results.')
+
+        await self.dump_attempts(attempts)
+        loop.stop()
 
     async def produce_passwords(self, passwords):
         """
@@ -89,9 +119,10 @@ class Engine(object):
             await passwords.put(password)
             count += 1
 
-    async def consume_results(self, results, attempts):
+    async def consume_results(self, loop, results, attempts):
         log = AppLogger('Consuming Results')
 
+        index = 0
         while True:
             # wait for an item from the producer
             result = await results.get()
@@ -100,14 +131,14 @@ class Engine(object):
                     "Result should be valid and conslusive."
                 )
 
+            index += 1
+            if self.total is not None:
+                log.notice("{0:.2%}".format(float(index) / self.total))
+
             if result.authorized:
                 log.notice(result)
                 log.notice(result.context.password)
-
-                # We are going to have to do this a cleaner way with the global
-                # stop event.
-                await self.dump_attempts(attempts)
-                sys.exit()
+                return await self.shutdown(loop, attempts, forced=True)
             else:
                 log.error(result)
 
@@ -123,11 +154,7 @@ class Engine(object):
             attempts_list.append(await attempts.get())
         self.config.user.update_password_attempts(attempts_list)
 
-    async def run(self, loop):
-
-        passwords = asyncio.Queue()
-        attempts = asyncio.Queue()
-        results = asyncio.Queue()
+    async def run(self, loop, passwords, attempts, results):
 
         proxy_producer = asyncio.ensure_future(
             self.proxy_handler.produce_proxies()
@@ -144,12 +171,14 @@ class Engine(object):
         log.notice("Set Token", extra={'token': token})
 
         results_consumer = asyncio.ensure_future(
-            self.consume_results(results, attempts)
+            self.consume_results(loop, results, attempts)
         )
 
         password_consumer = asyncio.ensure_future(
             self.login_handler.consume_passwords(passwords, results, token)
         )
+
+        self.consumers = [password_consumer, results_consumer, proxy_producer]
 
         # Run the main password producer and wait for completion
         await self.produce_passwords(passwords)
@@ -158,30 +187,30 @@ class Engine(object):
         if answer.lower() != 'y':
             sys.exit()
 
+        self.total = passwords.qsize()
+
         # Wait until the password consumer has processed all the passwords.
         log.debug('Awaiting Password Consumer')
 
+        # Not sure why we need this here and in the run.py file but we'll let it be for now.
+        def signal_handler(sig, frame):
+            self.shutdown(loop, attempts, forced=False)
+        signal.signal(signal.SIGINT, signal_handler)
+
         # TODO: Maybe try to add signals here for keyboard interrupt as well.
+        # await password_consumer
         try:
             await password_consumer
         except Exception as e:
-            log.critical("Uncaught Exception : %s" % str(e))
-            await self.dump_attempts(attempts)
-            sys.exit()
+            log.critical("Uncaught Exception")
+            import ipdb; ipdb.set_trace()
+            log.critical(e)
+            # Having trouble calling this outside of run.py without having issues
+            # closing the loop with ongoing tasks.  So we force.
+            return await self.shutdown(loop, attempts, forced=True)
+        except KeyboardInterrupt:
+            log.critical('Keyboard Interrupt')
+            return await self.shutdown(loop, attempts, forced=True)
         else:
             log.notice('Passwords Consumed')
-
-        # If the consumer is still awaiting for an item, cancel it.
-        log.debug('Cancelling Password Consumer')
-        password_consumer.cancel()
-        log.info('Password Consumer Cancelled')
-
-        log.debug('Cancelling Results Consumer')
-        results_consumer.cancel()
-        log.info('Results Consumer Cancelled')
-
-        log.debug('Cancelling Proxy Producer')
-        proxy_producer.cancel()
-        log.info('Proxy Producer Cancelled')
-
-        await self.dump_attempts(attempts)
+            return await self.slowdown()
