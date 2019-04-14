@@ -14,7 +14,7 @@ from app.engine import Engine
 from app.lib import exceptions
 from app.lib.users import User
 from app.lib.logging import AppLogger
-from app.lib.utils import validate_proxy_sleep, validate_log_level
+from app.lib.utils import validate_proxy_sleep, validate_log_level, validate_limit
 
 # May want to catch other signals too - these are not currently being
 # used, but could probably be expanded upon.
@@ -33,6 +33,9 @@ class Configuration(object):
 
         self.a_sync = arguments.a_sync or not arguments.sync
         self.sync = arguments.sync
+
+        # Limit on the number of passwords to try to login with.
+        self.limit = arguments.limit
         self.test = arguments.test
 
         self.proxysleep = None
@@ -89,7 +92,6 @@ async def shutdown(loop, signal=None):
     if signal:
         log.info(f'Received exit signal {signal.name}...')
 
-    log.critical('Shutting down in run.py')
     tasks = [task for task in asyncio.Task.all_tasks() if task is not
          asyncio.tasks.Task.current_task()]
 
@@ -108,6 +110,7 @@ def get_args():
     args.add_argument('-async', '--async', dest='a_sync', action='store_true')
     args.add_argument('-test', '--test', dest='test', action='store_true')
     args.add_argument('-level', '--level', default='INFO', type=validate_log_level)
+    args.add_argument('-limit', '--limit', default=None, type=validate_limit)
     return args.parse_args()
 
 

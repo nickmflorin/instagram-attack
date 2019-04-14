@@ -4,7 +4,6 @@ import asyncio
 import aiohttp
 
 import random
-import traceback
 
 from app import settings
 
@@ -53,25 +52,17 @@ class HandlerSettings(object):
 
 class request_handler(HandlerSettings):
 
-    def __init__(self, config, global_stop_event, queues):
+    def __init__(self, config, global_stop_event, proxy_handler):
         self.config = config
         self.global_stop_event = global_stop_event
         self.user_agent = random.choice(settings.USER_AGENTS)
         self.stop_event = asyncio.Event()
-        self.queues = queues
+        self.proxy_handler = proxy_handler
 
     def _headers(self):
         headers = settings.HEADER.copy()
         headers['user-agent'] = self.user_agent
         return headers
-
-    def _log_context(self, context, **kwargs):
-        context = {
-            'task': context.name,
-            'proxy': context.proxy,
-        }
-        context.update(**kwargs)
-        return context
 
     @property
     def connector(self):
@@ -96,19 +87,15 @@ class request_handler(HandlerSettings):
         )
 
     def log_request(self, context, log, retry=1, method="GET"):
-        stack = traceback.extract_stack()
-        line_no = stack[-3].lineno
-        file_name = stack[-3].filename
-
         if retry == 1:
             log.info(
                 f'Sending {method.upper()} Request',
-                extra=self._log_context(context, line_no=line_no, file_name=file_name)
+                extra=context.log_context(backstep=3),
             )
         else:
             log.info(
                 f'Sending {method.upper()} Request, Attempt {retry}',
-                extra=self._log_context(context, line_no=line_no, file_name=file_name)
+                extra=context.log_context(backstep=3),
             )
 
     def log_post_request(self, context, log, retry=1):

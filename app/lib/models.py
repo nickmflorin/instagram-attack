@@ -12,7 +12,103 @@ from app.lib import exceptions
 from app.lib.utils import Colors
 
 
-__all__ = ('InstagramResult', )
+@dataclass
+class Proxy:
+
+    host: str
+    port: int
+    valid: bool = False
+
+    def url(self, scheme='http'):
+        return f"{scheme}://{self.host}:{self.port}/"
+
+
+@dataclass
+class TaskContext:
+
+    def log_context(self, **kwargs):
+        data = self.__dict__.copy()
+        data['task'] = self.name
+        data.update(**kwargs)
+        return data
+
+
+@dataclass
+class TokenContext(TaskContext):
+
+    proxy: Proxy
+    index: int = 0
+
+    @property
+    def name(self):
+        return f'Token Task - Attempt {self.index}'
+
+    def new(self, proxy):
+        """
+        Creates a copy of the current context with an incremented index
+        and a new proxy.
+        """
+        return self.__class__(
+            proxy=proxy,
+            index=self.index + 1
+        )
+
+
+@dataclass
+class LoginContext(TaskContext):
+
+    password: str
+    token: str
+    index: int = 0
+
+    @property
+    def name(self):
+        return f'Login Task'
+
+    def new(self, password):
+        """
+        Creates a copy of the current context with an incremented index
+        and a new password.
+        """
+        return self.__class__(
+            password=password,
+            token=self.token,
+            index=self.index + 1
+        )
+
+
+@dataclass
+class LoginAttemptContext(TaskContext):
+
+    password: str
+    token: str
+    proxy: Proxy
+    index: int = 0
+
+    def new(self, proxy):
+        """
+        Creates a copy of the current context with an incremented index
+        and a new proxy.
+        """
+        return self.__class__(
+            password=self.password,
+            token=self.token,
+            proxy=proxy,
+            index=self.index + 1
+        )
+
+    @property
+    def name(self):
+        return f'Login Task - Attempt {self.index}'
+
+    @classmethod
+    def using_context(cls, context, **kwargs):
+        return cls(
+            index=kwargs.get('index') or context.index,
+            password=kwargs.get('password') or context.password,
+            token=kwargs.get('token') or context.token,
+            proxy=kwargs.get('proxy') or context.proxy,
+        )
 
 
 @dataclass
@@ -31,6 +127,7 @@ class InstagramResultErrors:
 @dataclass
 class InstagramResult:
 
+    context: LoginAttemptContext
     status: str
     user: Optional[bool]
     authenticated: Optional[bool]
@@ -48,7 +145,8 @@ class InstagramResult:
         return Colors.RED.format(string_rep)
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data, context):
+        data['context'] = context
         return from_dict(data_class=cls, data=data)
 
     @property
@@ -76,6 +174,7 @@ class InstagramResult:
         # should be returned by the request with a state of the result.
         # Checkpoint URL is the only thing that would vary
         current_state = self.__dict__.copy()
+        del current_state['context']
         if 'checkpoint_url' in current_state:
             del current_state['checkpoint_url']
         return current_state == self.checkpoint_required_state

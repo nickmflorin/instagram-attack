@@ -6,6 +6,7 @@ from app.lib import exceptions
 
 from .formatting import LoggingLevels, RecordAttributes, Styles
 from .misc import array_string
+from .traceback import log_tb_context
 
 
 __all__ = ('RecordFormatter', )
@@ -98,19 +99,15 @@ class RecordFormatter(object):
 
     @property
     def _traceback(self):
-        # See note in AppLogger.makeRecord()
-        # If line_no and file_name not explicitly provided, or we are not in
-        # DEBUG, CRITICAL or ERROR levels, don't include in message.
-        if (
-            not (self.line_no and self.file_name) and
-                self.levelname not in ('ERROR', 'CRITICAL', 'DEBUG')
-        ):
-            return None
+        if self.backstep:
+            context = log_tb_context(backstep=self.backstep + 3)
+            lineno = context['lineno']
+            filename = context['filename']
+        else:
+            lineno = self.lineno
+            filename = self.filename
 
-        lineno = self.line_no or self.lineno
-        filename = self.file_name or self.filename
-        if lineno and filename:
-            return f"({filename}, {Styles.BOLD.format(lineno)})"
+        return f"({filename}, {Styles.BOLD.format(lineno)})"
 
     @property
     def _proxy(self):

@@ -26,6 +26,7 @@ def auto_logger(*args):
             level = getattr(logging, level)
             log.setLevel(level)
 
+            log.debug('Starting...')
             return func(instance, *args, **kwargs)
         return wrapper
 

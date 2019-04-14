@@ -1,12 +1,8 @@
 from __future__ import absolute_import
 
 
-__all__ = ('format_proxy', 'get_token_from_cookies', 'get_cookies_from_response',
+__all__ = ('get_token_from_cookies', 'get_cookies_from_response',
     'get_token_from_response')
-
-
-def format_proxy(proxy, scheme='http'):
-    return f"{scheme}://{proxy.host}:{proxy.port}/"
 
 
 def get_token_from_cookies(cookies):

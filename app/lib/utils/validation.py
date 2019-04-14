@@ -10,6 +10,13 @@ def validate_proxy_sleep(n):
         raise ArgumentTypeError("--proxysleep must be a valid integer")
 
 
+def validate_limit(n):
+    try:
+        return int(n)
+    except TypeError:
+        raise ArgumentTypeError("--limit must be a valid integer")
+
+
 def validate_log_level(val):
     levels = [
         'INFO',

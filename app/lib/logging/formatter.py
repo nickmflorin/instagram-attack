@@ -121,6 +121,7 @@ class AppLogFormatter(logging.Formatter):
                 LogLineItem(formatted_date),  # Time Prefix
                 LogLineItem(
                     wrapper._levelname,
+                    wrapper._name,
                     wrapper._threadName,
                     wrapper._task,
                     separator='-',

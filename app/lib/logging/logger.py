@@ -4,7 +4,7 @@ import logging
 
 from colorama import init
 
-from app.lib.utils import Format, Colors, Styles
+from app.lib.utils import Format, Colors, Styles, log_tb_context
 from .formatter import AppLogFormatter
 
 
@@ -57,7 +57,10 @@ class AppLogger(logging.Logger):
         """
         extra = extra or {}
         for key, val in extra.items():
-            setattr(record, key, val)
+            if key == 'backstep':
+                setattr(record, key, val + 1)
+            else:
+                setattr(record, key, val)
         return record
 
     def stringify_item(self, key, val):
@@ -75,4 +78,6 @@ class AppLogger(logging.Logger):
     def success(self, message, *args, **kwargs):
         kwargs.setdefault('extra', {})
         kwargs['extra']['isSuccess'] = True
+        kwargs['extra']['backstep'] = kwargs['extra'].get('backstep', 0) + 1
+
         super(AppLogger, self).info(message, *args, **kwargs)
