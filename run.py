@@ -64,7 +64,6 @@ async def proxy_broker(proxies, loop):
 def main(config):
 
     proxies = asyncio.Queue()
-    passwords = asyncio.Queue()
     attempts = asyncio.Queue()
     results = asyncio.Queue()
 
@@ -81,13 +80,13 @@ def main(config):
     try:
         loop.run_until_complete(asyncio.gather(*[
             proxy_broker(proxies, loop),
-            engine.run(loop, passwords, attempts, results)
+            engine.run(loop, attempts, results)
         ]))
 
-        engine.shutdown(loop, attempts, log=log)
+        loop.run_until_complete(engine.shutdown(loop, attempts, forced=False))
     except KeyboardInterrupt:
         log.critical('Keyboard Interrupt')
-        engine.shutdown(loop, attempts, force=True, log=log)
+        loop.run_until_complete(engine.shutdown(loop, attempts, forced=True))
         loop.close()
     else:
         loop.close()

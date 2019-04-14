@@ -71,6 +71,7 @@ class LoginAttemptContext(TaskContext):
     token: str
     proxy: Proxy
     index: int = 0
+    parent_index: int = 0
 
     @property
     def context_id(self):
@@ -78,16 +79,7 @@ class LoginAttemptContext(TaskContext):
 
     @property
     def name(self):
-        return f'Login Task - Attempt {self.index}'
-
-    @classmethod
-    def using_context(cls, context, **kwargs):
-        return cls(
-            index=kwargs.get('index') or context.index,
-            password=kwargs.get('password') or context.password,
-            token=kwargs.get('token') or context.token,
-            proxy=kwargs.get('proxy') or context.proxy,
-        )
+        return f'Login Task {self.parent_index} - Attempt {self.index}'
 
 
 @dataclass

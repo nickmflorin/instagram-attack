@@ -198,8 +198,9 @@ class alteration_core_generator(core_password_generator):
 # in the previous attempts after additional alterations performed.
 class password_generator(core_password_generator):
 
-    def __init__(self, user):
+    def __init__(self, user, limit):
         self.user = user
+        self.limit = limit
         self.attempts = self.user.get_password_attempts()
 
         alterations = self.user.get_password_alterations()
@@ -231,18 +232,35 @@ class password_generator(core_password_generator):
         )
 
     def __call__(self):
+        self.user.num_passwords = 0
         for base_alteration in self.base_generator():
             if base_alteration not in self.attempts:
-                yield base_alteration
+                if not self.limit or self.user.num_passwords <= self.limit:
+                    self.user.num_passwords += 1
+                    yield base_alteration
+                else:
+                    return
 
             for alteration in self.alteration_generator(base_alteration):
                 if alteration not in self.attempts:
-                    yield alteration
+                    if not self.limit or self.user.num_passwords <= self.limit:
+                        self.user.num_passwords += 1
+                        yield alteration
+                    else:
+                        return
 
             for numeric_alteration in self.numeric_generator(base_alteration):
                 if numeric_alteration not in self.attempts:
-                    yield numeric_alteration
+                    if not self.limit or self.user.num_passwords <= self.limit:
+                        self.user.num_passwords += 1
+                        yield numeric_alteration
+                    else:
+                        return
 
                 for alteration in self.alteration_generator(numeric_alteration):
                     if alteration not in self.attempts:
-                        yield alteration
+                        if not self.limit or self.user.num_passwords <= self.limit:
+                            self.user.num_passwords += 1
+                            yield alteration
+                        else:
+                            return

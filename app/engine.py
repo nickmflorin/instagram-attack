@@ -104,21 +104,6 @@ class Engine(object):
         await self.dump_attempts(attempts)
         loop.stop()
 
-    async def produce_passwords(self, passwords):
-        """
-        Retrieves passwords generated passwords that have not been attempted
-        from the User object and populates the password queue.
-        """
-        log = AppLogger('Producing Passwords')
-        log.notice('Starting...')
-
-        count = 0
-        for password in self.config.user.get_new_attempts():
-            if self.config.limit is not None and count == self.config.limit:
-                break
-            await passwords.put(password)
-            count += 1
-
     async def consume_results(self, loop, results, attempts):
         log = AppLogger('Consuming Results')
 
@@ -132,8 +117,7 @@ class Engine(object):
                 )
 
             index += 1
-            if self.total is not None:
-                log.notice("{0:.2%}".format(float(index) / self.total))
+            log.notice("{0:.2%}".format(float(index) / self.config.user.num_passwords))
 
             if result.authorized:
                 log.notice(result)
@@ -154,7 +138,7 @@ class Engine(object):
             attempts_list.append(await attempts.get())
         self.config.user.update_password_attempts(attempts_list)
 
-    async def run(self, loop, passwords, attempts, results):
+    async def run(self, loop, attempts, results):
 
         proxy_producer = asyncio.ensure_future(
             self.proxy_handler.produce_proxies()
@@ -175,27 +159,13 @@ class Engine(object):
         )
 
         password_consumer = asyncio.ensure_future(
-            self.login_handler.consume_passwords(passwords, results, token)
+            self.login_handler.consume_passwords(loop, results, token)
         )
 
         self.consumers = [password_consumer, results_consumer, proxy_producer]
 
-        # Run the main password producer and wait for completion
-        await self.produce_passwords(passwords)
-        log.notice('Passwords Produced')
-        answer = input("Total of %s passwords, continue?" % passwords.qsize())
-        if answer.lower() != 'y':
-            sys.exit()
-
-        self.total = passwords.qsize()
-
         # Wait until the password consumer has processed all the passwords.
         log.debug('Awaiting Password Consumer')
-
-        # Not sure why we need this here and in the run.py file but we'll let it be for now.
-        def signal_handler(sig, frame):
-            self.shutdown(loop, attempts, forced=False)
-        signal.signal(signal.SIGINT, signal_handler)
 
         # TODO: Maybe try to add signals here for keyboard interrupt as well.
         # await password_consumer
@@ -203,7 +173,6 @@ class Engine(object):
             await password_consumer
         except Exception as e:
             log.critical("Uncaught Exception")
-            import ipdb; ipdb.set_trace()
             log.critical(e)
             # Having trouble calling this outside of run.py without having issues
             # closing the loop with ongoing tasks.  So we force.

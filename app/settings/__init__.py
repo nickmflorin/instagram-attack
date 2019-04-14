@@ -66,6 +66,9 @@ The FIRST_ATTEMPT_LIMIT for tokens can be much higher since we only make these
 requests at the beginning.
 """
 
+REQUEST_BATCH_SIZE = 100
+CONNECTOR_LIMIT = 200
+
 
 class LOGIN(object):
     FETCH_TIME = 8

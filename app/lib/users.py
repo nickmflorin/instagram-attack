@@ -39,6 +39,7 @@ class User(object):
     def __init__(self, username, password=None):
         self.username = username
         self.password = password
+        self.num_passwords = 0
         self.create_files()
 
     @classmethod
@@ -205,11 +206,11 @@ class User(object):
 
         self._write_password_attempts(all_attempts)
 
-    def get_new_attempts(self):
+    def get_new_attempts(self, limit=None):
         """
         For now, just returning current passwords for testing, but we will
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        generator = password_generator(self)
-        return generator()
+        generator = password_generator(self, limit=limit)
+        yield from generator()

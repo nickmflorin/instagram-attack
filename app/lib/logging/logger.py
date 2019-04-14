@@ -6,6 +6,8 @@ import logbook
 import inspect
 import sys
 
+from app.lib import exceptions
+
 from .formats import (LoggingLevels, RecordAttributes, APP_FORMAT,
     LOGIN_TASK_FORMAT, LOGIN_ATTEMPT_FORMAT, TOKEN_TASK_FORMAT)
 from .formatter import LogItem
@@ -42,20 +44,29 @@ def get_exception_message(exc):
             return exc.strerror
 
     message = getattr(exc, 'message', None) or str(exc)
-    if message == "":
+    if message == "" or message is None:
         return exc.__class__.__name__
     return message
 
 
 def format_exception_message(exc, level):
-    return LogItem(
-        LogItem(get_exception_request_method(exc),
-            formatter=RecordAttributes.METHOD),
-        LogItem(get_exception_message(exc),
-            formatter=level),
-        LogItem(get_exception_status_code(exc),
-            formatter=RecordAttributes.STATUS_CODE)
-    )
+    items = []
+
+    method = get_exception_request_method(exc)
+    if method:
+        items.append(
+            LogItem(method, formatter=RecordAttributes.METHOD),
+        )
+
+    message = get_exception_message(exc)
+    items.append(LogItem(message, formatter=level))
+
+    status_code = get_exception_status_code(exc)
+    if status_code:
+        items.append(
+            LogItem(status_code, formatter=RecordAttributes.STATUS_CODE),
+        )
+    return LogItem(*tuple(items))
 
 
 def format_log_message(msg, level):
@@ -65,6 +76,7 @@ def format_log_message(msg, level):
         return RecordAttributes.MESSAGE.format(msg)
 
 
+# This currently doesn't seem to be working...
 def contextual_log(func):
 
     arguments = inspect.getargspec(func).args
