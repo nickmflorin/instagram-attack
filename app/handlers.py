@@ -4,16 +4,15 @@ import asyncio
 import aiohttp
 
 import random
-import logbook
 
 from app import settings
 from app.lib import exceptions
 from app.lib.utils import get_token_from_response, cancel_remaining_tasks
-from app.lib.logging import login_attempt_log, token_task_log
+from app.lib.logging import AppLogger, log_attempt_context, log_token_context
 from app.lib.models import InstagramResult, LoginAttemptContext, LoginContext, TokenContext
 
 
-log = logbook.Logger(__file__)
+log = AppLogger(__file__)
 
 
 class HandlerSettings(object):
@@ -110,11 +109,11 @@ class token_handler(request_handler):
             raise exceptions.TokenNotInResponse()
         return token
 
-    @token_task_log
+    @log_token_context
     async def request(self, session, context, retry=1):
-        log = logbook.Logger('Token Fetch')
+        log = AppLogger('Token Fetch')
 
-        # self.log_get_request(context, log, retry=retry)
+        self.log_get_request(context, log, retry=retry)
 
         try:
             async with session.get(
@@ -129,15 +128,15 @@ class token_handler(request_handler):
                 try:
                     token = self._get_token_from_response(response)
                 except exceptions.TokenNotInResponse as e:
-                    log.warning(e, extra={'context': context})
+                    log.warning(e)
                     return None
                 else:
-                    log.notice('Got Token', extra={'context': context})
+                    log.notice('Got Token')
                     await self.proxy_handler.good.put(context.proxy)
                     return token
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
-            log.warning(e, extra={'context': context})
+            log.warning(e)
 
             # We probably want to lower this number
             if retry < self.MAX_REQUEST_RETRY_LIMIT:
@@ -146,18 +145,18 @@ class token_handler(request_handler):
                 retry += 1
                 return await self.request(session, context, retry=retry)
             else:
-                log.error(e, extra={'context': context})
+                log.error(e)
                 return None
 
         except aiohttp.ClientError as e:
-            log.error(e, extra={'context': context})
+            log.error(e)
             return None
 
         except asyncio.CancelledError:
             return None
 
         except (TimeoutError, asyncio.TimeoutError) as e:
-            log.error('TimeoutError', extra={'context': context})
+            log.error('TimeoutError')
         except Exception as e:
             raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
 
@@ -196,7 +195,7 @@ class token_handler(request_handler):
                 if context.index > self.FIRST_ATTEMPT_LIMIT:
                     break
 
-                log.info("Fetching Token", extra={'context': context})
+                log.info("Fetching Token")
                 task = asyncio.ensure_future(self.request(session, context))
                 tasks.append(task)
 
@@ -236,7 +235,7 @@ class login_handler(request_handler):
         else:
             return InstagramResult.from_dict(result, context)
 
-    @login_attempt_log
+    @log_attempt_context
     async def _handle_client_response(self, response, context):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
@@ -249,7 +248,7 @@ class login_handler(request_handler):
         via a `checkpoint_required` value, we cannot raise_for_status until after
         we try to first get the response json.
         """
-        log = logbook.Logger('Handling Client Response')
+        log = AppLogger('Handling Client Response')
 
         if response.status >= 400 and response.status < 500:
             log.debug('Response Status Code : %s' % response.status)
@@ -263,8 +262,7 @@ class login_handler(request_handler):
                 return await self._get_result_from_response(response, context)
             except exceptions.ResultNotInResponse as e:
                 raise exceptions.FatalException(
-                    "Unexpected behavior, result should be in response.",
-                    extra=context.log_context(response=response)
+                    "Unexpected behavior, result should be in response."
                 )
 
     async def _handle_parsed_result(self, result, context):
@@ -282,7 +280,7 @@ class login_handler(request_handler):
                 raise exceptions.InstagramResultError("Inconslusive result.")
             return result
 
-    @login_attempt_log
+    @log_attempt_context
     async def request(self, session, context, retry=1):
         """
         Do not want to automatically raise for status because we can have
@@ -292,7 +290,7 @@ class login_handler(request_handler):
         the response.json().
         """
         # Autologger not working because of keyword argument
-        log = logbook.Logger('Login Request')
+        log = AppLogger('Login Request')
         self.log_post_request(context, log, retry=retry)
 
         try:
@@ -312,16 +310,16 @@ class login_handler(request_handler):
                     result = await self._handle_parsed_result(result, context)
 
                 except exceptions.ResultNotInResponse as e:
-                    log.error(e, extra=context.log_context(response=response))
+                    log.error(e, extra={'response': response})
 
                 except exceptions.InstagramResultError as e:
-                    log.error(e, extra=context.log_context(response=response))
+                    log.error(e, extra={'response': response})
 
                 else:
                     if not result:
                         raise exceptions.FatalException("Result should not be None here.")
 
-                    log.debug('Putting Proxy in Good Queue', extra={'proxy': context.proxy})
+                    log.debug('Putting Proxy in Good Queue')
                     self.proxy_handler.good.put_nowait(context.proxy)
                     return result
 
@@ -331,22 +329,36 @@ class login_handler(request_handler):
             # We probably want to lower this number
             if retry < self.MAX_REQUEST_RETRY_LIMIT:
                 # Session should still be alive.
-                log.debug('Connection Error... Sleeping')
+                log.info('Connection Error... Sleeping')
                 await asyncio.sleep(1)
-                log.debug('Connection Error... Retrying')
+                log.info('Connection Error... Retrying')
                 return await self.request(session, context, retry=retry)
             else:
                 log.error(e, extra=context.log_context())
                 return None
 
+        except OSError as e:
+            # We have only seen this for the following:
+            # OSError: [Errno 24] Too many open files
+            # But for now it's safer to just sleep on the general exception than
+            # check for the exception code explicitly.
+
+            # TODO: Make sure that this isn't also a connection reset by peer
+            # exception, in which case we might want to not sleep but instead
+            # just return and move onto next proxy.
+            log.error(str(e), extra=context.log_context())
+            log.warning('Sleeping for %s Seconds...' % 5)
+            await asyncio.sleep(5)
+            return await self.request(session, context, retry=retry)
+
         except asyncio.TimeoutError as e:
-            log.error('TimeoutError', extra=context.log_context())
+            log.error('TimeoutError')
         except aiohttp.ClientError as e:
-            log.error(e, extra=context.log_context())
+            log.error(e)
         except Exception as e:
             raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
 
-    @login_attempt_log
+    @log_attempt_context
     async def attempt_login(self, session, context, results):
         """
         Instead of doing these one after another, we might be able to stagger
@@ -362,7 +374,7 @@ class login_handler(request_handler):
         Should we incorporate some type of limit here, so that we don't wind
         up trying to login with same password 100 times for safety?
         """
-        log = logbook.Logger('Login Attempt')
+        log = AppLogger('Login Attempt')
 
         stop_event = asyncio.Event()
         index = 0
@@ -379,12 +391,11 @@ class login_handler(request_handler):
             index += 1
             log.info(context)
 
-            log.info('Attempting Login {}...'.format(context.password),
-                extra={'context': context})
+            log.info('Attempting Login {}...'.format(context.password))
             result = await self.request(session, context)
 
             if result and result.conclusive:
-                log.debug('Got Conclusive Result', extra={'context': context})
+                log.debug('Got Conclusive Result')
                 # Returning and setting stop event is kind of redundant since these
                 # are running synchronously.
                 stop_event.set()
@@ -393,9 +404,9 @@ class login_handler(request_handler):
 
             else:
                 if result is None:
-                    log.debug('Got Null Result', extra={'context': context})
+                    log.debug('Got Null Result')
                 else:
-                    log.debug('Got Inconclusive Result', extra={'context': context})
+                    log.debug('Got Inconclusive Result')
 
     async def consume_passwords(self, passwords, results, token):
         """
@@ -437,7 +448,7 @@ class login_handler(request_handler):
                     # Increments Index and Uses New Password
                     context = context.new(password)
 
-                log.debug('Creating Login Attempt Future', extra=context.log_context())
+                log.debug('Creating Login Attempt Future', extra={'context': context})
                 task = asyncio.ensure_future(self.attempt_login(session, context, results))
                 tasks.append(task)
 

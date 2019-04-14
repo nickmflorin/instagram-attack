@@ -1,12 +1,12 @@
 from __future__ import absolute_import
 
-import logbook
 import time
 import sys
 
 import asyncio
 
 from app.lib import exceptions
+from app.lib.logging import AppLogger
 from app.lib.models import Proxy
 
 from .handlers import login_handler, token_handler
@@ -15,7 +15,7 @@ from .handlers import login_handler, token_handler
 __all__ = ('Engine', )
 
 
-log = logbook.Logger(__file__)
+log = AppLogger(__file__)
 
 
 class proxy_handler(object):
@@ -79,7 +79,7 @@ class Engine(object):
         Retrieves passwords generated passwords that have not been attempted
         from the User object and populates the password queue.
         """
-        log = logbook.Logger('Producing Passwords')
+        log = AppLogger('Producing Passwords')
         log.notice('Starting...')
 
         count = 0
@@ -90,7 +90,7 @@ class Engine(object):
             count += 1
 
     async def consume_results(self, results, attempts):
-        log = logbook.Logger('Consuming Results')
+        log = AppLogger('Consuming Results')
 
         while True:
             # wait for an item from the producer
@@ -106,6 +106,7 @@ class Engine(object):
 
                 # We are going to have to do this a cleaner way with the global
                 # stop event.
+                await self.dump_attempts(attempts)
                 sys.exit()
             else:
                 log.error(result)
@@ -114,6 +115,13 @@ class Engine(object):
 
             # Notify the queue that the item has been processed
             results.task_done()
+
+    async def dump_attempts(self, attempts):
+        log.info('Dumping Attempts')
+        attempts_list = []
+        while not attempts.empty():
+            attempts_list.append(await attempts.get())
+        self.config.user.update_password_attempts(attempts_list)
 
     async def run(self, loop):
 
@@ -152,8 +160,16 @@ class Engine(object):
 
         # Wait until the password consumer has processed all the passwords.
         log.debug('Awaiting Password Consumer')
-        await password_consumer
-        log.notice('Passwords Consumed')
+
+        # TODO: Maybe try to add signals here for keyboard interrupt as well.
+        try:
+            await password_consumer
+        except Exception as e:
+            log.critical("Uncaught Exception : %s" % str(e))
+            await self.dump_attempts(attempts)
+            sys.exit()
+        else:
+            log.notice('Passwords Consumed')
 
         # If the consumer is still awaiting for an item, cancel it.
         log.debug('Cancelling Password Consumer')
@@ -168,6 +184,4 @@ class Engine(object):
         proxy_producer.cancel()
         log.info('Proxy Producer Cancelled')
 
-        log.info('Dumping Attempts')
-        while not attempts.empty():
-            log.info(await attempts.get())
+        await self.dump_attempts(attempts)
