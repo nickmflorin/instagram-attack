@@ -1,16 +1,19 @@
 from __future__ import absolute_import
 
-import logging
-
 import aiohttp
 import asyncio
 
+import logbook
+
 from app import settings
 from app.lib import exceptions
-from app.lib.utils import auto_logger
+from app.lib.logging import login_attempt_log
 from app.lib.models import InstagramResult, LoginAttemptContext, LoginContext
 
 from .requests import request_handler
+
+
+log = logbook.Logger(__file__)
 
 
 class login_handler(request_handler):
@@ -40,7 +43,8 @@ class login_handler(request_handler):
         else:
             return InstagramResult.from_dict(result, context)
 
-    async def _handle_client_response(self, response, context, log):
+    @login_attempt_log
+    async def _handle_client_response(self, response, context):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
         InstagramResult object.
@@ -52,6 +56,8 @@ class login_handler(request_handler):
         via a `checkpoint_required` value, we cannot raise_for_status until after
         we try to first get the response json.
         """
+        log = logbook.Logger('Handling Client Response')
+
         if response.status >= 400 and response.status < 500:
             log.debug('Response Status Code : %s' % response.status)
             if response.status == 400:
@@ -68,7 +74,7 @@ class login_handler(request_handler):
                     extra=context.log_context(response=response)
                 )
 
-    async def _handle_parsed_result(self, result, context, log):
+    async def _handle_parsed_result(self, result, context):
         """
         Raises an exception if the result that was in the response is either
         non-conclusive or has an error in it.
@@ -83,6 +89,7 @@ class login_handler(request_handler):
                 raise exceptions.InstagramResultError("Inconslusive result.")
             return result
 
+    @login_attempt_log
     async def request(self, session, context, retry=1):
         """
         Do not want to automatically raise for status because we can have
@@ -92,7 +99,7 @@ class login_handler(request_handler):
         the response.json().
         """
         # Autologger not working because of keyword argument
-        log = logging.getLogger('Login')
+        log = logbook.Logger('Login Request')
         self.log_post_request(context, log, retry=retry)
 
         try:
@@ -108,8 +115,8 @@ class login_handler(request_handler):
                 # object
                 try:
                     log.debug('Handling Client Response')
-                    result = await self._handle_client_response(response, context, log)
-                    result = await self._handle_parsed_result(result, context, log)
+                    result = await self._handle_client_response(response, context)
+                    result = await self._handle_parsed_result(result, context)
 
                 except exceptions.ResultNotInResponse as e:
                     log.error(e, extra=context.log_context(response=response))
@@ -146,8 +153,8 @@ class login_handler(request_handler):
         except Exception as e:
             raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
 
-    @auto_logger("Login Attempt")
-    async def attempt_login(self, session, context, results, log):
+    @login_attempt_log
+    async def attempt_login(self, session, context, results):
         """
         Instead of doing these one after another, we might be able to stagger
         them asynchronously.  This would be waiting like 3 seconds in between
@@ -162,28 +169,29 @@ class login_handler(request_handler):
         Should we incorporate some type of limit here, so that we don't wind
         up trying to login with same password 100 times for safety?
         """
+        log = logbook.Logger('Login Attempt')
+
         stop_event = asyncio.Event()
-        attempt_context = None
+        index = 0
 
         while not self.global_stop_event.is_set() and not stop_event.is_set():
 
             proxy = await self.proxy_handler.get_best()
-            if not attempt_context:
-                # Starts Index at 0
-                attempt_context = LoginAttemptContext.using_context(
-                    context, proxy=proxy)
-            else:
-                # Increments Index and Uses New Proxy
-                attempt_context = attempt_context.new(proxy)
+            context = LoginAttemptContext(
+                index=index,
+                proxy=proxy,
+                password=context.password,
+                token=context.token
+            )
+            index += 1
+            log.info(context)
 
-            log.info('Attempting Login {}...'.format(context.password), extra=context.log_context())
-            result = await self.request(session, attempt_context)
+            log.info('Attempting Login {}...'.format(context.password),
+                extra={'context': context})
+            result = await self.request(session, context)
 
             if result and result.conclusive:
-                log.success('Got Conclusive Result', extra=context.log_context())
-                log.error(result.__dict__)
-                if result.authorized:
-                    log.success('Got Authencitated Result', extra=context.log_context())
+                log.debug('Got Conclusive Result', extra={'context': context})
                 # Returning and setting stop event is kind of redundant since these
                 # are running synchronously.
                 stop_event.set()
@@ -192,12 +200,11 @@ class login_handler(request_handler):
 
             else:
                 if result is None:
-                    log.debug('Got Null Result', extra=context.log_context())
+                    log.debug('Got Null Result', extra={'context': context})
                 else:
-                    log.debug('Got Inconclusive Result', extra=context.log_context())
+                    log.debug('Got Inconclusive Result', extra={'context': context})
 
-    @auto_logger("Consuming Passwords")
-    async def consume_passwords(self, passwords, results, token, log):
+    async def consume_passwords(self, passwords, results, token):
         """
         Asyncio Docs:
 
@@ -225,9 +232,6 @@ class login_handler(request_handler):
             connector=self.connector,
             timeout=self.timeout
         ) as session:
-            if passwords.empty():
-                raise Exception('NO PASSWORDS')
-
             while not passwords.empty():
                 # We might have to watch out for empty queue here.
                 password = await passwords.get()

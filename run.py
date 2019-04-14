@@ -4,27 +4,27 @@ import os
 from platform import python_version
 import signal
 import logging
+import sys
 
 import asyncio
 from argparse import ArgumentParser
 
 from proxybroker import Broker
+import logbook
 
 from app.engine import Engine
 from app.lib import exceptions
+from app.lib.logging import APP_FORMAT
 from app.lib.users import User
-from app.lib.logging import AppLogger
 from app.lib.utils import validate_proxy_sleep, validate_log_level, validate_limit
 
 # May want to catch other signals too - these are not currently being
 # used, but could probably be expanded upon.
 SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
-
-logging.setLoggerClass(AppLogger)
-
-log = logging.getLogger(__file__)
 logging.getLogger("proxybroker").setLevel(logging.CRITICAL)
+
+log = logbook.Logger(__file__)
 
 
 class Configuration(object):
@@ -127,6 +127,10 @@ if __name__ == '__main__':
     arguments = get_args()
     config = Configuration(arguments)
 
+    log_handler = logbook.StreamHandler(sys.stdout, level=arguments.level)
+    log_handler.format_string = APP_FORMAT
+    log_handler.push_application()
+
     os.environ['INSTAGRAM_LEVEL'] = arguments.level
-    log.setLevel(getattr(logging, arguments.level))
+
     main(config)

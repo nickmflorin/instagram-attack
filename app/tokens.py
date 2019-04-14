@@ -1,16 +1,20 @@
 from __future__ import absolute_import
 
-import logging
-
 import aiohttp
 import asyncio
 
+import logbook
+
 from app import settings
 from app.lib import exceptions
+from app.lib.logging import token_task_log
 from app.lib.models import TokenContext
-from app.lib.utils import auto_logger, get_token_from_response, cancel_remaining_tasks
+from app.lib.utils import get_token_from_response, cancel_remaining_tasks
 
 from .requests import request_handler
+
+
+log = logbook.Logger(__file__)
 
 
 class token_handler(request_handler):
@@ -23,11 +27,11 @@ class token_handler(request_handler):
             raise exceptions.TokenNotInResponse()
         return token
 
+    @token_task_log
     async def request(self, session, context, retry=1):
+        log = logbook.Logger('Token Fetch')
 
-        # Autologger not working because of keyword argument
-        log = logging.getLogger('Token Task')
-        self.log_get_request(context, log, retry=retry)
+        # self.log_get_request(context, log, retry=retry)
 
         try:
             async with session.get(
@@ -42,15 +46,15 @@ class token_handler(request_handler):
                 try:
                     token = self._get_token_from_response(response)
                 except exceptions.TokenNotInResponse as e:
-                    log.warning(e, extra=context.log_context())
+                    log.warning(e, extra={'context': context})
                     return None
                 else:
-                    log.success('Got Token', extra={'task': context.name})
+                    log.notice('Got Token', extra={'context': context})
                     await self.proxy_handler.good.put(context.proxy)
                     return token
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
-            log.warning(e, extra=context.log_context())
+            log.warning(e, extra={'context': context})
 
             # We probably want to lower this number
             if retry < self.MAX_REQUEST_RETRY_LIMIT:
@@ -59,23 +63,22 @@ class token_handler(request_handler):
                 retry += 1
                 return await self.request(session, context, retry=retry)
             else:
-                log.error(e, extra=context.log_context())
+                log.error(e, extra={'context': context})
                 return None
 
         except aiohttp.ClientError as e:
-            log.error(e, extra=context.log_context())
+            log.error(e, extra={'context': context})
             return None
 
         except asyncio.CancelledError:
             return None
 
         except (TimeoutError, asyncio.TimeoutError) as e:
-            log.error('TimeoutError', extra=context.log_context())
+            log.error('TimeoutError', extra={'context': context})
         except Exception as e:
             raise exceptions.FatalException(f'Uncaught Exception: {str(e)}')
 
-    @auto_logger("Fetching Token")
-    async def fetch(self, log):
+    async def fetch(self):
         """
         Asyncio Docs:
 
@@ -110,7 +113,7 @@ class token_handler(request_handler):
                 if context.index > self.FIRST_ATTEMPT_LIMIT:
                     break
 
-                log.info("Fetching Token", extra=context.log_context())
+                log.info("Fetching Token", extra={'context': context})
                 task = asyncio.ensure_future(self.request(session, context))
                 tasks.append(task)
 

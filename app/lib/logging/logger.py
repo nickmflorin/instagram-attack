@@ -1,83 +1,44 @@
 from __future__ import absolute_import
 
-import logging
+import logbook
 
-from colorama import init
-
-from app.lib.utils import Format, Colors, Styles, log_tb_context
-from .formatter import AppLogFormatter
+from .formatter import LOGIN_ATTEMPT_FORMAT, TOKEN_TASK_FORMAT
 
 
-__all__ = ('AppLogger', )
+__all__ = ('login_attempt_log', 'token_task_log', )
 
 
-class AppLogger(logging.Logger):
+# log = logbook.Logger('Main')
 
-    DATE_FORMAT_OBJ = Format(color=Colors.YELLOW, styles=Styles.DIM)
-    DATE_FORMAT = DATE_FORMAT_OBJ('%Y-%m-%d %H:%M:%S')
+# logger_group = logbook.LoggerGroup()
+# logger_group.level = logbook.WARNING
 
-    FORMAT = "[%(asctime)s]"
+# log1 = logbook.Logger('First')
+# log2 = logbook.Logger('Second')
 
-    __formatter__ = AppLogFormatter
+# logger_group.add_logger(log1)
+# logger_group.add_logger(log2)
 
-    def __init__(self, name):
-        init(autoreset=True)
-        logging.Logger.__init__(self, name)
 
-        logging.SUCCESS = 25  # between WARNING and INFO
-        logging.addLevelName(logging.SUCCESS, 'SUCCESS')
+def token_task_log(func):
+    def wrapper(*args, **kwargs):
+        handler = logbook.StderrHandler()
+        handler.format_string = TOKEN_TASK_FORMAT
+        with handler.threadbound():
+            return func(*args, **kwargs)
+    return wrapper
 
-        self.formatter = self.__formatter__(self.FORMAT, datefmt=self.DATE_FORMAT)
 
-        handler = logging.StreamHandler()
-        handler.setFormatter(self.formatter)
+def login_attempt_log(func):
+    def wrapper(*args, **kwargs):
+        handler = logbook.StderrHandler()
+        handler.format_string = LOGIN_ATTEMPT_FORMAT
+        with handler.threadbound():
+            return func(*args, **kwargs)
+    return wrapper
 
-        self.addHandler(handler)
 
-    def makeRecord(self, name, lvl, fn, lno, msg, args, exc_info, func, extra, sinfo):
-        record = super(AppLogger, self).makeRecord(name, lvl, fn, lno, msg, args,
-            exc_info, func, extra, sinfo)
-        """
-        Currently, we are using error handlers in order to raise certain exceptions
-        so that they are not suppressed and hidden by asyncio.
+token_task_log.logger = logbook.Logger('Token Fetch')
+token_task_log.logger.level = logbook.INFO
 
-        A side-effect is that the line number and file name of those raised
-        exceptions are not from the original stack trace, but the stack trace
-        of where they are handled by the handlers (usually in utils).
-
-        We are not allowed to override these values directly on the record instance,
-        so we cannot use extra={'lineno': ..., 'filename': ...}, so instead
-        we will use different parameters and have our handler override the
-        formatted message.
-
-        >>> log.warning("...", extra={'file_name': ..., 'line_no': ...})
-
-        If file_name or line_no are present, they will override values for
-        lineno and/or filename.
-        """
-        extra = extra or {}
-        for key, val in extra.items():
-            if key == 'backstep':
-                setattr(record, key, val + 1)
-            else:
-                setattr(record, key, val)
-        return record
-
-    def stringify_item(self, key, val):
-        bold_value = Styles.BOLD.encode(val)
-        return f"{key}: {bold_value}"
-
-    def stringify_items(self, **items):
-        string_items = [self.stringify_item(key, val)
-            for key, val in items.items()]
-        return ' '.join(string_items)
-
-    def items(self, **items):
-        self.info(self.stringify_items(**items))
-
-    def success(self, message, *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra']['isSuccess'] = True
-        kwargs['extra']['backstep'] = kwargs['extra'].get('backstep', 0) + 1
-
-        super(AppLogger, self).info(message, *args, **kwargs)
+login_attempt_log.logger = logbook.Logger('Login Attempt')

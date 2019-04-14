@@ -1,12 +1,11 @@
 from __future__ import absolute_import
 
-import logging
-import logging.config
+import logbook
+import sys
 
 import asyncio
 
 from app.lib import exceptions
-from app.lib.utils import auto_logger
 
 from .login import login_handler
 from .tokens import token_handler
@@ -16,7 +15,7 @@ from .proxies import proxy_handler
 __all__ = ('Engine', )
 
 
-log = logging.getLogger(__file__).setLevel(logging.INFO)
+log = logbook.Logger(__file__)
 
 
 class Engine(object):
@@ -30,23 +29,23 @@ class Engine(object):
         self.login_handler = login_handler(config, global_stop_event, self.proxy_handler)
         self.token_handler = token_handler(config, global_stop_event, self.proxy_handler)
 
-    @auto_logger("Producing Passwords")
-    async def produce_passwords(self, passwords, log):
+    async def produce_passwords(self, passwords):
         """
         Retrieves passwords generated passwords that have not been attempted
         from the User object and populates the password queue.
         """
-        log.success('Starting...')
+        log = logbook.Logger('Producing Passwords')
+        log.notice('Starting...')
 
         count = 0
         for password in self.config.user.get_new_attempts():
-            if self.config.limit and count == self.config.limit:
+            if self.config.limit is not None and count == self.config.limit:
                 break
             await passwords.put(password)
             count += 1
 
-    @auto_logger("Consuming Results")
-    async def consume_results(self, results, attempts, log):
+    async def consume_results(self, results, attempts):
+        log = logbook.Logger('Consuming Results')
 
         while True:
             # wait for an item from the producer
@@ -57,13 +56,12 @@ class Engine(object):
                 )
 
             if result.authorized:
-                import sys
+                log.notice(result)
+                log.notice(result.context.password)
 
+                # We are going to have to do this a cleaner way with the global
+                # stop event.
                 sys.exit()
-                # TODO: Set global stop event here.
-                raise exceptions.FatalException("GOT A RESULT BITCH")
-                log.success(result)
-                log.success(result.context.password)
             else:
                 log.error(result)
 
@@ -72,8 +70,7 @@ class Engine(object):
             # Notify the queue that the item has been processed
             results.task_done()
 
-    @auto_logger('Engine')
-    async def run(self, loop, log):
+    async def run(self, loop):
 
         passwords = asyncio.Queue()
         attempts = asyncio.Queue()
@@ -91,7 +88,7 @@ class Engine(object):
                 "a connection error."
             )
 
-        log.success("Set Token", extra={'token': token})
+        log.notice("Set Token", extra={'token': token})
 
         results_consumer = asyncio.ensure_future(
             self.consume_results(results, attempts)
@@ -103,15 +100,15 @@ class Engine(object):
 
         # Run the main password producer and wait for completion
         await self.produce_passwords(passwords)
-        await passwords.put("Ca23tlin083801331")
-        await passwords.put('JIBBERISH')
-        await passwords.put('NONSENSE')
-        log.success('Passwords Produced')
+        log.notice('Passwords Produced')
+        answer = input("Total of %s passwords, continue?" % passwords.qsize())
+        if answer.lower() != 'y':
+            sys.exit()
 
         # Wait until the password consumer has processed all the passwords.
         log.debug('Awaiting Password Consumer')
         await password_consumer
-        log.success('Passwords Consumed')
+        log.notice('Passwords Consumed')
 
         # If the consumer is still awaiting for an item, cancel it.
         log.debug('Cancelling Password Consumer')

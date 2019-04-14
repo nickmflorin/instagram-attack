@@ -69,13 +69,14 @@ class request_handler(HandlerSettings):
         """
         TCPConnector
         -------------
-        keepalive_timeout (float) – timeout for connection reusing aftet
+        keepalive_timeout (float) – timeout for connection reusing after
             releasing
         limit_per_host (int) – limit simultaneous connections to the same
             endpoint (default is 0)
         """
         return aiohttp.TCPConnector(
             ssl=False,
+            limit=100,  # The Default
             keepalive_timeout=self.CONNECTOR_KEEP_ALIVE_TIMEOUT,
             enable_cleanup_closed=True,
         )
@@ -90,12 +91,14 @@ class request_handler(HandlerSettings):
         if retry == 1:
             log.info(
                 f'Sending {method.upper()} Request',
-                extra=context.log_context(backstep=3),
+                extra={'context': context}
+                # extra={'context.log_context(backstep=3)'},
             )
         else:
             log.info(
                 f'Sending {method.upper()} Request, Attempt {retry}',
-                extra=context.log_context(backstep=3),
+                extra={'context': context}
+                # extra=context.log_context(backstep=3),
             )
 
     def log_post_request(self, context, log, retry=1):

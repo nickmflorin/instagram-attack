@@ -2,12 +2,15 @@ from __future__ import absolute_import
 
 import asyncio
 import time
+import logbook
 
 from app.lib.models import Proxy
-from app.lib.utils import auto_logger
 
 
 __all__ = ('proxy_handler', )
+
+
+log = logbook.Logger(__file__)
 
 
 class proxy_handler(object):
@@ -32,8 +35,7 @@ class proxy_handler(object):
             return proxy
         return await self.handled.get()
 
-    @auto_logger('Producing Proxies')
-    async def produce_proxies(self, log):
+    async def produce_proxies(self):
         """
         We are going to use this to better control the flow of proxies into the
         system.
@@ -42,7 +44,7 @@ class proxy_handler(object):
         also may want to validate them in some way before providing them to the
         consumers.
         """
-        log.success('Starting...')
+        log.notice('Starting...')
 
         while not self.global_stop_event.is_set():
             proxy = await self.generated.get()
