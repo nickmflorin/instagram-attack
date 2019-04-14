@@ -16,7 +16,8 @@ from app.engine import Engine
 from app.lib import exceptions
 from app.lib.logging import APP_FORMAT
 from app.lib.users import User
-from app.lib.utils import validate_proxy_sleep, validate_log_level, validate_limit
+from app.lib.utils import (shutdown,
+    validate_proxy_sleep, validate_log_level, validate_limit)
 
 # May want to catch other signals too - these are not currently being
 # used, but could probably be expanded upon.
@@ -71,34 +72,17 @@ def main(config):
 
     for s in SIGNALS:
         loop.add_signal_handler(
-            s, lambda s=s: asyncio.create_task(shutdown(loop, signal=s)))
+            s, lambda s=s: asyncio.create_task(shutdown(loop, signal=s, log=log)))
 
-    engine = Engine(
-        config,
-        global_stop_event,
-        proxies,
-    )
+    engine = Engine(config, global_stop_event, proxies)
 
     loop.run_until_complete(asyncio.gather(*[
         proxy_broker(global_stop_event, proxies, loop),
         engine.run(loop)
     ]))
 
-    loop.run_until_complete(shutdown(loop))
+    loop.run_until_complete(shutdown(loop, log=log))
     loop.close()
-
-
-async def shutdown(loop, signal=None):
-    if signal:
-        log.info(f'Received exit signal {signal.name}...')
-
-    tasks = [task for task in asyncio.Task.all_tasks() if task is not
-         asyncio.tasks.Task.current_task()]
-
-    list(map(lambda task: task.cancel(), tasks))
-    await asyncio.gather(*tasks, return_exceptions=True)
-    log.info('Finished awaiting cancelled tasks, results.')
-    loop.stop()
 
 
 def get_args():

@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
 
-class InstagramAttackException(Exception):
+class AppException(Exception):
     """
     Base exception class for all custom exceptions.
     """
@@ -16,7 +16,7 @@ class InstagramAttackException(Exception):
         return self.message
 
 
-class FatalException(InstagramAttackException):
+class FatalException(AppException):
     """
     Used for checks where we need to make sure something is available or operating
     properly, and if not, the system should shut down.
@@ -24,13 +24,13 @@ class FatalException(InstagramAttackException):
     pass
 
 
-class UserDoesNotExist(InstagramAttackException):
+class UserDoesNotExist(AppException):
     def __init__(self, username):
         message = "The user %s does not exist." % username
         super(UserDoesNotExist, self).__init__(message)
 
 
-class ApiException(InstagramAttackException):
+class ApiException(AppException):
     pass
 
 
