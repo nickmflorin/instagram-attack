@@ -27,6 +27,28 @@ async def proxy_broker(proxies, loop):
             break
 
 
+def start_server(loop):
+
+    host, get_port = '127.0.0.1', 8881  # by default
+    host, port = '127.0.0.1', 8888  # by default
+
+    types = ['HTTP']
+    codes = [200, 301, 302, 400]
+
+    broker = Broker(max_tries=1, loop=loop)
+    get_broker = Broker(max_tries=1, loop=loop)
+
+    broker.serve(host=host, port=port, types=types, limit=100, max_tries=2,
+                 prefer_connect=True, min_req_proxy=3, max_error_rate=0.5,
+                 max_resp_time=4, http_allowed_codes=codes, backlog=100,
+                 post=True)
+
+    get_broker.serve(host=host, port=get_port, types=types, limit=100, max_tries=2,
+                 prefer_connect=True, min_req_proxy=3, max_error_rate=0.5,
+                 max_resp_time=4, http_allowed_codes=codes, backlog=100)
+    return broker, get_broker
+
+
 async def test_proxies(proxies, loop):
     log.notice('Starting Tester')
     while True:

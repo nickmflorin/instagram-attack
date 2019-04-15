@@ -8,7 +8,7 @@ import logging
 import asyncio
 
 from app.engine import Engine
-from app.proxies import proxy_broker
+from app.proxies import proxy_broker, start_server
 from app.logging import AppLogger, create_handlers
 from app.config import get_config
 
@@ -39,17 +39,18 @@ def main(config):
         )
 
     try:
-        loop.run_until_complete(asyncio.gather(*[
-            proxy_broker(proxies, loop),
-            engine.run(loop, attempts, results)
-        ]))
-
+        broker, get_broker = start_server(loop)
+        loop.run_until_complete(engine.run(loop, attempts, results))
         loop.run_until_complete(engine.shutdown(loop, attempts, forced=False))
     except KeyboardInterrupt:
         log.critical('Keyboard Interrupt')
         loop.run_until_complete(engine.shutdown(loop, attempts, forced=True))
+        broker.stop()
+        get_broker.stop()
         loop.close()
     else:
+        broker.stop()
+        get_broker.stop()
         loop.close()
 
 

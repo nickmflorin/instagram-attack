@@ -13,6 +13,14 @@ from app.lib.utils import get_token_from_response, cancel_remaining_tasks
 from app.lib.models import InstagramResult, LoginAttemptContext, LoginContext, TokenContext
 
 
+host, port = '127.0.0.1', 8888  # by default
+PROXY_URL = 'http://%s:%d' % (host, port)
+PROXY_GET_URL = 'http://%s:%d' % (host, 8881)
+
+from app.lib.models import Proxy
+PROXY = Proxy(host=host, port=port)
+
+
 def limited_as_completed(coros, limit):
 
     futures = [
@@ -107,7 +115,7 @@ class token_handler(request_handler):
                 raise_for_status=True,
                 headers=self._headers(),
                 timeout=self.config.fetch_time,
-                proxy=context.proxy.url(scheme='http')
+                proxy=PROXY_GET_URL,
             ) as response:
                 # Raise for status is automatically performed, so we do not have
                 # to have a client response handler.
@@ -117,7 +125,7 @@ class token_handler(request_handler):
                     log.warning(e, extra={'context': context})
                     return None
                 else:
-                    await self.proxy_handler.add_good(context.proxy)
+                    # await self.proxy_handler.add_good(context.proxy)
                     return token
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
@@ -154,8 +162,8 @@ class token_handler(request_handler):
             timeout=self.timeout
         ) as session:
             while index < self.config.token_attempt_limit:
-                proxy = await self.proxy_handler.get_best()
-                context = TokenContext(proxy=proxy, index=index)
+                # proxy = await self.proxy_handler.get_best()
+                context = TokenContext(proxy=PROXY, index=index)
                 index += 1
 
                 task = asyncio.ensure_future(self.request(session, context))
@@ -267,7 +275,7 @@ class login_handler(request_handler):
                 return await self.request(session, context, retry=retry + 1)
             else:
                 log.error(e, extra={'context': context})
-                await self.proxy_handler.note_bad(context.proxy)
+                # await self.proxy_handler.note_bad(context.proxy)
                 return None
 
         try:
@@ -277,7 +285,7 @@ class login_handler(request_handler):
                 headers=self._headers(context.token),
                 data=self._login_data(context.password),
                 timeout=self.config.fetch_time,
-                proxy=context.proxy.url(scheme='http')
+                proxy=PROXY_URL,
             ) as response:
                 # Only reason to log these errors here is to provide the response
                 # object
@@ -288,12 +296,12 @@ class login_handler(request_handler):
 
                 except exceptions.ResultNotInResponse as e:
                     log.error(e, extra={'response': response, 'context': context})
-                    await self.proxy_handler.note_bad(context.proxy)
+                    # await self.proxy_handler.note_bad(context.proxy)
                     return None
 
                 except exceptions.InstagramResultError as e:
                     log.error(e, extra={'response': response, 'context': context})
-                    await self.proxy_handler.note_bad(context.proxy)
+                    # await self.proxy_handler.note_bad(context.proxy)
                     return None
 
                 else:
@@ -301,7 +309,7 @@ class login_handler(request_handler):
                         raise exceptions.FatalException("Result should not be None here.")
 
                     log.debug('Putting Proxy in Good Queue')
-                    await self.proxy_handler.add_good(context.proxy)
+                    # await self.proxy_handler.add_good(context.proxy)
                     return result
 
         except RuntimeError as e:
@@ -320,7 +328,7 @@ class login_handler(request_handler):
 
         except aiohttp.ClientConnectionError as e:
             log.error(e, extra={'context': context})
-            await self.proxy_handler.note_bad(context.proxy)
+            # await self.proxy_handler.note_bad(context.proxy)
             return None
 
         except OSError as e:
@@ -331,7 +339,7 @@ class login_handler(request_handler):
             # we want to move on to a new proxy.
             if e.errno == 54:
                 log.error(e, extra={'context': context})
-                await self.proxy_handler.note_bad(context.proxy)
+                # await self.proxy_handler.note_bad(context.proxy)
                 return None
             elif e.errno == 24:
                 return await handle_retry(e, time=3)
@@ -349,7 +357,7 @@ class login_handler(request_handler):
             if e.status == 429:
                 e.message = 'Too many requests.'
             log.error(e, extra={'context': context})
-            await self.proxy_handler.note_bad(context.proxy)
+            # await self.proxy_handler.note_bad(context.proxy)
             return None
 
     @contextual_log
@@ -364,11 +372,11 @@ class login_handler(request_handler):
 
         index = 0
         while True:
-            proxy = await self.proxy_handler.get_best()
+            # proxy = await self.proxy_handler.get_best()
             context = LoginAttemptContext(
                 index=index,
                 parent_index=context.index,
-                proxy=proxy,
+                proxy=PROXY,
                 password=context.password,
                 token=context.token
             )

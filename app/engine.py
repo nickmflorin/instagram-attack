@@ -72,7 +72,7 @@ class Engine(object):
 
             index += 1
             log.notice("{0:.2%}".format(float(index) / self.config.user.num_passwords))
-
+            log.notice(result)
             if result.authorized:
                 log.notice(result)
                 log.notice(result.context.password)
@@ -94,9 +94,9 @@ class Engine(object):
 
     async def run(self, loop, attempts, results):
 
-        proxy_producer = asyncio.ensure_future(
-            self.proxy_handler.produce_proxies()
-        )
+        # proxy_producer = asyncio.ensure_future(
+        #     self.proxy_handler.produce_proxies()
+        # )
 
         token = await self.token_handler.fetch()
         if token is None:
@@ -116,7 +116,7 @@ class Engine(object):
             self.login_handler.consume_passwords(loop, results, token)
         )
 
-        self.consumers = [password_consumer, results_consumer, proxy_producer]
+        self.consumers = [password_consumer, results_consumer]
 
         # Wait until the password consumer has processed all the passwords.
         log.debug('Awaiting Password Consumer')
