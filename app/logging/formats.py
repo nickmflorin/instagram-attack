@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from enum import Enum
 
-from app.lib.utils import Format, Colors, Styles
+from app.lib.formatting import Format, Colors, Styles
 
 from .formatter import LogFormattedString, LogFormattedLine, LogLabeledItem, LogItem
 

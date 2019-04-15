@@ -1,12 +1,12 @@
 from __future__ import absolute_import
 
-import aiohttp
 import contextlib
 import logbook
 import inspect
 import sys
 
-from app.lib import exceptions
+from app.lib.utils import (
+    get_exception_request_method, get_exception_message, get_exception_status_code)
 
 from .formats import (LoggingLevels, RecordAttributes, APP_FORMAT,
     LOGIN_TASK_FORMAT, LOGIN_ATTEMPT_FORMAT, TOKEN_TASK_FORMAT)
@@ -14,39 +14,6 @@ from .formatter import LogItem
 
 
 __all__ = ('AppLogger', 'create_handlers', 'contextual_log', )
-
-
-def get_exception_status_code(exc):
-
-    if isinstance(exc, aiohttp.ClientError):
-        if hasattr(exc, 'status'):
-            return exc.status
-        elif hasattr(exc, 'status_code'):
-            return exc.status_code
-        else:
-            return None
-    else:
-        return None
-
-
-def get_exception_request_method(exc):
-
-    if isinstance(exc, aiohttp.ClientError):
-        if hasattr(exc, 'request_info'):
-            if exc.request_info.method:
-                return exc.request_info.method
-    return None
-
-
-def get_exception_message(exc):
-    if isinstance(exc, OSError):
-        if hasattr(exc, 'strerror'):
-            return exc.strerror
-
-    message = getattr(exc, 'message', None) or str(exc)
-    if message == "" or message is None:
-        return exc.__class__.__name__
-    return message
 
 
 def format_exception_message(exc, level):
@@ -101,7 +68,7 @@ def contextual_log(func):
 
 
 @contextlib.contextmanager
-def create_handlers(arguments):
+def create_handlers(config):
 
     def filter_token_context(r, h):
         return r.extra['context'] and r.extra['context'].context_id == 'token'
@@ -112,12 +79,12 @@ def create_handlers(arguments):
     def filter_attempt_context(r, h):
         return r.extra['context'] and r.extra['context'].context_id == 'attempt'
 
-    base_handler = logbook.StreamHandler(sys.stdout, level=arguments.level, bubble=True)
+    base_handler = logbook.StreamHandler(sys.stdout, level=config.level, bubble=True)
     base_handler.format_string = APP_FORMAT
 
     token_handler = logbook.StreamHandler(
         sys.stdout,
-        level=arguments.level,
+        level=config.level,
         filter=filter_token_context
     )
 
@@ -125,7 +92,7 @@ def create_handlers(arguments):
 
     login_handler = logbook.StreamHandler(
         sys.stdout,
-        level=arguments.level,
+        level=config.level,
         filter=filter_login_context
     )
 
@@ -133,7 +100,7 @@ def create_handlers(arguments):
 
     attempt_handler = logbook.StreamHandler(
         sys.stdout,
-        level=arguments.level,
+        level=config.level,
         filter=filter_attempt_context
     )
 

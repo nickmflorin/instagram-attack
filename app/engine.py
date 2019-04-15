@@ -1,66 +1,20 @@
 from __future__ import absolute_import
 
-import time
-import signal
 import sys
 
 import asyncio
 
 from app.lib import exceptions
-from app.lib.logging import AppLogger
-from app.lib.models import Proxy
+from app.logging import AppLogger
 
 from .handlers import login_handler, token_handler
+from .proxies import proxy_handler
 
 
 __all__ = ('Engine', )
 
 
 log = AppLogger('Engine')
-
-
-class proxy_handler(object):
-
-    def __init__(self, config, generated):
-        self.config = config
-
-        self.generated = generated
-        self.good = asyncio.Queue()
-        self.handled = asyncio.Queue()
-
-    async def get_best(self):
-        # We could run into race conditions here - we may want to have a try
-        # except.
-        if not self.good.empty():
-            # Don't want to immediately put proxies back in because we will
-            # hit too many requests with same proxy, we shoudl eventually
-            # start using a proxy list.
-            proxy = await self.good.get()
-            # self.good.put_nowait(proxy)
-            return proxy
-        return await self.handled.get()
-
-    async def produce_proxies(self):
-        """
-        We are going to use this to better control the flow of proxies into the
-        system.
-
-        We don't need them to be funneling through at super fast speeds, and we
-        also may want to validate them in some way before providing them to the
-        consumers.
-        """
-        log.notice('Starting...')
-
-        while True:
-            proxy = await self.generated.get()
-            if proxy:
-                if self.config.proxysleep:
-                    time.sleep(self.config.proxysleep)
-
-                proxy = Proxy(port=proxy.port, host=proxy.host)
-                self.handled.put_nowait(proxy)
-            else:
-                log.critical('No New Proxies')
 
 
 class Engine(object):
@@ -173,7 +127,7 @@ class Engine(object):
             await password_consumer
         except Exception as e:
             log.critical("Uncaught Exception")
-            log.critical(e)
+            log.exception(e)
             # Having trouble calling this outside of run.py without having issues
             # closing the loop with ongoing tasks.  So we force.
             return await self.shutdown(loop, attempts, forced=True)

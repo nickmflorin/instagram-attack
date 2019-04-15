@@ -9,7 +9,7 @@ import json
 
 from app import settings
 from app.lib import exceptions
-from app.lib.utils import Colors
+from app.lib.formatting import Colors
 
 
 @dataclass
@@ -196,8 +196,8 @@ class InstagramResult:
             'checkpoint_url': None,
             'lock': False,
             'errors': InstagramResultErrors(
-                error=['Sorry, there was a problem with your request.']),
-            'error_type': 'generic_request_error',
+                error=[settings.GENERIC_REQUEST_MESSAGE]),
+            'error_type': settings.GENERIC_REQUEST_ERROR,
             'showAccountRecoveryModal': False
         }
         return self.__dict__ == state
