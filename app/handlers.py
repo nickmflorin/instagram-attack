@@ -304,6 +304,14 @@ class login_handler(request_handler):
                     await self.proxy_handler.add_good(context.proxy)
                     return result
 
+        except RuntimeError as e:
+            """
+            RuntimeError: File descriptor 87 is used by transport
+            <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
+            """
+            log.error(e, extra={'context': context})
+            return await handle_retry(e, time=5)
+
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
             return await handle_retry(e, time=3)
 
@@ -373,7 +381,6 @@ class login_handler(request_handler):
                 return result
 
     async def consume_passwords(self, loop, results, token):
-        import ipdb; ipdb.set_trace()
         async with aiohttp.ClientSession(
             connector=self.connector,
             timeout=self.timeout

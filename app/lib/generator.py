@@ -139,9 +139,10 @@ class base_alteration_generator(abstract_password_generator):
         for case_altered in cases(word):
             yield case_altered
 
-            replacements = character_replacement_generator()
-            for char_altered in replacements(case_altered):
-                yield char_altered
+            # Skipping for now to make faster
+            # replacements = character_replacement_generator()
+            # for char_altered in replacements(case_altered):
+            #     yield char_altered
 
 
 class base_core_generator(core_password_generator):
