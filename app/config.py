@@ -16,7 +16,6 @@ class Config:
     username: str
     user: object = field(init=False)
 
-    proxy_sleep: int = 0
     fetch_time: int = 8
     max_retries: int = 0
     password_limit: int = 0
@@ -33,7 +32,6 @@ class Config:
     def from_args(cls, arguments):
         return cls(
             username=arguments.username,
-            proxy_sleep=arguments.proxy_sleep,
             max_retries=arguments.max_retries,
             connection_limit=arguments.connection_limit,
             password_limit=arguments.pwlimit,
@@ -48,11 +46,6 @@ def get_config():
     args = ArgumentParser()
     args.add_argument('username', help='email or username')
 
-    args.add_argument('-sleep', '--proxy_sleep', default=None, type=validate_int,
-        help=(
-            ""
-        )
-    )
     args.add_argument('-bs', '--batch_size', default=100, type=validate_int,
         help=(
             "BATCH_SIZE"

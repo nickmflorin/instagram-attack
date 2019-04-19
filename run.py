@@ -8,9 +8,10 @@ import logging
 import asyncio
 
 from app.engine import Engine
-from app.proxies import proxy_broker, start_server
+from app.server import TokenBroker, LoginBroker
 from app.logging import AppLogger, create_handlers
 from app.config import get_config
+from proxybroker import ProxyPool
 
 
 # May want to catch other signals too - these are not currently being
@@ -24,12 +25,18 @@ log = AppLogger(__file__)
 
 def main(config):
 
-    proxies = asyncio.Queue()
     attempts = asyncio.Queue()
     results = asyncio.Queue()
 
     loop = asyncio.get_event_loop()
-    engine = Engine(config, proxies)
+
+    proxies = asyncio.Queue(loop=loop)
+    proxy_pool = ProxyPool(proxies)
+
+    engine = Engine(config)
+
+    get_server = TokenBroker(proxies, loop=loop)
+    post_server = LoginBroker(proxies, loop=loop)
 
     for s in SIGNALS:
         loop.add_signal_handler(
@@ -39,18 +46,25 @@ def main(config):
         )
 
     try:
-        broker, get_broker = start_server(loop)
-        loop.run_until_complete(engine.run(loop, attempts, results))
-        loop.run_until_complete(engine.shutdown(loop, attempts, forced=False))
-    except KeyboardInterrupt:
-        log.critical('Keyboard Interrupt')
-        loop.run_until_complete(engine.shutdown(loop, attempts, forced=True))
-        broker.stop()
-        get_broker.stop()
-        loop.close()
-    else:
-        broker.stop()
-        get_broker.stop()
+        loop.run_until_complete(asyncio.gather(
+            get_server.find(),  # TODO: Add a limit, we only need a few of these
+            post_server.find(),
+            engine.run(loop, proxy_pool, attempts, results, get_server)
+        ))
+
+        loop.run_until_complete(engine.shutdown(
+            loop,
+            attempts,
+        ))
+
+    except Exception as e:
+        log.exception(e)
+        loop.run_until_complete(engine.shutdown(
+            loop,
+            attempts,
+        ))
+
+    finally:
         loop.close()
 
 

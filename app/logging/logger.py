@@ -5,6 +5,7 @@ import logbook
 import inspect
 import sys
 
+from app.lib import exceptions
 from app.lib.utils import (
     get_exception_request_method, get_exception_message, get_exception_status_code)
 
@@ -13,7 +14,7 @@ from .formats import (LoggingLevels, RecordAttributes, APP_FORMAT,
 from .formatter import LogItem
 
 
-__all__ = ('AppLogger', 'create_handlers', 'contextual_log', )
+__all__ = ('AppLogger', 'create_handlers', 'contextual_log', 'base_handler', )
 
 
 def format_exception_message(exc, level):
@@ -26,6 +27,8 @@ def format_exception_message(exc, level):
         )
 
     message = get_exception_message(exc)
+    if message is None:
+        raise exceptions.FatalException("Exception message should not be null.")
     items.append(LogItem(message, formatter=level))
 
     status_code = get_exception_status_code(exc)
@@ -67,6 +70,10 @@ def contextual_log(func):
     return wrapper
 
 
+base_handler = logbook.StreamHandler(sys.stdout, level="INFO", bubble=True)
+base_handler.format_string = APP_FORMAT
+
+
 @contextlib.contextmanager
 def create_handlers(config):
 
@@ -78,9 +85,6 @@ def create_handlers(config):
 
     def filter_attempt_context(r, h):
         return r.extra['context'] and r.extra['context'].context_id == 'attempt'
-
-    base_handler = logbook.StreamHandler(sys.stdout, level=config.level, bubble=True)
-    base_handler.format_string = APP_FORMAT
 
     token_handler = logbook.StreamHandler(
         sys.stdout,

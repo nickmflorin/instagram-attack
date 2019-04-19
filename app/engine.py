@@ -8,7 +8,6 @@ from app.lib import exceptions
 from app.logging import AppLogger
 
 from .handlers import login_handler, token_handler
-from .proxies import proxy_handler
 
 
 __all__ = ('Engine', )
@@ -19,20 +18,16 @@ log = AppLogger('Engine')
 
 class Engine(object):
 
-    def __init__(self, config, proxies):
-
+    def __init__(self, config):
+        self.total = None
         self.config = config
 
-        self.proxy_handler = proxy_handler(config, proxies)
-        self.login_handler = login_handler(config, self.proxy_handler)
-        self.token_handler = token_handler(config, self.proxy_handler)
+        self.login_handler = login_handler(config)
+        self.token_handler = token_handler(config)
 
-        self.consumers = []
-        self.total = None
-
-    async def slowdown(self):
-        log.info(f'Shutting Down {len(self.consumers)} Consumers...')
-        for consumer in self.consumers:
+    async def cancel_consumers(self, *consumers):
+        log.info(f'Shutting Down {len(consumers)} Consumers...')
+        for consumer in consumers:
             consumer.cancel()
 
     async def shutdown(self, loop, attempts, forced=False, signal=None):
@@ -41,21 +36,23 @@ class Engine(object):
         # We have to do this for now for when we find a successful login,
         # otherwise we hit an error in run.py about the loop being closed
         # before all futures finished - being caused by the proxy_broker.
-        if forced:
-            await self.dump_attempts(attempts)
-            sys.exit()
-
         if signal:
             log.info(f'Received exit signal {signal.name}...')
 
+        # post_server.stop()
+
+        await self.dump_attempts(attempts)
+        if forced:
+            sys.exit()
+
+        await self.cancel_consumers()
+
         tasks = [task for task in asyncio.Task.all_tasks() if task is not
              asyncio.tasks.Task.current_task()]
-
         list(map(lambda task: task.cancel(), tasks))
         await asyncio.gather(*tasks, return_exceptions=True)
         log.info('Finished awaiting cancelled tasks, results.')
 
-        await self.dump_attempts(attempts)
         loop.stop()
 
     async def consume_results(self, loop, results, attempts):
@@ -92,13 +89,9 @@ class Engine(object):
             attempts_list.append(await attempts.get())
         self.config.user.update_password_attempts(attempts_list)
 
-    async def run(self, loop, attempts, results):
+    async def run(self, loop, proxy_pool, attempts, results, get_server):
 
-        # proxy_producer = asyncio.ensure_future(
-        #     self.proxy_handler.produce_proxies()
-        # )
-
-        token = await self.token_handler.fetch()
+        token = await self.token_handler.wait_for_token(loop, proxy_pool)
         if token is None:
             raise exceptions.FatalException(
                 "The allowable attempts to retrieve a token did not result in a "
@@ -106,17 +99,16 @@ class Engine(object):
                 "a connection error."
             )
 
-        log.notice("Set Token", extra={'token': token})
+        log.notice(f"Setting Token {token}")
+        get_server.stop()
 
         results_consumer = asyncio.ensure_future(
             self.consume_results(loop, results, attempts)
         )
 
         password_consumer = asyncio.ensure_future(
-            self.login_handler.consume_passwords(loop, results, token)
+            self.login_handler.consume_passwords(loop, proxy_pool, results, token)
         )
-
-        self.consumers = [password_consumer, results_consumer]
 
         # Wait until the password consumer has processed all the passwords.
         log.debug('Awaiting Password Consumer')
@@ -130,10 +122,10 @@ class Engine(object):
             log.exception(e)
             # Having trouble calling this outside of run.py without having issues
             # closing the loop with ongoing tasks.  So we force.
-            return await self.shutdown(loop, attempts, forced=True)
+            return await self.shutdown(loop, attempts)
         except KeyboardInterrupt:
             log.critical('Keyboard Interrupt')
-            return await self.shutdown(loop, attempts, forced=True)
+            return await self.shutdown(loop, attempts)
         else:
             log.notice('Passwords Consumed')
-            return await self.slowdown()
+            return await self.cancel_consumers(password_consumer, results_consumer)

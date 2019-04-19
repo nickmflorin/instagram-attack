@@ -16,6 +16,16 @@ class AppException(Exception):
         return self.message
 
 
+class ProxyServerException(Exception):
+
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+
+    def __str__(self):
+        return f"Could not start proxy server on port {self.port}"
+
+
 class FatalException(AppException):
     """
     Used for checks where we need to make sure something is available or operating

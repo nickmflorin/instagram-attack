@@ -1,5 +1,8 @@
 from __future__ import absolute_import
 
+from app.lib.utils import create_url
+
+
 # User Management
 PASSWORD_FILENAME = "passwords"
 ATTEMPTS_FILENAME = "attempts"
@@ -34,6 +37,8 @@ USER_AGENTS = [
 ]
 
 
+TEST_URL = 'https://api6.ipify.org?format=json'
+
 # Instagram Requests
 HEADER = {
     'Referer': 'https://www.instagram.com/',
@@ -51,3 +56,55 @@ INSTAGRAM_PASSWORD_FIELD = 'password'
 CHECKPOINT_REQUIRED = "checkpoint_required"
 GENERIC_REQUEST_ERROR = 'generic_request_error'
 GENERIC_REQUEST_MESSAGE = 'Sorry, there was a problem with your request.'
+
+# Make Overrideable from Config
+PROXY_HOST = '127.0.0.1'
+
+GET_PORT = 8881
+POST_PORT = 8882
+
+GET_URL = create_url(PROXY_HOST, GET_PORT)
+POST_URL = create_url(PROXY_HOST, POST_PORT)
+
+
+GET_BROKER_CONFIG = {
+    'max_tries': 3,
+    'max_conn': 100,
+}
+
+POST_BROKER_CONFIG = {
+    'max_tries': 3,
+    'max_conn': 400,
+}
+
+GET_SERVER_CONFIG = {
+    'types': [('HTTP', 'High'), 'HTTPS', 'CONNECT:80'],
+    'http_allowed_codes': [200, 301, 302, 400],
+    'limit': 100,
+    'prefer_connect': False,
+    'min_req_proxy': 5,
+    'max_error_rate': 0.5,
+    'max_resp_time': 8,
+    'backlog': 100,
+    'host': PROXY_HOST,
+    'port': GET_PORT,
+}
+
+POST_BROKER_MAX_RETRIES = 1
+
+POST_SERVER_CONFIG = {
+    'types': [('HTTP', 'High'), 'HTTPS', 'CONNECT:80'],
+    'http_allowed_codes': [200, 201, 301, 302, 400],
+    'limit': 200,
+    'prefer_connect': False,
+    'min_req_proxy': 5,
+    'max_error_rate': 0.5,
+    'max_resp_time': 8,
+    'backlog': 100,
+    'post': True,
+    'host': PROXY_HOST,
+    'port': POST_PORT,
+}
+
+TEST_GET_REQUEST_URL = 'https://postman-echo.com/get'
+TEST_POST_REQUEST_URL = 'https://postman-echo.com/post'

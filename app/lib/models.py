@@ -12,15 +12,31 @@ from app.lib import exceptions
 from app.lib.formatting import Colors
 
 
-@dataclass
-class Proxy:
+# @dataclass
+# class Proxy:
 
-    host: str
-    port: int
-    valid: bool = False
+#     host: str
+#     port: int
+#     original: object
+#     avg_resp_time: float
+#     error_rate: float
+#     is_working: bool = True
+#     valid: bool = False
+#     # types: dict ## TODO
 
-    def url(self, scheme='http'):
-        return f"{scheme}://{self.host}:{self.port}/"
+#     @classmethod
+#     def from_broker_proxy(cls, proxy):
+#         return cls(
+#             original=proxy,
+#             host=proxy.host,
+#             port=proxy.port,
+#             avg_resp_time=proxy.avg_resp_time,
+#             error_rate=proxy.error_rate,
+#             is_working=proxy.is_working,
+#         )
+
+#     def url(self, scheme='http'):
+#         return f"{scheme}://{self.host}:{self.port}/"
 
 
 @dataclass
@@ -36,7 +52,7 @@ class TaskContext:
 @dataclass
 class TokenContext(TaskContext):
 
-    proxy: Proxy
+    proxy: dict
     index: int = 0
 
     @property
@@ -69,7 +85,7 @@ class LoginAttemptContext(TaskContext):
 
     password: str
     token: str
-    proxy: Proxy
+    proxy: dict
     index: int = 0
     parent_index: int = 0
 

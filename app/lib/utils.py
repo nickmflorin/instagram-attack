@@ -3,6 +3,8 @@ from __future__ import absolute_import
 import asyncio
 import aiohttp
 
+import subprocess
+
 from argparse import ArgumentTypeError
 from collections import Iterable
 import traceback
@@ -49,6 +51,42 @@ def ensure_iterable(arg):
     return arg
 
 
+def get_pids_from_terminal_content(content, port, limit=None):
+    lines = content.split('\n')
+    if len(lines) < 2:
+        raise IOError(f"Invalid content returned from lsof -i:{port}")
+
+    lines = lines[1:]
+    if limit:
+        lines = lines[:limit]
+
+    rows = [
+        [item for item in line.split(' ') if item.strip() != '']
+        for line in lines
+    ]
+
+    if limit == 1:
+        return int(rows[0][1])
+
+    pids = []
+    for row in rows:
+        try:
+            pids.append(row[1])
+        except IndexError:
+            continue
+    return [int(pid) for pid in pids]
+
+
+def find_pids_on_port(port):
+    try:
+        content = subprocess.check_output(['lsof', '-i', ':%s' % port], universal_newlines=True)
+    except subprocess.CalledProcessError:
+        return []
+    else:
+        pids = get_pids_from_terminal_content(content, port)
+        return list(set(pids))
+
+
 def array(*values):
     return [val for val in values if val is not None]
 
@@ -56,6 +94,10 @@ def array(*values):
 def array_string(*values, separator=" "):
     values = array(*values)
     return separator.join(values)
+
+
+def create_url(host, port, scheme='http'):
+    return f'{scheme}://{host}:{port}/'
 
 
 def get_token_from_cookies(cookies):

