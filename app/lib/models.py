@@ -1,42 +1,44 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import aiohttp
 from dacite import from_dict
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional
 import json
+
+import aiohttp
 
 from app import settings
 from app.lib import exceptions
 from app.lib.formatting import Colors
 
 
-# @dataclass
-# class Proxy:
+@dataclass
+class Proxy:
 
-#     host: str
-#     port: int
-#     original: object
-#     avg_resp_time: float
-#     error_rate: float
-#     is_working: bool = True
-#     valid: bool = False
-#     # types: dict ## TODO
+    host: str
+    port: int
+    original: object
+    avg_resp_time: float
+    error_rate: float
+    is_working: bool = True
+    valid: bool = False
+    last_used: datetime = None
 
-#     @classmethod
-#     def from_broker_proxy(cls, proxy):
-#         return cls(
-#             original=proxy,
-#             host=proxy.host,
-#             port=proxy.port,
-#             avg_resp_time=proxy.avg_resp_time,
-#             error_rate=proxy.error_rate,
-#             is_working=proxy.is_working,
-#         )
+    @classmethod
+    def from_broker_proxy(cls, proxy):
+        return cls(
+            original=proxy,
+            host=proxy.host,
+            port=proxy.port,
+            avg_resp_time=proxy.avg_resp_time,
+            error_rate=proxy.error_rate,
+            is_working=proxy.is_working,
+        )
 
-#     def url(self, scheme='http'):
-#         return f"{scheme}://{self.host}:{self.port}/"
+    def url(self, scheme='http'):
+        return f"{scheme}://{self.host}:{self.port}/"
 
 
 @dataclass
@@ -52,7 +54,7 @@ class TaskContext:
 @dataclass
 class TokenContext(TaskContext):
 
-    proxy: dict
+    proxy: Proxy
     index: int = 0
 
     @property
@@ -85,7 +87,7 @@ class LoginAttemptContext(TaskContext):
 
     password: str
     token: str
-    proxy: dict
+    proxy: Proxy
     index: int = 0
     parent_index: int = 0
 

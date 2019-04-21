@@ -120,6 +120,11 @@ class AppLogger(logbook.Logger):
         logbook.Logger.process_record(self, record)
         level = LoggingLevels[record.level_name]
 
+        if record.extra['lineno']:
+            record.lineno = record.extra['lineno']
+        if record.extra['filename']:
+            record.filename = record.extra['filename']
+
         record.extra['formatted_level_name'] = level.format(record.level_name)
         record.extra['formatted_message'] = format_log_message(
             record.message, level)

@@ -26,6 +26,8 @@ def kill_processes_on_port(port):
     on the same port.
 
     Instead, we will just kill all processes on the port ahead of time.
+
+    Not currently being used but we may decide to use again in the future.
     """
     for pid in find_pids_on_port(port):
         log.warning(f'Found PID {pid} Running on Port {port}')
@@ -40,6 +42,8 @@ class CustomServer(Server):
     when the server shuts down, which means it is impossible to have multiple
     servers run in the same asyncio program (one for GET and one for POST
     requests).
+
+    Not currently being used but we may decide to use again in the future.
     """
 
     def start(self):
@@ -78,14 +82,26 @@ class LoginServer(CustomServer):
 
 
 class CustomBroker(Broker):
+    """
+    Overridden to allow custom server to be used and convenience settings
+    to be implemented directly from the settings module.
+    """
 
-    def serve(self, max_conn=100, limit=100, **kwargs):
+    def __init__(self, *args, **kwargs):
+        return super(CustomBroker, self).__init__(
+            *args, **self.__broker_settings__,
+        )
+
+    def find(self):
+        return super(CustomBroker, self).find(**self.__find_settings__)
+
+    def serve(self):
 
         self._server = self.__server_cls__(
             proxies=self._proxies,
             timeout=self._timeout,
             loop=self._loop,
-            **kwargs
+            **self.__serve_settings__
         )
 
         self._server.start()
@@ -97,26 +113,14 @@ class CustomBroker(Broker):
 class TokenBroker(CustomBroker):
 
     __server_cls__ = TokenProxyServer
-
-    def __init__(self, *args, **kwargs):
-        return super(TokenBroker, self).__init__(*args, **settings.GET_BROKER_CONFIG)
-
-    def find(self):
-        return super(TokenBroker, self).find(**settings.GET_SERVER_CONFIG)
-
-    def serve(self):
-        return super(TokenBroker, self).serve(**settings.GET_SERVER_CONFIG)
+    __broker_settings__ = settings.BROKER_CONFIG['GET']
+    __find_settings__ = settings.BROKER_CONFIG['FIND']['GET']
+    __serve_settings__ = settings.BROKER_CONFIG['FIND']['GET']
 
 
 class LoginBroker(CustomBroker):
 
     __server_cls__ = LoginServer
-
-    def __init__(self, *args, **kwargs):
-        return super(LoginBroker, self).__init__(*args, **settings.POST_BROKER_CONFIG)
-
-    def find(self):
-        return super(LoginBroker, self).find(**settings.POST_SERVER_CONFIG)
-
-    def serve(self):
-        return super(LoginBroker, self).serve(**settings.POST_SERVER_CONFIG)
+    __broker_settings__ = settings.BROKER_CONFIG['POST']
+    __find_settings__ = settings.BROKER_CONFIG['FIND']['POST']
+    __serve_settings__ = settings.BROKER_CONFIG['SERVE']['POST']

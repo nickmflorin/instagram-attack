@@ -34,6 +34,15 @@ class FatalException(AppException):
     pass
 
 
+class InternalTimeout(FatalException):
+    """
+    Thrown when we have internal logic that might wait on a result over a series
+    of attempts and we want to limit the number of attempts or total time
+    just in case something is wrong.
+    """
+    pass
+
+
 class UserDoesNotExist(AppException):
     def __init__(self, username):
         message = "The user %s does not exist." % username

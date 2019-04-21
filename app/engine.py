@@ -1,16 +1,23 @@
 from __future__ import absolute_import
 
-import sys
+import signal
 
 import asyncio
 
 from app.lib import exceptions
 from app.logging import AppLogger
+from app.lib.utils import cancel_remaining_tasks, handle_global_exception
 
-from .handlers import login_handler, token_handler
+from .handlers import (
+    password_handler, token_handler, proxy_handler, results_handler)
 
 
 __all__ = ('Engine', )
+
+
+# May want to catch other signals too - these are not currently being
+# used, but could probably be expanded upon.
+SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 
 log = AppLogger('Engine')
@@ -18,20 +25,29 @@ log = AppLogger('Engine')
 
 class Engine(object):
 
-    def __init__(self, config):
-        self.total = None
+    def __init__(self, config, get_proxy_handler, post_proxy_handler, attempts,
+            results):
+
         self.config = config
 
-        self.login_handler = login_handler(config)
-        self.token_handler = token_handler(config)
+        self.attempts = attempts
+        self.results = results
 
-    async def cancel_consumers(self, *consumers):
-        log.info(f'Shutting Down {len(consumers)} Consumers...')
-        for consumer in consumers:
-            consumer.cancel()
+        self.results_handler = results_handler(config, results, attempts)
+        # self.token_handler = token_handler(get_proxy_handler, config, results, attempts)
+        self.password_handler = password_handler(post_proxy_handler, config, results, attempts)
 
-    async def shutdown(self, loop, attempts, forced=False, signal=None):
-        log.info("Shutting Down...")
+        self.consumers = ()
+
+    async def cancel_consumers(self):
+        if len(self.consumers) != 0:
+            log.warning(f'Shutting Down {len(self.consumers)} Consumers...')
+            for consumer in self.consumers:
+                consumer.cancel()
+            log.notice('Done')
+
+    async def shutdown(self, loop, signal=None):
+        log.warning("Shutting Down...")
 
         # We have to do this for now for when we find a successful login,
         # otherwise we hit an error in run.py about the loop being closed
@@ -39,59 +55,62 @@ class Engine(object):
         if signal:
             log.info(f'Received exit signal {signal.name}...')
 
-        # post_server.stop()
+        # Probably need try excepts for these just in case they were already
+        # stoped.
+        # log.warning('Shutting Down Proxy Servers...')
+        # # self.get_server.stop()
+        # # self.post_server.stop()
+        # log.notice('Done')
 
-        await self.dump_attempts(attempts)
-        if forced:
-            sys.exit()
-
+        await self.results_handler.dump()
         await self.cancel_consumers()
 
-        tasks = [task for task in asyncio.Task.all_tasks() if task is not
-             asyncio.tasks.Task.current_task()]
-        list(map(lambda task: task.cancel(), tasks))
-        await asyncio.gather(*tasks, return_exceptions=True)
-        log.info('Finished awaiting cancelled tasks, results.')
+        log.warning('Cancelling Remaining Tasks...')
+        await cancel_remaining_tasks()
+        log.notice('Done')
 
         loop.stop()
+        log.notice('Shutdown Complete')
 
-    async def consume_results(self, loop, results, attempts):
-        log = AppLogger('Consuming Results')
+    def attach_signals(self, loop):
+        for s in SIGNALS:
+            loop.add_signal_handler(
+                s, lambda s=s: asyncio.create_task(
+                    self.shutdown(loop, signal=s)
+                )
+            )
 
-        index = 0
-        while True:
-            # wait for an item from the producer
-            result = await results.get()
-            if not result or not result.conclusive:
+    async def set_token(self, loop, get_proxy_handler, stop_event):
+
+        self.attach_signals(loop)
+
+        token = None
+        while not stop_event.is_set():
+            token = await self.token_handler.consume(loop)
+            if token is None:
                 raise exceptions.FatalException(
-                    "Result should be valid and conslusive."
+                    "The allowable attempts to retrieve a token did not result in a "
+                    "valid response containing a token.  This is most likely do to "
+                    "a connection error."
                 )
 
-            index += 1
-            log.notice("{0:.2%}".format(float(index) / self.config.user.num_passwords))
-            log.notice(result)
-            if result.authorized:
-                log.notice(result)
-                log.notice(result.context.password)
-                return await self.shutdown(loop, attempts, forced=True)
-            else:
-                log.error(result)
+            log.notice(f"Setting Token {token}")
+            stop_event.set()
+        # get_proxy_handler.cancel()
+        return token
 
-            await attempts.put(result.context.password)
+    async def run(self, loop):
 
-            # Notify the queue that the item has been processed
-            results.task_done()
+        self.attach_signals(loop)
 
-    async def dump_attempts(self, attempts):
-        log.info('Dumping Attempts')
-        attempts_list = []
-        while not attempts.empty():
-            attempts_list.append(await attempts.get())
-        self.config.user.update_password_attempts(attempts_list)
+        log.notice('Starting Proxy Handler')
+        # proxy_task = asyncio.create_task(self.get_proxy_handler.consume(loop))
 
-    async def run(self, loop, proxy_pool, attempts, results, get_server):
+        # self.consumers = (
+        #     asyncio.create_task(self.get_proxy_handler.consume(loop)),
+        # )
 
-        token = await self.token_handler.wait_for_token(loop, proxy_pool)
+        token = await self.token_handler.consume(loop)
         if token is None:
             raise exceptions.FatalException(
                 "The allowable attempts to retrieve a token did not result in a "
@@ -100,32 +119,27 @@ class Engine(object):
             )
 
         log.notice(f"Setting Token {token}")
-        get_server.stop()
+        self.get_server.stop()
 
-        results_consumer = asyncio.ensure_future(
-            self.consume_results(loop, results, attempts)
+        log.notice('Starting Results Handler')
+        log.notice('Starting Password Handler')
+        self.consumers += (
+            asyncio.ensure_future(self.post_proxy_handler.consume(loop)),
+            asyncio.ensure_future(self.results_handler.consume(loop)),
+            asyncio.ensure_future(self.password_handler.consume(loop)),
         )
 
-        password_consumer = asyncio.ensure_future(
-            self.login_handler.consume_passwords(loop, proxy_pool, results, token)
-        )
-
-        # Wait until the password consumer has processed all the passwords.
-        log.debug('Awaiting Password Consumer')
-
-        # TODO: Maybe try to add signals here for keyboard interrupt as well.
-        # await password_consumer
         try:
-            await password_consumer
+            # Wait until the password consumer has processed all the passwords.
+            log.debug('Awaiting Password Consumer')
+            await self.consumers[3]
         except Exception as e:
             log.critical("Uncaught Exception")
             log.exception(e)
-            # Having trouble calling this outside of run.py without having issues
-            # closing the loop with ongoing tasks.  So we force.
-            return await self.shutdown(loop, attempts)
+            return await self.shutdown(loop)
         except KeyboardInterrupt:
             log.critical('Keyboard Interrupt')
-            return await self.shutdown(loop, attempts)
+            return await self.shutdown(loop)
         else:
             log.notice('Passwords Consumed')
-            return await self.cancel_consumers(password_consumer, results_consumer)
+            return await self.shutdown(loop)
