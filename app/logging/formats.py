@@ -26,12 +26,12 @@ class RecordAttributes(Enum):
     LABEL = Format(color=Colors.BLACK, styles=[Styles.DIM, Styles.UNDERLINE])
     MESSAGE = Format(color=Colors.BLACK, styles=Styles.NORMAL)
     CHANNEL = Format(color=Colors.GRAY, styles=Styles.BOLD)
-    PROXY = Format(color=Colors.CYAN, wrapper="<%s>")
-    TOKEN = Format(color=Colors.CYAN)
+    PROXY = Format(color=Colors.YELLOW, wrapper="<%s>")
+    TOKEN = Format(color=Colors.RED)
     STATUS_CODE = Format(color=Colors.RED, wrapper="[%s]")
     METHOD = Format(color=Colors.CYAN, styles=Styles.NORMAL)
     TASK = Format(color=Colors.CYAN, styles=Styles.NORMAL, wrapper="(%s)")
-    PASSWORD = Format(color=Colors.CYAN, styles=Styles.NORMAL)
+    PASSWORD = Format(color=Colors.BLACK, styles=Styles.BOLD)
 
     def __init__(self, format):
         self.format = format
@@ -47,15 +47,16 @@ FORMAT_STRING = LogItemSet(
         LogItem("formatted_level_name"),
     ),
     LogItem("formatted_message", indent=4),
+    LogItem("other_message", indent=4, formatter=RecordAttributes.MESSAGE),
 
     LogLabeledItem('index', label="Attempt #",
-        formatter=Styles.BOLD, indent=8),
+        formatter=Styles.BOLD, indent=6),
     LogLabeledItem('parent_index', label="Password #",
-        formatter=Styles.BOLD, indent=8),
+        formatter=Styles.BOLD, indent=6),
     LogLabeledItem('password', label="Password",
-        formatter=RecordAttributes.PASSWORD, indent=8),
+        formatter=RecordAttributes.PASSWORD, indent=6),
     LogLabeledItem('proxy', label="Proxy",
-        formatter=RecordAttributes.PROXY, indent=8),
+        formatter=RecordAttributes.PROXY, indent=6),
 
     LogItemLine(
         LogItem("filename", suffix=",", formatter=Colors.GRAY),

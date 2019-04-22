@@ -68,6 +68,9 @@ def app_formatter(record, handler):
     format_context['formatted_level_name'] = level.format(record.level_name)
     format_context['formatted_message'] = format_log_message(record.message, level)
 
+    # TODO: Might want to format 'other' message differently.
+    format_context['other_message'] = flexible_retrieval('other')
+
     format_context['index'] = flexible_retrieval('index')
     format_context['parent_index'] = flexible_retrieval('parent_index')
     format_context['password'] = flexible_retrieval('password')
