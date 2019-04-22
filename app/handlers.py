@@ -111,6 +111,9 @@ class proxy_handler(handler):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
+
+        # Make max_error_rate and max_resp_time for proxies configurable, and if
+        # they are set, than we can filter the proxies we read by those values.
         proxies = read_proxies(method=self.method, order_by='avg_resp_time')
         for proxy in proxies:
             await self.put(proxy, update_time=False)

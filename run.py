@@ -156,6 +156,9 @@ if __name__ == '__main__':
         exit()
 
     sys.stdout.write("\x1b[2J\x1b[H")
+
+    # Make max_error_rate and max_resp_time for proxies configurable, and if
+    # they are set, than we can filter the proxies we read by those values.
     config = get_config()
     with log_handling(config=config):
         # os.system('cls' if os.name == 'nt' else 'clear')
