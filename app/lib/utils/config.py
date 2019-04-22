@@ -27,3 +27,14 @@ def validate_log_level(val):
         if val.upper() not in levels:
             raise ArgumentTypeError("Invalid log level.")
         return val.upper()
+
+
+def validate_method(value):
+    methods = {
+        'get': 'GET',
+        'post': 'POST'
+    }
+    method = methods.get(value.lower())
+    if not method:
+        raise ArgumentTypeError('Invalid method.')
+    return method

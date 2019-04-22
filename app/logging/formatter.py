@@ -1,45 +1,82 @@
 from __future__ import absolute_import
 
+from app.lib import exceptions
+from app.lib.utils import (
+    get_exception_request_method, get_exception_message, get_exception_status_code)
 
-class LogItem(str):
-
-    def __new__(cls, *items, prefix=None, suffix=None, formatter=None, indent=0):
-        items = ["%s" % item for item in items if item is not None]
-
-        cls.indent = indent
-
-        prefix = prefix or ""
-        suffix = suffix or ""
-        indentation = " " * cls.indent
-
-        item = " ".join(items)
-        if formatter:
-            item = formatter.format(item)
-
-        item = "%s%s%s" % (prefix, item, suffix)
-        item = "%s%s" % (indentation, item)
-        return str.__new__(cls, item)
+from .formats import RecordAttributes, LoggingLevels, FORMAT_STRING
+from .utils import LogItem, LogItemLine
 
 
-class LogFormattedLine(LogItem):
+def format_exception_message(exc, level):
+    FORMAT_EXCEPTION_MESSAGE = LogItemLine(
+        LogItem('method', formatter=RecordAttributes.METHOD),
+        LogItem('message', formatter=level),
+        LogItem('status_code', formatter=RecordAttributes.STATUS_CODE),
+    )
 
-    def __new__(cls, *items, **kwargs):
-        items = ["%s" % item for item in items if item is not None]
-        content = " ".join(items)
-        return LogItem.__new__(cls, "%s" % content, **kwargs)
+    message = get_exception_message(exc)
+    if message is None:
+        raise exceptions.FatalException("Exception message should not be null.")
+
+    return FORMAT_EXCEPTION_MESSAGE.format(
+        status_code=get_exception_status_code(exc),
+        message=message,
+        method=get_exception_request_method(exc)
+    )
 
 
-class LogLabeledItem(LogItem):
-    def __new__(cls, item, label=None, formatter=None, indent=0):
-        from .formats import RecordAttributes
-        prefix = RecordAttributes.LABEL.format(label)
-        prefix = "%s: " % prefix
-        return LogFormattedLine.__new__(cls, item, prefix=prefix,
-            formatter=formatter, indent=indent)
+def format_log_message(msg, level):
+    if isinstance(msg, Exception):
+        return format_exception_message(msg, level)
+    else:
+        return LogItem('message', formatter=level).format(message=msg)
 
 
-class LogFormattedString(str):
+def app_formatter(record, handler):
 
-    def __new__(cls, *items):
-        items = ["%s" % item for item in items if item is not None]
-        return str.__new__(cls, "".join(items))
+    def flexible_retrieval(param, tier_key=None):
+        """
+        Priorities overridden values explicitly provided in extra, and will
+        check record.extra['context'] if the value is not in 'extra'.
+
+        If tier_key is provided and item found is object based, it will try
+        to use the tier_key to get a non-object based value.
+        """
+        def flexible_obj_get(value):
+            if hasattr(value, '__dict__') and tier_key:
+                return getattr(value, tier_key)
+            return value
+
+        if record.extra.get(param):
+            return flexible_obj_get(record.extra[param])
+        else:
+            if hasattr(record, param):
+                return getattr(record, param)
+            else:
+                if record.extra.get('context'):
+                    ctx = record.extra['context']
+                    if hasattr(ctx, param):
+                        value = getattr(ctx, param)
+                        return flexible_obj_get(value)
+            return None
+
+    format_context = {}
+
+    level = LoggingLevels[record.level_name]
+    format_context['channel'] = record.channel
+    format_context['formatted_level_name'] = level.format(record.level_name)
+    format_context['formatted_message'] = format_log_message(record.message, level)
+
+    format_context['index'] = flexible_retrieval('index')
+    format_context['parent_index'] = flexible_retrieval('parent_index')
+    format_context['password'] = flexible_retrieval('password')
+
+    format_context['proxy'] = flexible_retrieval('proxy', tier_key='host')
+
+    # Allow traceback to be overridden.
+    format_context['lineno'] = flexible_retrieval('lineno')
+    format_context['filename'] = flexible_retrieval('filename')
+    format_context['func_name'] = flexible_retrieval('func_name')
+
+    return FORMAT_STRING.format(**format_context)

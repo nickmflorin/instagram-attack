@@ -124,3 +124,9 @@ class LoginBroker(CustomBroker):
     __broker_settings__ = settings.BROKER_CONFIG['POST']
     __find_settings__ = settings.BROKER_CONFIG['FIND']['POST']
     __serve_settings__ = settings.BROKER_CONFIG['SERVE']['POST']
+
+
+BROKERS = {
+    'GET': TokenBroker,
+    'POST': LoginBroker,
+}

@@ -1,14 +1,5 @@
 from __future__ import absolute_import
 
-from app.lib.utils import create_url
-
-
-# User Management
-PASSWORD_FILENAME = "passwords"
-ATTEMPTS_FILENAME = "attempts"
-ALTERATIONS_FILENAME = "alterations"
-NUMBERS_FILENAME = "common_numbers"
-USER_DIRECTORY = "users"
 
 USER_AGENTS = [
     'Googlebot/2.1 (+http://www.google.com/bot.html)',
@@ -37,7 +28,20 @@ USER_AGENTS = [
 ]
 
 
-TEST_URL = 'https://api6.ipify.org?format=json'
+USER_DIRECTORY = "users"
+
+
+class FILENAMES(object):
+
+    PASSWORDS = "passwords"
+    ATTEMPTS = "attempts"
+    ALTERATIONS = "alterations"
+    NUMBERS = "common_numbers"
+    PROXIES = {
+        'GET': 'get_proxies',
+        'POST': 'post_proxies',
+    }
+
 
 # Instagram Requests
 HEADER = {
@@ -45,9 +49,6 @@ HEADER = {
     'Content-Type': 'application/x-www-form-urlencoded',
 }
 TOKEN_HEADER = 'x-csrftoken'
-
-INSTAGRAM_URL = 'https://www.instagram.com/'
-INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
 INSTAGRAM_USERNAME_FIELD = 'username'
 INSTAGRAM_PASSWORD_FIELD = 'password'
@@ -57,18 +58,22 @@ CHECKPOINT_REQUIRED = "checkpoint_required"
 GENERIC_REQUEST_ERROR = 'generic_request_error'
 GENERIC_REQUEST_MESSAGE = 'Sorry, there was a problem with your request.'
 
-# Make Overrideable from Config
-PROXY_HOST = '127.0.0.1'
 
-GET_PORT = 8881
-POST_PORT = 8882
+INSTAGRAM_URL = 'https://www.instagram.com/'
+INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
-GET_URL = create_url(PROXY_HOST, GET_PORT)
-POST_URL = create_url(PROXY_HOST, POST_PORT)
+URLS = {
+    'GET': INSTAGRAM_URL,
+    'POST': INSTAGRAM_LOGIN_URL
+}
 
 TEST_GET_REQUEST_URL = 'https://postman-echo.com/get'
 TEST_POST_REQUEST_URL = 'https://postman-echo.com/post'
 
+TEST_URLS = {
+    'GET': TEST_GET_REQUEST_URL,
+    'POST': TEST_POST_REQUEST_URL
+}
 
 BROKER_CONFIG = {
     'GET': {
@@ -109,7 +114,7 @@ BROKER_CONFIG = {
             'types': [('HTTP', ('Anonymous', 'High')), 'HTTPS'],
         },
         'POST': {
-            'types': [('HTTP', ('Anonymous', 'High')), 'HTTPS'],
+            'types': ['HTTP', 'HTTPS'],
             'post': True,
         },
     }

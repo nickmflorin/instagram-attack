@@ -2,129 +2,86 @@ from __future__ import absolute_import
 
 import contextlib
 import logbook
-import inspect
+import progressbar
 import sys
 
-from app.lib import exceptions
-from app.lib.utils import (
-    get_exception_request_method, get_exception_message, get_exception_status_code)
-
-from .formats import (LoggingLevels, RecordAttributes, APP_FORMAT,
-    LOGIN_TASK_FORMAT, LOGIN_ATTEMPT_FORMAT, TOKEN_TASK_FORMAT)
-from .formatter import LogItem
+from .formatter import app_formatter
 
 
-__all__ = ('AppLogger', 'create_handlers', 'contextual_log', 'base_handler', )
+__all__ = ('AppLogger', 'log_handling', )
 
 
-def format_exception_message(exc, level):
-    items = []
-
-    method = get_exception_request_method(exc)
-    if method:
-        items.append(
-            LogItem(method, formatter=RecordAttributes.METHOD),
-        )
-
-    message = get_exception_message(exc)
-    if message is None:
-        raise exceptions.FatalException("Exception message should not be null.")
-    items.append(LogItem(message, formatter=level))
-
-    status_code = get_exception_status_code(exc)
-    if status_code:
-        items.append(
-            LogItem(status_code, formatter=RecordAttributes.STATUS_CODE),
-        )
-    return LogItem(*tuple(items))
+def _stream_handler(config=None, format_string=None, filter=None):
+    handler = logbook.StreamHandler(
+        sys.stdout,
+        level=config.level if config else 'INFO',
+        filter=filter,
+        bubble=True
+    )
+    handler.format_string = format_string
+    return handler
 
 
-def format_log_message(msg, level):
-    if isinstance(msg, Exception):
-        return format_exception_message(msg, level)
-    else:
-        return RecordAttributes.MESSAGE.format(msg)
+def filter_context(context_id):
+    def _filter_context(r, h):
+        return (r.extra['context'] and
+            r.extra['context'].context_id == context_id)
+    return _filter_context
 
 
-# This currently doesn't seem to be working...
-def contextual_log(func):
-
-    arguments = inspect.getargspec(func).args
-    try:
-        context_index = arguments.index('context')
-    except IndexError:
-        raise NotImplementedError(
-            "Cannot use decorator on a method that does not take context "
-            "as a positional argument."
-        )
-
-    def wrapper(*args, **kwargs):
-        context = args[context_index]
-
-        def inject_context(record):
-            record.extra['context'] = context
-
-        with logbook.Processor(inject_context).threadbound():
-            return func(*args, **kwargs)
-
-    return wrapper
+def base_handler(config=None):
+    """
+    We want to lazy evaluate the initialization of StreamHandler for purposes
+    of progressbar implementation with logging.
+    """
+    handler = _stream_handler(
+        config=config,
+    )
+    handler.formatter = app_formatter
+    return handler
 
 
-base_handler = logbook.StreamHandler(sys.stdout, level="INFO", bubble=True)
-base_handler.format_string = APP_FORMAT
+def token_handler(config=None):
+    handler = _stream_handler(
+        config=config,
+        filter=filter_context('token'),
+    )
+    handler.formatter = app_formatter
+    return handler
+
+
+def login_handler(config=None):
+    handler = _stream_handler(
+        config=config,
+        filter=filter_context('login'),
+    )
+    handler.formatter = app_formatter
+    return handler
+
+
+def attempt_handler(config=None):
+    handler = _stream_handler(
+        config=config,
+        filter=filter_context('attempt'),
+    )
+    handler.formatter = app_formatter
+    return handler
 
 
 @contextlib.contextmanager
-def create_handlers(config):
+def log_handling(config=None):
 
-    def filter_token_context(r, h):
-        return r.extra['context'] and r.extra['context'].context_id == 'token'
+    progressbar.streams.wrap_stderr()
+    progressbar.streams.wrap_stdout()
 
-    def filter_login_context(r, h):
-        return r.extra['context'] and r.extra['context'].context_id == 'login'
+    base = base_handler(config=config)
+    token = token_handler(config=config)
+    login = login_handler(config=config)
+    attempt = attempt_handler(config=config)
 
-    def filter_attempt_context(r, h):
-        return r.extra['context'] and r.extra['context'].context_id == 'attempt'
-
-    token_handler = logbook.StreamHandler(
-        sys.stdout,
-        level=config.level,
-        filter=filter_token_context
-    )
-
-    token_handler.format_string = TOKEN_TASK_FORMAT
-
-    login_handler = logbook.StreamHandler(
-        sys.stdout,
-        level=config.level,
-        filter=filter_login_context
-    )
-
-    login_handler.format_string = LOGIN_TASK_FORMAT
-
-    attempt_handler = logbook.StreamHandler(
-        sys.stdout,
-        level=config.level,
-        filter=filter_attempt_context
-    )
-
-    attempt_handler.format_string = LOGIN_ATTEMPT_FORMAT
-
-    with base_handler, token_handler, login_handler, attempt_handler:
+    with base, token, login, attempt:
         yield
 
 
 class AppLogger(logbook.Logger):
-
-    def process_record(self, record):
-        logbook.Logger.process_record(self, record)
-        level = LoggingLevels[record.level_name]
-
-        if record.extra['lineno']:
-            record.lineno = record.extra['lineno']
-        if record.extra['filename']:
-            record.filename = record.extra['filename']
-
-        record.extra['formatted_level_name'] = level.format(record.level_name)
-        record.extra['formatted_message'] = format_log_message(
-            record.message, level)
+    pass

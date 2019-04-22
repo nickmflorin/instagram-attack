@@ -51,19 +51,19 @@ class User(object):
 
     @property
     def password_file_name(self):
-        return f"{settings.PASSWORD_FILENAME}.txt"
+        return f"{settings.FILENAMES.PASSWORDS}.txt"
 
     @property
     def attempt_file_name(self):
-        return f"{settings.ATTEMPTS_FILENAME}.txt"
+        return f"{settings.FILENAMES.ATTEMPTS}.txt"
 
     @property
     def alterations_file_name(self):
-        return f"{settings.ALTERATIONS_FILENAME}.txt"
+        return f"{settings.FILENAMES.ALTERATIONS}.txt"
 
     @property
     def numbers_file_name(self):
-        return f"{settings.NUMBERS_FILENAME}.txt"
+        return f"{settings.FILENAMES.NUMBERS}.txt"
 
     @property
     def file_path(self):

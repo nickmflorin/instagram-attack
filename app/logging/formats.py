@@ -4,7 +4,7 @@ from enum import Enum
 
 from app.lib.formatting import Format, Colors, Styles
 
-from .formatter import LogFormattedString, LogFormattedLine, LogLabeledItem, LogItem
+from .utils import LogItemSet, LogItemLine, LogLabeledItem, LogItem
 
 
 class LoggingLevels(Enum):
@@ -41,77 +41,28 @@ DATE_FORMAT_OBJ = Format(color=Colors.YELLOW, styles=Styles.DIM)
 DATE_FORMAT = DATE_FORMAT_OBJ('%Y-%m-%d %H:%M:%S')
 
 
-BASE_FORMAT = LogFormattedString(
-    LogFormattedLine(
-        LogItem("{record.channel}", suffix=":", formatter=RecordAttributes.CHANNEL),
-        LogItem("{record.extra[formatted_level_name]}"),
+FORMAT_STRING = LogItemSet(
+    LogItemLine(
+        LogItem("channel", suffix=":", formatter=RecordAttributes.CHANNEL),
+        LogItem("formatted_level_name"),
     ),
-    "\n",
-    LogItem("{record.extra[formatted_message]}", indent=4),
-)
+    LogItem("formatted_message", indent=4),
 
-TRACEBACK_FORMAT = LogFormattedLine(
-    LogItem("{record.filename}", suffix=",", formatter=Colors.GRAY),
-    LogItem("{record.func_name}", suffix=",", formatter=Colors.BLACK),
-    LogItem("{record.lineno}", formatter=Styles.BOLD),
-    prefix="(",
-    suffix=")",
-    indent=4,
-)
-
-APP_FORMAT = LogFormattedString(
-    BASE_FORMAT,
-    "\n",
-    TRACEBACK_FORMAT,
-    "\n",
-)
-
-TOKEN_TASK_FORMAT = LogFormattedString(
-    BASE_FORMAT,
-    "\n",
-    LogLabeledItem("{record.extra[context].index}", label="Attempt #",
+    LogLabeledItem('index', label="Attempt #",
         formatter=Styles.BOLD, indent=8),
-    "\n",
-    LogLabeledItem("{record.extra[context].proxy.host}", label="Proxy",
-        formatter=RecordAttributes.PROXY, indent=8),
-    "\n",
-    TRACEBACK_FORMAT,
-    "\n",
-)
-
-
-LOGIN_TASK_FORMAT = LogFormattedString(
-    BASE_FORMAT,
-    "\n",
-    LogLabeledItem("{record.extra[context].index}", label="Password #",
+    LogLabeledItem('parent_index', label="Password #",
         formatter=Styles.BOLD, indent=8),
-    "\n",
-    LogLabeledItem("{record.extra[context].password}", label="Password",
+    LogLabeledItem('password', label="Password",
         formatter=RecordAttributes.PASSWORD, indent=8),
-    "\n",
-    LogLabeledItem("{record.extra[context].proxy.host}", label="Proxy",
+    LogLabeledItem('proxy', label="Proxy",
         formatter=RecordAttributes.PROXY, indent=8),
-    "\n",
-    TRACEBACK_FORMAT,
-    "\n",
-)
 
-
-LOGIN_ATTEMPT_FORMAT = LogFormattedString(
-    BASE_FORMAT,
-    "\n",
-    LogLabeledItem("{record.extra[context].index}", label="Attempt #",
-        formatter=Styles.BOLD, indent=8),
-    "\n",
-    LogLabeledItem("{record.extra[context].parent_index}", label="Password #",
-        formatter=Styles.BOLD, indent=8),
-    "\n",
-    LogLabeledItem("{record.extra[context].password}", label="Password",
-        formatter=RecordAttributes.PASSWORD, indent=8),
-    "\n",
-    LogLabeledItem("{record.extra[context].proxy.host}", label="Proxy",
-        formatter=RecordAttributes.PROXY, indent=8),
-    "\n",
-    TRACEBACK_FORMAT,
-    "\n",
+    LogItemLine(
+        LogItem("filename", suffix=",", formatter=Colors.GRAY),
+        LogItem("func_name", suffix=",", formatter=Colors.BLACK),
+        LogItem("lineno", formatter=Styles.BOLD),
+        prefix="(",
+        suffix=")",
+        indent=4,
+    )
 )
