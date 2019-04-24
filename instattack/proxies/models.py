@@ -7,7 +7,14 @@ from datetime import datetime
 
 @dataclass
 class Proxy:
+    """
+    TODO:
+    ----
 
+    Need to include additional information like ProxyBroker, things like
+    num_times_used, an array of errors, things like that so we can more
+    appropriately make decisions based on what is going on.
+    """
     host: str
     port: int
     avg_resp_time: float

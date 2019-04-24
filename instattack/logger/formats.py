@@ -60,7 +60,6 @@ FORMAT_STRING = LogItemSet(
 
     LogItemLine(
         LogItem("filename", suffix=",", formatter=Colors.GRAY),
-        LogItem("func_name", suffix=",", formatter=Colors.BLACK),
         LogItem("lineno", formatter=Styles.BOLD),
         prefix="(",
         suffix=")",

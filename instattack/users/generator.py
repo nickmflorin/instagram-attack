@@ -10,9 +10,9 @@ class abstract_password_generator(object):
 class core_password_generator(object):
     def __init__(self, alterations=None, common_numbers=None, raw_passwords=None):
 
-        self.alterations = alterations
-        self.common_numbers = common_numbers
-        self.raw_passwords = raw_passwords
+        self.alterations = alterations or []
+        self.common_numbers = common_numbers or []
+        self.raw_passwords = raw_passwords or []
 
 
 class case_alteration_generator(abstract_password_generator):
@@ -199,69 +199,44 @@ class alteration_core_generator(core_password_generator):
 # in the previous attempts after additional alterations performed.
 class password_generator(core_password_generator):
 
-    def __init__(self, user, limit):
-        self.user = user
-        self.limit = limit
-        self.attempts = self.user.get_password_attempts()
+    def __init__(self, **kwargs):
+        super(password_generator, self).__init__(**kwargs)
 
-        alterations = self.user.get_password_alterations()
-        common_numbers = self.user.get_password_numbers()
-        raw_passwords = self.user.get_raw_passwords()
+        self.count = 0
+        self.base_generator = base_core_generator(**kwargs)
+        self.numeric_generator = numeric_core_generator(**kwargs)
+        self.alteration_generator = alteration_core_generator(**kwargs)
 
-        super(password_generator, self).__init__(
-            alterations=alterations,
-            common_numbers=common_numbers,
-            raw_passwords=raw_passwords,
-        )
+    def __call__(self, attempts=None, limit=None):
+        attempts = attempts or []
+        self.count = 0
 
-        self.base_generator = base_core_generator(
-            alterations=alterations,
-            common_numbers=common_numbers,
-            raw_passwords=raw_passwords,
-        )
+        def safe_to_yield():
+            if not limit or self.count < limit:
+                self.count += 1
+                return True
 
-        self.numeric_generator = numeric_core_generator(
-            alterations=alterations,
-            common_numbers=common_numbers,
-            raw_passwords=raw_passwords,
-        )
-
-        self.alteration_generator = alteration_core_generator(
-            alterations=alterations,
-            common_numbers=common_numbers,
-            raw_passwords=raw_passwords,
-        )
-
-    def __call__(self):
-        self.user.num_passwords = 0
         for base_alteration in self.base_generator():
-            if base_alteration not in self.attempts:
-                if not self.limit or self.user.num_passwords <= self.limit:
-                    self.user.num_passwords += 1
-                    yield base_alteration
-                else:
+
+            if base_alteration not in attempts:
+                if not safe_to_yield():
                     return
+                yield base_alteration
 
             for alteration in self.alteration_generator(base_alteration):
-                if alteration not in self.attempts:
-                    if not self.limit or self.user.num_passwords <= self.limit:
-                        self.user.num_passwords += 1
-                        yield alteration
-                    else:
+                if alteration not in attempts:
+                    if not safe_to_yield():
                         return
+                    yield alteration
 
             for numeric_alteration in self.numeric_generator(base_alteration):
-                if numeric_alteration not in self.attempts:
-                    if not self.limit or self.user.num_passwords <= self.limit:
-                        self.user.num_passwords += 1
-                        yield numeric_alteration
-                    else:
-                        return
-
-                for alteration in self.alteration_generator(numeric_alteration):
-                    if alteration not in self.attempts:
-                        if not self.limit or self.user.num_passwords <= self.limit:
-                            self.user.num_passwords += 1
-                            yield alteration
-                        else:
+                if numeric_alteration not in attempts:
+                        if not safe_to_yield():
                             return
+                        yield numeric_alteration
+
+                for num_alteration in self.alteration_generator(numeric_alteration):
+                    if num_alteration not in attempts:
+                        if not safe_to_yield():
+                            return
+                        yield num_alteration

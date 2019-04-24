@@ -43,12 +43,6 @@ class InternalTimeout(FatalException):
     pass
 
 
-class UserDoesNotExist(AppException):
-    def __init__(self, username):
-        message = "The user %s does not exist." % username
-        super(UserDoesNotExist, self).__init__(message)
-
-
 class ApiException(AppException):
     pass
 

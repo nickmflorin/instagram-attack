@@ -1,0 +1,18 @@
+## Password Generator
+
+Password Pairings
+
+(mer, eileen)
+(mer, gins) -> Should do each one individually and combos of the two
+
+All birthday combos with year
+-> 01, 02, 03, 04, 05, 06, ... for month, combined with all digits and years
+
+
+## Requests
+
+Increment sleep on consecutive retries
+Figure out why we keep seeing those large amount of TimeOutError's causing freezing
+after awhile.
+
+

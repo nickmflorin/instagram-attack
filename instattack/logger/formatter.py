@@ -1,6 +1,6 @@
 from __future__ import absolute_import
 
-from instattack.core import exceptions
+from instattack import exceptions
 
 from .utils import (
     get_exception_request_method, get_exception_message,
@@ -80,6 +80,5 @@ def app_formatter(record, handler):
     # Allow traceback to be overridden.
     format_context['lineno'] = flexible_retrieval('lineno')
     format_context['filename'] = flexible_retrieval('filename')
-    format_context['func_name'] = flexible_retrieval('func_name')
 
     return FORMAT_STRING.format(**format_context)

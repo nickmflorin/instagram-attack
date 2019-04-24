@@ -1,15 +1,17 @@
 from __future__ import absolute_import
 
+import heapq
 import time
 import subprocess
 import sys
 
 import asyncio
-from proxybroker import Broker
+from proxybroker import Broker, ProxyPool
+from proxybroker.errors import NoProxyError
 from proxybroker.server import Server
 
 from instattack.conf import settings
-from instattack.logging import AppLogger
+from instattack.logger import AppLogger
 
 from .utils import find_pids_on_port
 
@@ -35,6 +37,100 @@ def kill_processes_on_port(port):
         log.info(f'Killing PID {pid}')
         subprocess.Popen(['kill', '-9', "%s" % pid], stdout=sys.stdout)
         log.notice(f'Successfully Killed PID {pid}')
+
+
+class CustomProxyPool(ProxyPool):
+    """
+    Imports and gives proxies from queue on demand.
+
+    Overridden because of weird error referenced:
+
+    Weird error from ProxyBroker that makes no sense...
+    TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
+
+    We also want the ability to put None in the queue so that we can stop the
+    consumers.
+    """
+
+    # TODO: Set these defaults based off of settings or arguments in config.
+    def __init__(
+        self, proxies, min_req_proxy=5, max_error_rate=0.5, max_resp_time=8
+    ):
+        self._proxies = proxies
+        self._pool = []
+        self._min_req_proxy = min_req_proxy
+
+        # We need to use this so that we can tell the difference when the found
+        # proxy is None as being intentionally put in the queue to stop the
+        # consumer or because there are no more proxies left.
+        # I am not 100% sure this will work properly, since the package code
+        # might actually put None in when there are no more proxies (see line
+        # 112)
+        self._stopped = False
+
+        # if num of erros greater or equal 50% - proxy will be remove from pool
+        self._max_error_rate = max_error_rate
+        self._max_resp_time = max_resp_time
+
+    async def get(self, scheme):
+        scheme = scheme.upper()
+        for priority, proxy in self._pool:
+            if scheme in proxy.schemes:
+                chosen = proxy
+                self._pool.remove((proxy.priority, proxy))
+                break
+        else:
+            chosen = await self._import(scheme)
+        return chosen
+
+    async def _import(self, expected_scheme):
+        while True:
+            proxy = await self._proxies.get()
+            self._proxies.task_done()
+            if not proxy:
+                # See note above about stopping the consumer and putting None
+                # in the proxy.
+                if not self._stopped:
+                    raise NoProxyError('No more available proxies')
+                else:
+                    break
+            elif expected_scheme not in proxy.schemes:
+                await self.put(proxy)
+            else:
+                return proxy
+
+    async def put(self, proxy):
+        """
+        TODO:
+        -----
+        Use information from stat to integrate our own proxy
+        models with more information.
+        stat: {'requests': 3, 'errors': Counter({'connection_timeout': 1, 'empty_response': 1})}
+
+        We might want to start min_req_per_proxy to a higher level since we
+        are controlling how often they are used to avoid max request errors!!!
+
+        We can also prioritize by number of requests to avoid max request errors
+        """
+        # Overridden Portion
+        if proxy is None:
+            # ProxyBroker package might actually put None in when there are no
+            # more proxies in which case this can cause issues.
+            self._stopped = True
+            await self._proxies.put(None)
+
+        # Original Portion
+        else:
+            if proxy.stat['requests'] >= self._min_req_proxy and (
+                (proxy.error_rate > self._max_error_rate or
+                    proxy.avg_resp_time > self._max_resp_time)
+            ):
+                log.debug(
+                    '%s:%d removed from proxy pool' % (proxy.host, proxy.port)
+                )
+            else:
+                heapq.heappush(self._pool, (proxy.priority, proxy))
+            log.debug('%s:%d stat: %s' % (proxy.host, proxy.port, proxy.stat))
 
 
 class CustomServer(Server):

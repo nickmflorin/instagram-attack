@@ -4,6 +4,7 @@ import contextlib
 import logbook
 import progressbar
 import sys
+import traceback
 
 from .formatter import app_formatter
 
@@ -11,10 +12,10 @@ from .formatter import app_formatter
 __all__ = ('AppLogger', 'log_handling', )
 
 
-def _stream_handler(config=None, format_string=None, filter=None):
+def _stream_handler(level='INFO', format_string=None, filter=None):
     handler = logbook.StreamHandler(
         sys.stdout,
-        level=config.level if config else 'INFO',
+        level=level,
         filter=filter,
         bubble=True
     )
@@ -22,26 +23,61 @@ def _stream_handler(config=None, format_string=None, filter=None):
     return handler
 
 
-def base_handler(config=None):
+def base_handler(level=None):
     """
     We want to lazy evaluate the initialization of StreamHandler for purposes
     of progressbar implementation with logging.
     """
-    handler = _stream_handler(config=config)
+    handler = _stream_handler(level=level)
     handler.formatter = app_formatter
     return handler
 
 
 @contextlib.contextmanager
-def log_handling(config=None):
+def log_handling(level=None):
 
     progressbar.streams.wrap_stderr()
     progressbar.streams.wrap_stdout()
 
-    base = base_handler(config=config)
+    base = base_handler(level=level)
     with base:
         yield
 
 
 class AppLogger(logbook.Logger):
-    pass
+    """
+    TODO: For the traceback in start_and_done, we have to set it back one step
+    so it shows the original location.
+    """
+    @contextlib.contextmanager
+    def start_and_done(self, action_string, level='INFO', exit_level='DEBUG'):
+        methods = {
+            'INFO': self.info,
+            'NOTICE': self.notice,
+            'DEBUG': self.debug,
+            'WARNING': self.warning,
+        }
+        method = methods[level.upper()]
+        exit_method = methods[exit_level.upper()]
+
+        # This doesn't seem to be working...
+        stacks = traceback.extract_stack()
+        stacks = [
+            st for st in stacks if (all([
+                not st.filename.startswith('/Library/Frameworks/'),
+                not any([x in st.filename for x in ['stdin', 'stderr', 'stdout']]),
+                __file__ not in st.filename,
+            ]))
+        ]
+
+        try:
+            method(f'{action_string}...', extra={
+                'lineno': stacks[-1].lineno,
+                'filename': stacks[-1].filename,
+            })
+            yield
+        finally:
+            exit_method(f'Done {action_string}.', extra={
+                'lineno': stacks[-1].lineno,
+                'filename': stacks[-1].filename,
+            })

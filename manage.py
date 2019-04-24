@@ -11,13 +11,16 @@ import asyncio
 
 from proxybroker import ProxyPool
 
-from app import settings
-from app.server import BROKERS
-from app.logging import AppLogger, log_handling
-from app.lib.models import Proxy
-from app.lib.utils import (
-    cancel_remaining_tasks, write_proxies, validate_method, read_proxies,
-    bar, handle_global_exception)
+from instattack.utils import bar, cancel_remaining_tasks
+from instattack.conf import settings
+from instattack.conf.utils import validate_method
+
+from instattack.logger import AppLogger, log_handling
+from instattack.logger.utils import handle_global_exception
+
+from instattack.proxies import BROKERS
+from instattack.proxies.models import Proxy
+from instattack.proxies.utils import read_proxies, write_proxies
 
 
 log = AppLogger(__file__)

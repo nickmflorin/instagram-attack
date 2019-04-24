@@ -27,8 +27,10 @@ USER_AGENTS = [
     'Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',  # noqa
 ]
 
-
-USER_DIRECTORY = "/users/data/"
+APP_NAME = 'instattack'
+USER_DIR = "users"
+DATA_DIR = "data"
+PROXY_DIR = "proxies"
 
 
 class FILENAMES(object):
@@ -37,11 +39,10 @@ class FILENAMES(object):
     ATTEMPTS = "attempts"
     ALTERATIONS = "alterations"
     NUMBERS = "common_numbers"
-    PROXIES = {
-        'GET': 'get_proxies',
-        'POST': 'post_proxies',
-    }
 
+
+USER_FILES = [FILENAMES.PASSWORDS, FILENAMES.ATTEMPTS, FILENAMES.NUMBERS,
+    FILENAMES.ALTERATIONS]
 
 # Instagram Requests
 HEADER = {
@@ -77,11 +78,13 @@ TEST_URLS = {
 
 BROKER_CONFIG = {
     'GET': {
+        # TODO: Move these values to arguments on initialization.
         'max_tries': 5,
         'max_conn': 100,
         'verify_ssl': False,
     },
     'POST': {
+        # TODO: Move these values to arguments on initialization.
         'max_tries': 5,
         'max_conn': 100,
         'verify_ssl': False,
@@ -90,23 +93,25 @@ BROKER_CONFIG = {
         'GET': {
             'types': [('HTTP', ('Anonymous', 'High')), 'HTTPS'],
             'http_allowed_codes': [200, 301, 302, 400],
-            'limit': 100,
             'prefer_connect': False,
+            # TODO: Move these values to arguments on initialization.
+            'limit': 100,
             'min_req_proxy': 5,
             'max_error_rate': 0.5,
             'max_resp_time': 8,
             'backlog': 100,
         },
         'POST': {
-            'types': [('HTTP', ('Anonymous', 'High')), 'HTTPS'],
+            'types': ['HTTP', 'HTTPS'],
             'http_allowed_codes': [200, 201, 301, 302, 400],
-            'limit': 200,
             'prefer_connect': True,
+            'post': True,
+            # TODO: Move these values to arguments on initialization.
+            'limit': 200,
             'min_req_proxy': 5,
             'max_error_rate': 0.5,
             'max_resp_time': 8,
             'backlog': 100,
-            'post': True,
         },
     },
     'FIND': {
