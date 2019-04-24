@@ -26,6 +26,13 @@ from instattack.proxies.utils import read_proxies, write_proxies
 log = AppLogger(__file__)
 
 
+"""
+TODO:
+
+Make these subcommands of the main run CLI.
+"""
+
+
 async def make_test_post_request(session, proxy, **params):
     async with session.post(
         settings.TEST_POST_REQUEST_URL,
