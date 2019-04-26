@@ -18,9 +18,16 @@ class TokenHandler(RequestHandler):
 
     __method__ = 'GET'
 
-    def __init__(self, user, proxy_handler, **kwargs):
+    arguments = (
+        ('fetch_time', ),
+        ('connection_limit', ),
+        ('connector_timeout', ),
+        ('token_max_wait_time', ),
+    )
+
+    def __init__(self, proxy_handler, **kwargs):
         self.proxy_handler = proxy_handler
-        super(TokenHandler, self).__init__(user, method=self.__method__, **kwargs)
+        super(TokenHandler, self).__init__(method=self.__method__, **kwargs)
 
     def _get_token_from_response(self, response):
         token = get_token_from_response(response)
@@ -29,7 +36,14 @@ class TokenHandler(RequestHandler):
         return token
 
     async def fetch(self, session):
+        """
+        TODO
+        ----
 
+        We might want to incorporate handling of a "Too Many Requests" exception
+        that is smarter and will notify the handler to use a different proxy and
+        note the time.
+        """
         async def try_with_proxy(attempt=0):
 
             proxy = await self.proxy_handler.get()
@@ -37,8 +51,6 @@ class TokenHandler(RequestHandler):
             self._notify_request(context, retry=attempt)
 
             try:
-                # Raise for status is automatically performed, so we do not have
-                # to have a client response handler.
                 async with session.get(
                     settings.INSTAGRAM_URL,
                     raise_for_status=True,
@@ -54,8 +66,6 @@ class TokenHandler(RequestHandler):
                         await self.proxy_handler.put(proxy)
                         return token
 
-            # TODO: Might want to incorporate too many requests, although that
-            # is unlikely.
             except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
                 return await try_with_proxy(attempt=attempt + 1)
 
@@ -88,8 +98,7 @@ class TokenHandler(RequestHandler):
             with self.log.start_and_done('Finding Token'):
                 task = asyncio.ensure_future(self.fetch(session))
 
-                # TODO: Move the allowed timeout for finding the token to settings.
-                with stopit.SignalTimeout(10) as timeout_mgr:
+                with stopit.SignalTimeout(self.token_max_wait_time) as timeout_mgr:
                     token = await task
                     if not token:
                         raise exceptions.FatalException("Token should be non-null here.")
@@ -99,7 +108,6 @@ class TokenHandler(RequestHandler):
 
                 # See related notes in ProxyPool and ProxyHandler about potential
                 # duplicate meaning of putting None in the proxy pool.
-                self.log.debug('Putting None in Pool')
                 await self.proxy_handler.pool.put(None)
 
                 return token

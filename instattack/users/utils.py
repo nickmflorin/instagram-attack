@@ -4,6 +4,7 @@ from plumbum import local
 
 from instattack.conf import settings
 from instattack.logger import AppLogger
+from instattack.utils import convert_lines_to_text
 
 from .exceptions import (
     UserDirExists, UserFileExists, UserFileMissing, UserDirMissing, DirExists,
@@ -153,16 +154,6 @@ def read_user_file(filename, username):
     return [val.strip() for val in raw_data.split('\n')]
 
 
-def convert_attempts_to_text(attempts):
-    if "" in attempts:
-        log.warning('Found empty string in attempts.')
-    elif None in attempts:
-        log.warning('Found null value in attempts.')
-
-    attempts = [att for att in attempts if att is not None and att != ""]
-    return "\n".join(attempts)
-
-
 def write_attempts_file(attempts, username):
     try:
         path = get_user_file_path(settings.FILENAMES.ATTEMPTS, username,
@@ -172,7 +163,7 @@ def write_attempts_file(attempts, username):
         create_user_file(settings.FILENAMES.ATTEMPTS, username, strict=True)
 
     # TODO: Wrap around try/except maybe?
-    data = convert_attempts_to_text(attempts)
+    data = convert_lines_to_text(attempts)
     path.write(data, encoding='utf-8')
 
 

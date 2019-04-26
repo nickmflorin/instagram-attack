@@ -2,3 +2,6 @@
 *.pyc
 /users
 __pycache__
+build
+dist
+env

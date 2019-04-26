@@ -16,9 +16,17 @@ class PasswordHandler(RequestHandler):
 
     __method__ = 'POST'
 
+    arguments = (
+        ('fetch_time', ),
+        ('connection_limit', ),
+        ('connector_timeout', ),
+    )
+
     def __init__(self, user, proxy_handler, **kwargs):
-        super(PasswordHandler, self).__init__(user, method=self.__method__, **kwargs)
+        super(PasswordHandler, self).__init__(method=self.__method__, **kwargs)
+
         self.passwords = asyncio.Queue()
+        self.user = user
 
         # TODO: See if we can initialize the server for GET and POST proxies
         # in the handlers themselves, or potentially subclass the asyncio.Queue()\
@@ -138,6 +146,7 @@ class PasswordHandler(RequestHandler):
                             raise exceptions.FatalException("Result should not be None here.")
 
                         # Put proxy back in so that it can be reused.
+                        proxy.confirmed = True
                         await self.proxy_handler.put(proxy)
                         return result
 
@@ -163,10 +172,8 @@ class PasswordHandler(RequestHandler):
 
             except OSError as e:
                 # We have only seen this for the following:
-                # >>> OSError: [Errno 24] Too many open files
-                # >>> OSError: [Errno 54] Connection reste by peer
-                # For the former, we want to sleep for a second, for the latter,
-                # we want to move on to a new proxy.
+                # >>> OSError: [Errno 24] Too many open files -> Want to sleep
+                # >>> OSError: [Errno 54] Connection reset by peer
                 if e.errno == 54:
                     self.log.error(e, extra={'context': context})
                     return await try_with_proxy(attempt=attempt + 1)
@@ -185,10 +192,10 @@ class PasswordHandler(RequestHandler):
 
             except aiohttp.ClientError as e:
                 # For whatever reason these errors don't have any message...
-                # We want to put the proxy back in the queue so it can be used
-                # again later.
                 if e.status == 429:
                     e.message = 'Too many requests.'
+                    # We still want to put the proxy back in the queue so it can be used
+                    # again later, but not confirm it.
                     await self.proxy_handler.put(proxy)
 
                 self.log.error(e, extra={'context': context})
@@ -203,11 +210,10 @@ class PasswordHandler(RequestHandler):
 
     async def consume(self, loop, found_result_event, token, results):
         """
-        Stop event is not needed for the GET case, where we are finding a token,
-        because we can trigger the generator to stop by putting None in the queue.
-
-        On the other hand, if we notice that a result is authenticated, we need
-        the stop event to stop handlers mid queue.
+        A stop event is required since if the results handler notices that we
+        found an authenticated result, it needs some way to communicate this to
+        the password consumer, since the password consumer will already have
+        a series of tasks queued up.
 
         TODO:
         ----
@@ -229,11 +235,8 @@ class PasswordHandler(RequestHandler):
         if self.passwords.qsize() == 0:
             self.log.error('No Passwords to Try')
 
-            # Stop Results Consumer (Could probably be done using stop_event as
-            # well but this is faster.)
-            await results.put(None)
-            # Stop Proxy Producer
-            # stop_event.set()
+            await results.put(None)  # Stop Results Consumer
+            await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
             return
 
         # progress = bar(label='Attempting Login', max_value=self.passwords.qsize())
@@ -250,9 +253,6 @@ class PasswordHandler(RequestHandler):
 
         # progress.start()
 
-        # def keep_going():
-        #     return not stop_event.is_set() and not self.passwords.empty()
-
         with self.log.start_and_done('Consuming Passwords'):
 
             async with aiohttp.ClientSession(
@@ -262,8 +262,6 @@ class PasswordHandler(RequestHandler):
 
                 index = 0
                 while not self.passwords.empty() and not found_result_event.is_set():
-                    # Controlled by ResultsHandler - will insert null value if
-                    # the passwords need to stop being watched.
                     password = await self.passwords.get()
                     context = LoginContext(index=index, token=token, password=password)
 
@@ -276,21 +274,13 @@ class PasswordHandler(RequestHandler):
 
         # progress.finish()
 
-        # Triggered by ResultsHandler if it notices an authenticated result.
+        # Triggered by results handler if it notices an authenticated result.
         if found_result_event.is_set():
             # Here we might want to cancel outstanding tasks that we are awaiting.
             self.log.debug('Stop Event Noticed')
-            self.log.info('Stopping Proxy Handler')
-            await self.proxy_handler.pool.put(None)
+            await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
 
+        # Triggered by No More Passwords - No Authenticated Result
         else:
-            self.log.info('No More Passwords')
-            self.log.info('Stopping Proxy Handler')
-            await self.proxy_handler.pool.put(None)
-            await results.put(None)
-        # # Triggered by No More Passwords - No Authenticated Result
-        # else:
-        # self.log.info('No More Passwords')
-        # await results.put(None)  # Stop Results Consumer
-        # await self.proxy_handler.pool.put(None)
-        # stop_event.set()  # Stop Proxy Producer
+            await results.put(None)  # Stop Results Consumer
+            await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)

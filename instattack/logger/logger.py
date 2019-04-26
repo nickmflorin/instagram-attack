@@ -9,7 +9,7 @@ import traceback
 from .formatter import app_formatter
 
 
-__all__ = ('AppLogger', 'log_handling', )
+__all__ = ('AppLogger', 'log_handling', 'handle_global_exception', )
 
 
 def _stream_handler(level='INFO', format_string=None, filter=None):
@@ -33,15 +33,63 @@ def base_handler(level=None):
     return handler
 
 
-@contextlib.contextmanager
-def log_handling(level=None):
+def handle_global_exception(exc, callback=None):
+    """
+    Can only handle instances of traceback.TracebackException
+    """
+    tb = exc.exc_traceback
 
-    progressbar.streams.wrap_stderr()
-    progressbar.streams.wrap_stdout()
+    log = tb.tb_frame.f_globals.get('log')
+    if not log:
+        log = tb.tb_frame.f_locals.get('log')
 
-    base = base_handler(level=level)
-    with base:
-        yield
+    # Array of lines for the stack trace - might be useful later.
+    # trace = traceback.format_exception(ex_type, ex, tb, limit=3)
+    if not callback:
+        log.exception(exc, extra={
+            'lineno': exc.stack[-1].lineno,
+            'filename': exc.stack[-1].filename,
+        })
+    else:
+        log.error(exc, extra={
+            'lineno': exc.stack[-1].lineno,
+            'filename': exc.stack[-1].filename,
+        })
+        if callback:
+            return callback[0](*callback[1])
+
+
+class log_handling(object):
+
+    def __init__(self, level):
+        self.level = level
+
+    def __call__(self, f):
+
+        def wrapped(instance, *args, **kwargs):
+            if self.level == 'self':
+                self.level = getattr(instance, 'level')
+
+            with self.context():
+                return f(instance, *args, **kwargs)
+        return wrapped
+
+    @contextlib.contextmanager
+    def context(self):
+        self._init_progressbar()
+        try:
+            with base_handler(level=self.level):
+                yield
+        finally:
+            self._deinit_progressbar()
+
+    def _init_progressbar(self):
+        progressbar.streams.wrap_stderr()
+        progressbar.streams.wrap_stdout()
+
+    def _deinit_progressbar(self):
+        progressbar.streams.unwrap_stdout()
+        progressbar.streams.unwrap_stderr()
 
 
 class AppLogger(logbook.Logger):

@@ -12,77 +12,157 @@ from instattack.conf import settings
 
 from instattack.proxies import BROKERS
 from instattack.proxies.server import CustomProxyPool
-from instattack.proxies.utils import read_proxies
+from instattack.proxies.utils import read_proxies, filter_proxies, filter_proxy
 from instattack.proxies.models import Proxy
 
 from .base import Handler
 
 
-class ProxyHandler(Handler):
+class ProxyProducerMixin(object):
     """
-    TODO:
-    -----
+    Portion of ProxyHandler that is responsible for reading proxies from the
+    ProxyBroker ProxyPool and puting results in the queue if they meet
+    certain criteria.
+    """
 
-    This could be cleaned up a bit, with the validation in particular.
-    It might be worthwhile looking into whether or not we can subclass the
-    asyncio.Queue() so we don't have to have the methods on this handler and
-    pass the handler around.
+    async def get_from_pool(self, max_error_rate=None, max_resp_time=None):
+        # Leave these optional now for flexibility - this can be useful to use
+        # outside of this class.
+        max_error_rate = max_error_rate or self.max_error_rate
+        max_resp_time = max_resp_time or self.max_resp_time
 
-    The logic in here definitely needs to be looked at and cleaned up, particularly
-    in terms of the order we are validating and when we are validating the proxies.
+        with stopit.SignalTimeout(self.pool_max_wait_time) as timeout_mgr:
+            while True:
+                proxy = await self.pool.get(scheme=self.scheme)
+                if not proxy:
+                    self.log.debug('Proxy Pool Returned None')
+                    return proxy
+
+                # TODO: Make it so that the pool works with our model of Proxy and
+                # our model of Proxy includes additional info.
+                _proxy = Proxy(
+                    host=proxy.host,
+                    port=proxy.port,
+                    avg_resp_time=proxy.avg_resp_time,
+                    error_rate=proxy.error_rate,
+                    is_working=proxy.is_working,
+                )
+
+                _proxy, reason = filter_proxy(
+                    _proxy,
+                    max_error_rate=max_error_rate,
+                    max_resp_time=max_resp_time
+                )
+                if not _proxy:
+                    if reason == 'max_error_rate':
+                        message = f'Discarding Proxy with Error Rate {_proxy.error_rate}'
+                    elif reason == 'max_resp_time':
+                        message = f'Discarding Proxy with Avg Resp Time {_proxy.avg_resp_time}'
+                    self.log.debug(message, extra={'proxy': _proxy})
+                    continue
+
+            if timeout_mgr.state == timeout_mgr.TIMED_OUT:
+                raise exceptions.InternalTimeout("Timed out waiting for a proxy from pool.")
+            return _proxy
+
+    async def produce(self, loop):
+        """
+        Stop event should not be needed since we can break from the cycle
+        by putting None into the pool, the potential issue is that None will
+        be in the queue if the Broker cannot find anymore proxies as well...
+
+        We may run into issues with that down the line.
+        """
+        with self.log.start_and_done(f'Producing {self.method} Proxies'):
+            while True:
+                try:
+                    proxy = await self.get_from_pool(
+                        max_error_rate=self.max_error_rate,
+                        max_resp_time=self.max_resp_time
+                    )
+                # Weird error from ProxyBroker that makes no sense...
+                # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
+                except TypeError as e:
+                    self.log.warning(e)
+                else:
+                    # See docstring about None value.
+                    if proxy is None:
+                        await self.stop()
+                        break
+
+                    await self.put(proxy, update_time=False)
+
+
+class ProxyHandler(Handler, ProxyProducerMixin):
+    """
+    We have to run handler.broker.stop() and handler.broker.find() instead
+    of having an async method on ProxyHandler like `start_server()`.  At this point,
+    I'm not exactly sure why - but it was causing issues.
+
+    TODO
+    ----
+    We want to eventually subclass CustomProxyPool more dynamically to use our
+    Proxy model and to be able to handle the validation and retrieval logic
+    of a proxy.
+
+    Once this is done, self.proxies will not be required anymore because we can
+    return directly from self.pool instead of populating results of self.pool
+    in self.proxies.
     """
     __name__ = 'Proxy Handler'
 
-    def __init__(self, user, method='GET', **kwargs):
+    def __init__(self, method='GET', **kwargs):
         kwargs['__name__'] = f'{method} {self.__name__}'
-        super(ProxyHandler, self).__init__(user, **kwargs)
+        super(ProxyHandler, self).__init__(**kwargs)
 
         self.method = method
 
-        # TODO:  Once we subclass CustomProxyPool to correctly use our proxy
-        # model instead of theirs, we don't need separate queues for the proxies
-        # that we read from .txt file and filter out from the server and the
-        # proxies that are read from the server.
-
-        # Proxies we read from .txt files on prepopulate and then proxies we
-        # get from server during live run.
+        # `broker_proxies` store the results from the CustomProxyPool queue,
+        # whereas `self.proxies` stores these consumed results after they are
+        # validated for certain metrics and converted to our Proxy model.
         self.proxies = asyncio.Queue()
+        broker_proxies = asyncio.Queue()
 
-        # We don't really access self.served_proxies, it's just so that there
-        # is a queue that the proxy pool can store the proxies in.
-        self.served_proxies = asyncio.Queue()
-        self.server = self.broker_cls(self.served_proxies)
-        self._server_running = False
-        self.pool = CustomProxyPool(self.served_proxies)
+        # Shoud we provide any arguments to the Pool?
+        self.pool = CustomProxyPool(broker_proxies)
 
-    @property
-    def broker_cls(self):
-        return BROKERS[self.method]
+        # We could provide timeout here but we do that on our own.
+        self.broker = self.broker_cls(
+            max_conn=kwargs['max_conn'],
+            max_tries=kwargs['max_tries'],
+            # timeout=kwargs['pool_max_wait_time']
 
-    @property
-    def scheme(self):
-        return urlparse(settings.URLS[self.method]).scheme
+            # Not usually applied to broker, but we apply for our custom broker.
+            limit=kwargs['limit'],
+            post=kwargs['post'],
+            countries=kwargs['countries'],
+            types=kwargs['types'],
 
-    async def put(self, proxy, update_time=True):
-        if proxy and update_time:
-            proxy.last_used = datetime.now()
-        await self.proxies.put(proxy)
+            # These parameters are provided to the .serve() method, which we do not
+            # use, but we might be able to apply them to the pool.
+            # max_error_rate and max_resp_time also provided to .serve() method,
+            # but we may be able to provide to pool.
+            prefer_connect=kwargs['prefer_connect'],
+            http_allowed_codes=kwargs['http_allowed_codes'],
+            min_req_proxy=kwargs['min_req_proxy'],
+        )
 
-    async def put_nowait(self, proxy, update_time=True):
-        if proxy and update_time:
-            proxy.last_used = datetime.now()
-        await self.proxies.put_nowait(proxy)
+    async def prepopulate(self, loop):
+        """
+        When initially starting, it sometimes takes awhile for the proxies with
+        valid credentials to populate and kickstart the password consumer.
 
-    async def validate_proxy(self, proxy):
-        if not proxy.last_used:
-            return True
-        else:
-            # TODO: Move this value to settings.
-            if proxy.time_since_used() >= 10:
-                return True
-            else:
-                await self.proxies.put(proxy)
-                return False
+        Prepopulating the proxies from the designated text file can help and
+        dramatically increase speeds.
+        """
+        with self.log.start_and_done(f'Prepopulating {self.method} Proxies'):
+            proxies = read_proxies(method=self.method)
+            for proxy in filter_proxies(
+                proxies,
+                max_error_rate=self.max_error_rate,
+                max_resp_time=self.max_resp_time
+            ):
+                await self.put(proxy, update_time=False)
 
     async def get_from_queue(self):
         while True:
@@ -102,14 +182,39 @@ class ProxyHandler(Handler):
         """
         TODO
         ----
-        Move the allowed timeout for finding a given proxy that satisfies
-        reauirements to settings.
+        We want to eventually incorporate this type of logic into the ProxyPool
+        so that we can more easily control the queue output.
 
-        We will set the timeout very high right now, because it sometimes takes
-        awhile for the proxies to build up - setting this low causes it to fail
-        during early stages of login attempts.
+        We should be looking at prioritizing proxies by `confirmed = True` where
+        the time since it was last used is above a threshold (if it caused a too
+        many requests error) and then look at metrics.
+
+        import heapq
+
+        data = [
+            ((5, 1, 2), 'proxy1'),
+            ((5, 2, 1), 'proxy2'),
+            ((3, 1, 2), 'proxy3'),
+            ((5, 1, 1), 'proxy5'),
+        ]
+
+        heapq.heapify(data)
+        for item in data:
+            print(item)
+
+        We will have to re-heapify whenever we go to get a proxy (hopefully not
+        too much processing) - if it is, we should limit the size of the proxy queue.
+
+        Priority can be something like (x), (max_resp_time), (error_rate), (times used)
+        x is determined if confirmed AND time since last used > x (binary)
+        y is determined if not confirmed and time since last used > x (binary)
+
+        Then we will always have prioritized by confirmed and available, not confirmed
+        but ready, all those not used yet... Might not need to prioritize by times
+        not used since that is guaranteed (at least should be) 0 after the first
+        two priorities
         """
-        with stopit.SignalTimeout(50) as timeout_mgr:
+        with stopit.SignalTimeout(self.proxy_max_wait_time) as timeout_mgr:
             proxy = await self.get_from_queue()
             self.log.info('THE CHECK BELOW IS NOT WORKING, NO PROXY HAS TIME SINCE USED')
             if proxy:
@@ -124,77 +229,53 @@ class ProxyHandler(Handler):
 
         return proxy
 
-    async def start_server(self, loop):
-        with self.log.start_and_done(f'Starting {self.method} Server'):
-            self.server.find()
-        self._server_running = True
+    async def stop(self):
+        with self.log.start_and_done(f'Stopping {self.method} Handler'):
+            await self.pool.put(None)
+            self.proxies.put_nowait(None)
 
-    async def stop_server(self, loop):
-        # Stopping server can be done outside of main event loop but starting
-        # it must be done at the top level in loop.run_until_complete().
-        with self.log.start_and_done(f'Stopping {self.method} Server'):
-            self.server.stop()
-        self._server_running = False
+            self.log.info(f'Waiting for {self.method} Server to Stop...')
+            self.broker.stop()
 
-    async def prepopulate(self, loop):
+    async def confirmed(self, proxy):
+        proxy.last_used = datetime.now()
+        proxy.confirmed = True
+        proxy.times_used += 1
+        await self.proxies.put(proxy)
+
+    async def used(self, proxy):
         """
-        When initially starting, it sometimes takes awhile for the proxies with
-        valid credentials to populate and kickstart the password consumer.
-
-        Prepopulating the proxies from the designated text file can help and
-        dramatically increase speeds.
+        When we want to keep proxy in queue because we're not sure if it is
+        invalid (like when we get a Too Many Requests error) but we don't want
+        to note it as `confirmed` just yet.
         """
+        proxy.last_used = datetime.now()
+        proxy.times_used += 1
+        await self.proxies.put(proxy)
 
-        # Make max_error_rate and max_resp_time for proxies configurable, and if
-        # they are set, than we can filter the proxies we read by those values.
-        with self.log.start_and_done(f'Prepopulating {self.method} Proxies'):
-            proxies = read_proxies(method=self.method, order_by='avg_resp_time')
-            for proxy in proxies:
-                await self.put(proxy, update_time=False)
+    async def validate_proxy(self, proxy):
+        if not proxy.last_used:
+            return True
+        else:
+            # TODO: Move this value to settings.
+            if proxy.time_since_used() >= 10:
+                return True
+            else:
+                await self.proxies.put(proxy)
+                return False
 
-    async def produce(self, loop):
-        """
-        Stop event is not needed for the GET case, where we are finding a token,
-        because we can trigger the generator to stop by putting None in the queue.
+    @property
+    def broker_cls(self):
+        return BROKERS[self.method]
 
-        On the other hand, if we notice that a result is authenticated, we need
-        the stop event to stop handlers mid queue.
+    @property
+    def scheme(self):
+        return urlparse(settings.URLS[self.method]).scheme
 
-        TODO
-        -----
-        Stop event should not be needed if we can break when the found proxy
-        is None.  That is why we override the ProxyPool, to allow us to put
-        None in there.
+    @property
+    def stopped(self):
+        return self.broker._server is None
 
-        However, this might also be a case where there are actually no more
-        proxies from the server, which would otherwise raise a NoProxyError.
-
-        We may run into issues with that down the line.
-        """
-        with self.log.start_and_done(f'Producing {self.method} Proxies'):
-            while True:
-                try:
-                    self.log.debug('Waiting on Proxy...')
-                    proxy = await self.pool.get(scheme=self.scheme)
-
-                    # See docstring about None value.
-                    if proxy is None:
-                        self.log.debug('None in Pool Indicated Stop')
-                        self.put_nowait(None)
-                        self.log.debug('Put None in Pool...')
-                        break
-
-                # Weird error from ProxyBroker that makes no sense...
-                # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
-                except TypeError as e:
-                    self.log.warning(e)
-
-                else:
-                    proxy = Proxy.from_broker_proxy(proxy)
-                    # TODO: Move these values to settings.
-                    if proxy.error_rate <= 0.5 and proxy.avg_resp_time <= 5.0:
-                        # Should we maybe check other proxy verifications before we put the
-                        # proxy in the queue to begin with?
-                        await self.put(proxy, update_time=False)
-
-            await self.stop_server(loop)
+    @property
+    def running(self):
+        return not self.stopped

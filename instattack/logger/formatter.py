@@ -1,7 +1,5 @@
 from __future__ import absolute_import
 
-from instattack import exceptions
-
 from .utils import (
     get_exception_request_method, get_exception_message,
     get_exception_status_code, LogItem, LogItemLine)
@@ -16,8 +14,6 @@ def format_exception_message(exc, level):
     )
 
     message = get_exception_message(exc)
-    if message is None:
-        raise exceptions.FatalException("Exception message should not be null.")
 
     return FORMAT_EXCEPTION_MESSAGE.format(
         status_code=get_exception_status_code(exc),

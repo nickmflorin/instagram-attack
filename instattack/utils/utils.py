@@ -12,13 +12,18 @@ def ensure_iterable(arg):
     return arg
 
 
-def array(*values):
-    return [val for val in values if val is not None]
+def convert_lines_to_text(lines):
+    # This is being a pain about circular imports, will resolve later.
+    from instattack.logger import AppLogger
+    log = AppLogger(__file__)
 
+    if "" in lines:
+        log.warning('Found empty string in lines.')
+    elif None in lines:
+        log.warning('Found null value in lines.')
 
-def array_string(*values, separator=" "):
-    values = array(*values)
-    return separator.join(values)
+    lines = [line for line in lines if line is not None and line != ""]
+    return "\n".join(lines)
 
 
 async def cancel_remaining_tasks(futures=None):

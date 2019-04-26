@@ -20,19 +20,11 @@ class Proxy:
     avg_resp_time: float
     error_rate: float
     is_working: bool = True
-    valid: bool = False
+    confirmed: bool = False
     last_used: datetime = None
+    times_used: int = 0
 
-    @classmethod
-    def from_broker_proxy(cls, proxy):
-        return cls(
-            host=proxy.host,
-            port=proxy.port,
-            avg_resp_time=proxy.avg_resp_time,
-            error_rate=proxy.error_rate,
-            is_working=proxy.is_working,
-        )
-
+    @property
     def time_since_used(self):
         if self.last_used:
             delta = datetime.now() - self.last_used

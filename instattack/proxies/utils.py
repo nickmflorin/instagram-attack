@@ -7,6 +7,7 @@ from instattack.conf import settings
 from instattack.conf.utils import validate_method
 
 from instattack.logger import AppLogger
+from instattack.utils import convert_lines_to_text
 
 from .models import Proxy
 from .exceptions import InvalidFileLine
@@ -18,7 +19,7 @@ log = AppLogger(__file__)
 def parse_proxy(proxy):
     return (
         f"{proxy.host}:{proxy.port},"
-        f"{proxy.avg_resp_time},{proxy.error_rate}\n"
+        f"{proxy.avg_resp_time},{proxy.error_rate}"
     )
 
 
@@ -87,6 +88,24 @@ def read_proxies(method, limit=None, order_by=None):
     return proxies
 
 
+def filter_proxy(proxy, max_error_rate=None, max_resp_time=None):
+    if max_error_rate and proxy.error_rate > max_error_rate:
+        return (None, 'max_error_rate')
+
+    if max_resp_time and proxy.avg_resp_time > max_resp_time:
+        return (None, 'max_resp_time')
+    return (proxy, None)
+
+
+def filter_proxies(proxies, max_error_rate=None, max_resp_time=None):
+    return [
+        filtered_proxy[0] for filtered_proxy in [
+            filter_proxy(proxy, max_error_rate=max_error_rate, max_resp_time=max_resp_time)
+            for proxy in proxies
+        ] if filtered_proxy[0] is not None
+    ]
+
+
 def write_proxies(method, proxies, overwrite=False):
 
     filepath = get_proxy_file_path(method)
@@ -103,42 +122,6 @@ def write_proxies(method, proxies, overwrite=False):
             if proxy not in add_proxies:
                 add_proxies.append(proxy)
 
-    for proxy in add_proxies:
-        line = parse_proxy(proxy)
-        filepath.write(line)
-
-
-def get_pids_from_terminal_content(content, port, limit=None):
-    lines = content.split('\n')
-    if len(lines) < 2:
-        raise IOError(f"Invalid content returned from lsof -i:{port}")
-
-    lines = lines[1:]
-    if limit:
-        lines = lines[:limit]
-
-    rows = [
-        [item for item in line.split(' ') if item.strip() != '']
-        for line in lines
-    ]
-
-    if limit == 1:
-        return int(rows[0][1])
-
-    pids = []
-    for row in rows:
-        try:
-            pids.append(row[1])
-        except IndexError:
-            continue
-    return [int(pid) for pid in pids]
-
-
-def find_pids_on_port(port):
-    try:
-        content = subprocess.check_output(['lsof', '-i', ':%s' % port], universal_newlines=True)
-    except subprocess.CalledProcessError:
-        return []
-    else:
-        pids = get_pids_from_terminal_content(content, port)
-        return list(set(pids))
+    to_write = [parse_proxy(proxy) for proxy in add_proxies]
+    data = convert_lines_to_text(to_write)
+    filepath.write(data, encoding='utf-8')

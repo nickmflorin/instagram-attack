@@ -2,9 +2,11 @@ from __future__ import absolute_import
 
 import progressbar
 
-from .formatting import Colors
+from instattack.conf import Colors
 
 
+# TODO: Replace with Plumbum Progressbar
+# https://plumbum.readthedocs.io/en/latest/api/cli.html
 class CustomProgressbar(progressbar.ProgressBar):
 
     def update(self, value=None, force=False, **kwargs):

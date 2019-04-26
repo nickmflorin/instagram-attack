@@ -8,7 +8,9 @@ from .base import Handler
 class ResultsHandler(Handler):
 
     def __init__(self, user, results, **kwargs):
-        super(ResultsHandler, self).__init__(user, **kwargs)
+        super(ResultsHandler, self).__init__(**kwargs)
+
+        self.user = user
         self.attempts = asyncio.Queue()
         self.results = results
 

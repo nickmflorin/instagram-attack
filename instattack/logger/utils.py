@@ -1,34 +1,6 @@
 from __future__ import absolute_import
 
-from __future__ import absolute_import
-
 import aiohttp
-
-
-def handle_global_exception(exc, callback=None):
-    """
-    Can only handle instances of traceback.TracebackException
-    """
-    tb = exc.exc_traceback
-
-    log = tb.tb_frame.f_globals.get('log')
-    if not log:
-        log = tb.tb_frame.f_locals.get('log')
-
-    # Array of lines for the stack trace - might be useful later.
-    # trace = traceback.format_exception(ex_type, ex, tb, limit=3)
-    if not callback:
-        log.exception(exc, extra={
-            'lineno': exc.stack[-1].lineno,
-            'filename': exc.stack[-1].filename,
-        })
-    else:
-        log.error(exc, extra={
-            'lineno': exc.stack[-1].lineno,
-            'filename': exc.stack[-1].filename,
-        })
-        if callback:
-            return callback[0](*callback[1])
 
 
 def get_exception_status_code(exc):

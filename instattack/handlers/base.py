@@ -10,8 +10,9 @@ from instattack.logger import AppLogger
 
 class Handler(object):
 
-    def __init__(self, user, **kwargs):
-        self.user = user
+    arguments = ()
+
+    def __init__(self, **kwargs):
 
         logger_name = kwargs.get('__name__') or self.__class__.__name__
         self.log = AppLogger(logger_name)
@@ -19,16 +20,17 @@ class Handler(object):
 
 class RequestHandler(Handler):
 
-    def __init__(self, user, method=None, fetch_time=None, connection_limit=None,
-            connector_timeout=None, **kwargs):
-        super(RequestHandler, self).__init__(user, **kwargs)
+    def __init__(self, method=None, **kwargs):
+        super(RequestHandler, self).__init__(**kwargs)
 
         self.user_agent = random.choice(settings.USER_AGENTS)
-
         self.method = method
-        self.fetch_time = fetch_time
-        self.connection_limit = connection_limit
-        self.connector_timeout = connector_timeout
+
+        self.connection_limit = kwargs['connection_limit']
+        self.connection_timeout = kwargs['connection_timeout']
+        self.connection_force_close = kwargs['connection_force_close']
+        self.connection_limit_per_host = kwargs['connection_limit_per_host']
+        self.connection_keepalive_timeout = kwargs['connection_keepalive_timeout']
 
     def _notify_request(self, context, retry=1):
         message = f'Sending {self.__method__} Request'
@@ -53,11 +55,13 @@ class RequestHandler(Handler):
         """
         return aiohttp.TCPConnector(
             ssl=False,
+            force_close=self.connection_force_close,
             limit=self.connection_limit,
-            keepalive_timeout=self.connector_timeout,
+            limit_per_host=self.connection_limit_per_host,
+            keepalive_timeout=self.connection_keepalive_timeout,
             enable_cleanup_closed=True,
         )
 
     @property
     def timeout(self):
-        return aiohttp.ClientTimeout(total=self.fetch_time)
+        return aiohttp.ClientTimeout(total=self.connection_timeout)
