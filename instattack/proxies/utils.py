@@ -51,7 +51,7 @@ def reverse_parse_proxy(line):
 def get_proxy_file_path(method):
     validate_method(method)
     filename = "%s.txt" % method.lower()
-    return local.cwd / settings.APP_NAME / settings.PROXY_DIR / settings.DATA_DIR / filename
+    return local.cwd / settings.PROXY_DIR / settings.DATA_DIR / filename
 
 
 def read_proxies(method, limit=None, order_by=None):

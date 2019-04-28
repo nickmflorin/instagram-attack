@@ -48,13 +48,6 @@ class BaseApplication(cli.Application):
 
     level = cli.SwitchAttr("--level", validate_log_level, default='INFO')
 
-    _method = 'GET'
-
-    @cli.switch("--method", cli.Set("GET", "POST", case_sensitive=False))
-    def method(self, method):
-        self._method = method.upper()
-        return self._method
-
 
 class Instattack(BaseApplication):
 
@@ -77,65 +70,7 @@ class Instattack(BaseApplication):
 
 
 class ConfigArgs(object):
-
-    def _conditional_set(self, name, value, conditional):
-        if hasattr(self, conditional):
-            if not hasattr(self, name):
-                setattr(self, '_%s' % name, value[getattr(self, conditional)])
-            else:
-                setattr(self, name, value[getattr(self, conditional)])
-        else:
-            if not hasattr(self, name):
-                setattr(self, '_%s' % name, value)
-            else:
-                setattr(self, name, value)
-
-
-class ProxyPoolArgs(ConfigArgs):
-
-    __group__ = 'Proxy Pool'
-
-    _max_resp_time = None
-    _max_error_rate = None
-    _proxy_queue_timeout = None
-    _proxy_pool_timeout = None
-    _pool_min_req_proxy = None
-
-    @method_switch('max_error_rate',
-        default={'GET': 0.5, 'POST': 0.5},
-        group=__group__,
-        help="Maximum error rate for a given proxy in the pool.")
-    def max_error_rate(self, data):
-        self._conditional_set('_max_error_rate', data, '_method')
-
-    @method_switch('max_resp_time',
-        default={'GET': 8, 'POST': 6},
-        group=__group__,
-        help="Maximum average response time for a given proxy in the pool.")
-    def max_resp_time(self, data):
-        self._conditional_set('_max_resp_time', data, '_method')
-
-    @method_switch('proxy_queue_timeout',
-        group=__group__,
-        default={'GET': 8, 'POST': 8})
-    def proxy_queue_timeout(self, data):
-        self._conditional_set('_proxy_queue_timeout', data, '_method')
-
-    @method_switch('proxy_pool_timeout',
-        group=__group__,
-        default={'GET': 25, 'POST': 25})
-    def proxy_pool_timeout(self, data):
-        self._conditional_set('_proxy_pool_timeout', data, '_method')
-
-    @method_switch('pool_min_req_proxy',
-        group=__group__,
-        default={'GET': 3, 'POST': 3},
-        help=(
-            "The minimum number of processed requests to estimate the quality "
-            "of proxy (in accordance with max_error_rate and max_resp_time)"
-        ))
-    def pool_min_req_proxy(self, data):
-        self._conditional_set('_pool_min_req_proxy', data, '_method')
+    pass
 
 
 class RequestArgs(ConfigArgs):
@@ -144,6 +79,9 @@ class RequestArgs(ConfigArgs):
 
     # We should probably be using the force close option.
     _connection_force_close = cli.Flag('--connection_force_close')
+    _connection_limit = {'GET': 50, 'POST': 200}
+    _connection_limit_per_host = {'GET': 0, 'POST': 0}
+    _session_timeout = {'GET': 5, 'POST': 10}
 
     _connection_keepalive_timeout = cli.SwitchAttr(
         "--token_connection_keepalive_timeout", float,
@@ -154,29 +92,36 @@ class RequestArgs(ConfigArgs):
             "For disabling keep-alive feature use force_close=True flag."
         )
     )
-    _connection_limit = None
-    _connection_limit_per_host = None
-    _session_timeout = None
 
     @method_switch('connection_limit',
-        default={'GET': 50, 'POST': 200},
+        default=_connection_limit,
         group=__group__,
         help="Total number simultaneous connections for the connector.")
     def connection_limit(self, data):
-        self._conditional_set('connection_limit', data, '_method')
+        self._connection_limit = data
 
     @method_switch('connection_limit_per_host',
-        default={'GET': 0, 'POST': 0},
+        default=_connection_limit_per_host,
         group=__group__,
         help="Limit simultaneous connections to the same endpoint.")
     def connection_limit_per_host(self, data):
-        self._conditional_set('connection_limit_per_host', data, '_method')
+        self._connection_limit_per_host = data
 
     # This value needs to be higher when we do not have any collected GET proxies
     # stored.
     @method_switch('session_timeout',
-        default={'GET': 5, 'POST': 10},
+        default=_session_timeout,
         group=__group__,
         help="Session timeout for requests.")
     def session_timeout(self, data):
-        self._conditional_set('session_timeout', data, '_method')
+        self._session_timeout = data
+
+    def request_config(self, method=None):
+        method = method or self._method
+        return {
+            'connection_force_close': self._connection_force_close,
+            'connection_keepalive_timeout': self._connection_keepalive_timeout,
+            'connection_limit': self._connection_limit[method],
+            'connection_limit_per_host': self._connection_limit_per_host[method],
+            'session_timeout': self._session_timeout[method],
+        }

@@ -8,13 +8,14 @@ import stopit
 
 from instattack import exceptions
 from instattack.conf import settings
+from instattack.utils import OptionalProgressbar
+from instattack.handlers.base import Handler
 
-from instattack.proxies import CustomBroker, CustomProxyPool
-from instattack.proxies.exceptions import NoProxyError, ProxyException
-from instattack.proxies.utils import read_proxies, filter_proxies
-from instattack.proxies.models import Proxy
-
-from .base import Handler
+from .server import CustomBroker
+from .pool import CustomProxyPool
+from .exceptions import NoProxyError, ProxyException
+from .utils import read_proxies, filter_proxies, write_proxies
+from .models import Proxy
 
 
 class ProxyHandler(Handler):
@@ -50,8 +51,8 @@ class ProxyHandler(Handler):
         proxy_types=None,
         # Pool Arguments
         pool_min_req_proxy=None,
-        proxy_max_error_rate=None,
-        proxy_max_resp_time=None,
+        pool_max_error_rate=None,
+        pool_max_resp_time=None,
         # Handler Args
         proxy_queue_timeout=None,
         proxy_pool_timeout=None,
@@ -63,10 +64,11 @@ class ProxyHandler(Handler):
 
         self._proxy_queue_timeout = proxy_queue_timeout
         self._proxy_pool_timeout = proxy_pool_timeout
+        self._proxy_limit = proxy_limit
 
         # Pool Arguments
-        self._proxy_max_error_rate = proxy_max_error_rate
-        self._proxy_max_resp_time = proxy_max_resp_time
+        self._proxy_max_error_rate = pool_max_error_rate
+        self._proxy_max_resp_time = pool_max_resp_time
 
         broker_proxies = asyncio.Queue()
         self.proxies = proxies or asyncio.Queue()
@@ -110,7 +112,7 @@ class ProxyHandler(Handler):
             ):
                 await self.proxies.put(proxy)
 
-    async def produce(self, loop):
+    async def produce(self, loop, current_proxies=None, progress=False, display=False):
         """
         Stop event should not be needed since we can break from the cycle
         by putting None into the pool.  If the CustomProxyPool reaches it's limit,
@@ -119,19 +121,62 @@ class ProxyHandler(Handler):
         If it has not met it's limit yet, we are intentionally stopping it and
         the value of the retrieved proxy will be None.
         """
+        current_proxies = current_proxies or []
         with self.log.start_and_done(f'Producing {self.method} Proxies'):
-            async for proxy in self.get_from_pool():
+            async for proxy in self.get_proxies_from_pool(progress=progress, display=display):
                 if proxy is None:
                     raise ProxyException("Should not have None values in generator.")
-                await self.proxies.put(proxy)
-        # Should we have a self.stop() call here?
+                if proxy not in current_proxies:
+                    await self.proxies.put(proxy)
 
-    async def _get_from_pool(self, max_error_rate=None, max_resp_time=None):
-        # Leave these optional now for flexibility - this can be useful to use
-        # outside of this class.
-        max_error_rate = max_error_rate or self._proxy_max_error_rate
-        max_resp_time = max_resp_time or self._proxy_max_resp_time
+    async def get_proxies_from_pool(self, progress=False, display=False):
+        progress = OptionalProgressbar(max_value=self._proxy_limit, enabled=progress)
 
+        while True:
+            try:
+                self.log.debug('Retrieving Proxy from Pool')
+                with stopit.SignalTimeout(self._proxy_pool_timeout) as timeout_mgr:
+                    proxy = await self._get_from_pool()
+
+                if timeout_mgr.state == timeout_mgr.TIMED_OUT:
+                    raise exceptions.InternalTimeout(
+                        "Timed out waiting for a proxy from pool."
+                    )
+
+            # Weird error from ProxyBroker that makes no sense...
+            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
+            except TypeError as e:
+                self.log.warning(e)
+                continue
+
+            except NoProxyError as e:
+                self.log.warning(e)
+                progress.finish()
+                await self.stop()
+                break
+
+            else:
+                # See docstring about None value.
+                if proxy is None:
+                    self.log.debug('Generator Found Null Proxy')
+                    progress.finish()
+
+                    await self.stop()
+                    break
+
+                if display:
+                    self.log.info('Retrieved Proxy from Pool', extra={
+                        'proxy': proxy,
+                        'other': f'Error Rate: {proxy.error_rate}, Avg Resp Time: {proxy.avg_resp_time}' # noqa
+                    })
+                else:
+                    self.log.debug('Generator Yielding Proxy', extra={
+                        'proxy': proxy,
+                    })
+                progress.update()
+                yield proxy
+
+    async def _get_from_pool(self):
         # If we are not filtering by the metrics (which should be done automatically
         # in the pool) than we probably don't need SignalTimeout.
         self.log.debug('Waiting on Proxy from Pool...')
@@ -152,45 +197,6 @@ class ProxyHandler(Handler):
             is_working=proxy.is_working,
         )
         return _proxy
-
-    async def get_from_pool(self, max_error_rate=None, max_resp_time=None):
-        # Maybe add optional limit argument that can override the Pool limit?
-        max_error_rate = max_error_rate or self._proxy_max_error_rate
-        max_resp_time = max_resp_time or self._proxy_max_resp_time
-
-        while True:
-            try:
-                self.log.debug('Retrieving Proxy from Pool')
-                with stopit.SignalTimeout(self._proxy_pool_timeout) as timeout_mgr:
-                    proxy = await self._get_from_pool(
-                        max_error_rate=max_error_rate,
-                        max_resp_time=max_resp_time
-                    )
-                if timeout_mgr.state == timeout_mgr.TIMED_OUT:
-                    raise exceptions.InternalTimeout(
-                        "Timed out waiting for a proxy from pool."
-                    )
-
-            # Weird error from ProxyBroker that makes no sense...
-            # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
-            except TypeError as e:
-                self.log.warning(e)
-                continue
-
-            except NoProxyError as e:
-                self.log.warning(e)
-                await self.stop()
-                break
-
-            else:
-                # See docstring about None value.
-                if proxy is None:
-                    self.log.debug('Generator Found Null Proxy')
-                    await self.stop()
-                    break
-
-                self.log.debug('Generator Yielding Proxy', extra={'proxy': proxy})
-                yield proxy
 
     async def get_from_queue(self):
         """
@@ -267,6 +273,18 @@ class ProxyHandler(Handler):
         #     raise exceptions.InternalTimeout("Timed out waiting for a valid proxy.")
 
         return proxy
+
+    async def save(self, overwrite=False):
+        collected = []
+        while not self.proxies.empty():
+            proxy = await self.proxies.get()
+            if proxy is None:
+                self.log.warning('Saving Proxies: Found Null Proxy... Removing')
+            else:
+                collected.append(proxy)
+
+        self.log.notice(f'Saving {len(collected)} Proxies to {self.method.lower()}.txt.')
+        write_proxies(self.method, collected, overwrite=overwrite)
 
     async def stop(self):
         self.log.notice(f'Stopping {self.method} Server.')

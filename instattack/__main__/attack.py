@@ -7,44 +7,19 @@ from plumbum import cli
 
 from instattack import exceptions
 
-from instattack.logger import log_handling, handle_global_exception
+from instattack.logger import log_handling
 
 from instattack.users.models import User
-
-from instattack.handlers import (
-    ProxyHandler, TokenHandler, ResultsHandler, PasswordHandler)
+from instattack.proxies import ProxyHandler
+from instattack.handlers import TokenHandler, ResultsHandler, PasswordHandler
 
 from .base import BaseApplication, Instattack, RequestArgs
 from .proxies import ProxyArgs
 from .utils import cancel_remaining_tasks
 
 
-class AttackArgs(RequestArgs, ProxyArgs):
-
-    @property
-    def token_handler_config(self):
-        return {
-            'token_max_fetch_time': self._token_max_fetch_time,
-            'session_timeout': self._session_timeout['GET'],
-            'connection_limit': self._connection_limit['GET'],
-            'connection_force_close': self._connection_force_close,
-            'connection_limit_per_host': self._connection_limit_per_host['GET'],
-            'connection_keepalive_timeout': self._connection_keepalive_timeout,
-        }
-
-    @property
-    def password_handler_config(self):
-        return {
-            'session_timeout': self._session_timeout['POST'],
-            'connection_limit': self._connection_limit['POST'],
-            'connection_force_close': self._connection_force_close,
-            'connection_limit_per_host': self._connection_limit_per_host['POST'],
-            'connection_keepalive_timeout': self._connection_keepalive_timeout,
-        }
-
-
 @Instattack.subcommand('attack')
-class InstattackAttack(BaseApplication, AttackArgs):
+class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
 
     __group__ = 'Instattack Attack'
 
@@ -54,27 +29,24 @@ class InstattackAttack(BaseApplication, AttackArgs):
         group=__group__,
     )
 
+    _pwlimit = cli.SwitchAttr(
+        "--pwlimit", int,
+        default=None,
+        group=__group__,
+    )
+
     def get_handlers(self):
-        proxy_handler = ProxyHandler(
-            method='GET',
-            **self.proxy_handler_config('GET')
-        )
-        token_handler = TokenHandler(
-            proxy_handler,
-            **self.token_handler_config
-        )
+        config = self.request_config(method='GET')
+        config['token_max_fetch_time'] = self._token_max_fetch_time
+
+        proxy_handler = ProxyHandler(method='GET', **self.proxy_config(method='GET'))
+        token_handler = TokenHandler(proxy_handler, **config)
         return proxy_handler, token_handler
 
     def post_handlers(self, user):
-        proxy_handler = ProxyHandler(
-            method='POST',
-            **self.proxy_handler_config('POST')
-        )
-        password_handler = PasswordHandler(
-            self.user,
-            proxy_handler,
-            **self.password_handler_config
-        )
+        proxy_handler = ProxyHandler(method='POST', **self.proxy_config(method='POST'))
+        password_handler = PasswordHandler(self.user, proxy_handler,
+            **self.request_config(method='POST'))
         return proxy_handler, password_handler
 
     @log_handling('self')
@@ -91,7 +63,7 @@ class InstattackAttack(BaseApplication, AttackArgs):
         except Exception as e:
             exc_info = sys.exc_info()
             e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-            handle_global_exception(e)
+            self.log.handle_global_exception(e)
 
         finally:
             loop.run_until_complete(self.shutdown(loop))
@@ -122,7 +94,7 @@ class InstattackAttack(BaseApplication, AttackArgs):
         except Exception as e:
             exc_info = sys.exc_info()
             e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-            handle_global_exception(e)
+            self.log.handle_global_exception(e)
 
             # Might not have been stopped if we hit an exception.
             self.ensure_servers_shutdown(loop, get_proxy_handler)
@@ -137,14 +109,14 @@ class InstattackAttack(BaseApplication, AttackArgs):
             post_proxy_handler, password_handler = self.post_handlers()
             try:
                 loop.run_until_complete(asyncio.gather(
-                    password_handler.prepopulate(loop, password_limit=self.password_limit),
+                    password_handler.prepopulate(loop, password_limit=self._pwlimit),
                     post_proxy_handler.prepopulate(loop)
                 ))
 
             except Exception as e:
                 exc_info = sys.exc_info()
                 e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-                handle_global_exception(e)
+                self.log.handle_global_exception(e)
 
             else:
                 auth_result_found = asyncio.Event()
@@ -167,7 +139,7 @@ class InstattackAttack(BaseApplication, AttackArgs):
                 except Exception as e:
                     exc_info = sys.exc_info()
                     e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-                    handle_global_exception(e)
+                    self.log.handle_global_exception(e)
 
                     # Might not have been stopped if we hit an exception, but should
                     # be stopped automatically if the block succeeds.  We will

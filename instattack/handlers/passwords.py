@@ -3,10 +3,9 @@ from __future__ import absolute_import
 import asyncio
 import aiohttp
 
-from instattack.conf import settings
-
 from instattack import exceptions
-from instattack.utils import bar
+from instattack.conf import settings
+from instattack.utils import OptionalProgressbar
 
 from .models import InstagramResult, LoginAttemptContext, LoginContext
 from .base import RequestHandler
@@ -217,7 +216,7 @@ class PasswordHandler(RequestHandler):
             for password in self.user.get_new_attempts(limit=password_limit):
                 await self.passwords.put(password)
 
-    async def consume(self, loop, found_result_event, token, results):
+    async def consume(self, loop, found_result_event, token, results, progress=False):
         """
         A stop event is required since if the results handler notices that we
         found an authenticated result, it needs some way to communicate this to
@@ -248,7 +247,7 @@ class PasswordHandler(RequestHandler):
             await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
             return
 
-        # progress = bar(label='Attempting Login', max_value=self.passwords.qsize())
+        progress = OptionalProgressbar(label='Attempting Login', max_value=self.passwords.qsize())
 
         def task_done(fut):
             result = fut.result()
@@ -258,9 +257,8 @@ class PasswordHandler(RequestHandler):
                 )
             # TODO: Make sure we do not run into any threading issues with this
             # potentially not being thread safe.
+            progress.update()
             results.put_nowait(result)
-
-        # progress.start()
 
         with self.log.start_and_done('Consuming Passwords'):
 
@@ -281,7 +279,7 @@ class PasswordHandler(RequestHandler):
                 self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
                 await asyncio.gather(*tasks)
 
-        # progress.finish()
+        progress.finish()
 
         # Triggered by results handler if it notices an authenticated result.
         if found_result_event.is_set():

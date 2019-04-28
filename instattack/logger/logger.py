@@ -9,7 +9,7 @@ import traceback
 from .formatter import app_formatter
 
 
-__all__ = ('AppLogger', 'log_handling', 'handle_global_exception', )
+__all__ = ('AppLogger', 'log_handling', )
 
 
 def _stream_handler(level='INFO', format_string=None, filter=None):
@@ -31,24 +31,6 @@ def base_handler(level=None):
     handler = _stream_handler(level=level)
     handler.formatter = app_formatter
     return handler
-
-
-def handle_global_exception(exc, callback=None):
-    """
-    Can only handle instances of traceback.TracebackException
-    """
-    tb = exc.exc_traceback
-
-    log = tb.tb_frame.f_globals.get('log')
-    if not log:
-        log = tb.tb_frame.f_locals.get('log')
-
-    # Array of lines for the stack trace - might be useful later.
-    # trace = traceback.format_exception(ex_type, ex, tb, limit=3)
-    log.exception(exc, extra={
-        'lineno': exc.stack[-1].lineno,
-        'filename': exc.stack[-1].filename,
-    })
 
 
 class log_handling(object):
@@ -89,6 +71,24 @@ class AppLogger(logbook.Logger):
     TODO: For the traceback in start_and_done, we have to set it back one step
     so it shows the original location.
     """
+
+    def handle_global_exception(self, exc):
+        """
+        Can only handle instances of traceback.TracebackException
+        """
+        tb = exc.exc_traceback
+
+        log = tb.tb_frame.f_globals.get('log')
+        if not log:
+            log = tb.tb_frame.f_locals.get('log')
+
+        # Array of lines for the stack trace - might be useful later.
+        # trace = traceback.format_exception(ex_type, ex, tb, limit=3)
+        self.exception(exc, extra={
+            'lineno': exc.stack[-1].lineno,
+            'filename': exc.stack[-1].filename,
+        })
+
     @contextlib.contextmanager
     def start_and_done(self, action_string, level='NOTICE', exit_level='DEBUG'):
         methods = {
