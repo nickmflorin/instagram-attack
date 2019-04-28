@@ -7,8 +7,8 @@ from .base import Handler
 
 class ResultsHandler(Handler):
 
-    def __init__(self, user, results, **kwargs):
-        super(ResultsHandler, self).__init__(**kwargs)
+    def __init__(self, user, results):
+        super(ResultsHandler, self).__init__('Results Handler')
 
         self.user = user
         self.attempts = asyncio.Queue()
@@ -18,26 +18,16 @@ class ResultsHandler(Handler):
         """
         Stop event is not needed for the GET case, where we are finding a token,
         because we can trigger the generator to stop by putting None in the queue.
-
         On the other hand, if we notice that a result is authenticated, we need
         the stop event to stop handlers mid queue.
-
-        Since this consumer is at the bottom of the entire tree (i.e. only
-        receiving information after all other consumers), we don't have to wait
-        for a stop event in the loop, we can just break out of it.
         """
         index = 0
         with self.log.start_and_done('Consuming Results'):
             # When there are no more passwords, the Password Consumer will put
             # None in the results queue, triggering this loop to break and
             # the stop_event() to stop the Proxy Producer.
-
-            # Note that we could add a stop event check here just to be safe
-            # and guarantee it stops at the faster event (retrieval of None from
-            # queue or stop event).
             while True:
                 result = await self.results.get()
-
                 if result is None:
                     # Triggered by Password Consumer
                     break

@@ -16,14 +16,25 @@ class PasswordHandler(RequestHandler):
 
     __method__ = 'POST'
 
-    arguments = (
-        ('fetch_time', ),
-        ('connection_limit', ),
-        ('connector_timeout', ),
-    )
-
-    def __init__(self, user, proxy_handler, **kwargs):
-        super(PasswordHandler, self).__init__(method=self.__method__, **kwargs)
+    def __init__(
+        self,
+        user,
+        proxy_handler,
+        session_timeout=None,
+        connection_limit=None,
+        connection_force_close=None,
+        connection_limit_per_host=None,
+        connection_keepalive_timeout=None,
+    ):
+        super(PasswordHandler, self).__init__(
+            'Password Handler',
+            method=self.__method__,
+            connection_limit=connection_limit,
+            session_timeout=session_timeout,
+            connection_force_close=connection_force_close,
+            connection_limit_per_host=connection_limit_per_host,
+            connection_keepalive_timeout=connection_keepalive_timeout
+        )
 
         self.passwords = asyncio.Queue()
         self.user = user
@@ -145,9 +156,7 @@ class PasswordHandler(RequestHandler):
                         if not result:
                             raise exceptions.FatalException("Result should not be None here.")
 
-                        # Put proxy back in so that it can be reused.
-                        proxy.confirmed = True
-                        await self.proxy_handler.put(proxy)
+                        await self.proxy_handler.confirmed(proxy)
                         return result
 
             except RuntimeError as e:
@@ -196,7 +205,7 @@ class PasswordHandler(RequestHandler):
                     e.message = 'Too many requests.'
                     # We still want to put the proxy back in the queue so it can be used
                     # again later, but not confirm it.
-                    await self.proxy_handler.put(proxy)
+                    await self.proxy_handler.used(proxy)
 
                 self.log.error(e, extra={'context': context})
                 return await try_with_proxy(attempt=attempt + 1)

@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 
-import asyncio
 from collections import Iterable
 
 
@@ -24,13 +23,3 @@ def convert_lines_to_text(lines):
 
     lines = [line for line in lines if line is not None and line != ""]
     return "\n".join(lines)
-
-
-async def cancel_remaining_tasks(futures=None):
-    if not futures:
-        futures = asyncio.Task.all_tasks()
-
-    tasks = [task for task in futures if task is not
-         asyncio.tasks.Task.current_task()]
-    list(map(lambda task: task.cancel(), tasks))
-    await asyncio.gather(*tasks, return_exceptions=True)

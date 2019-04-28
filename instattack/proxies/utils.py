@@ -1,6 +1,5 @@
 from __future__ import absolute_import
 
-import subprocess
 from plumbum import local
 
 from instattack.conf import settings

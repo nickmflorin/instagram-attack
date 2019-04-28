@@ -45,18 +45,10 @@ def handle_global_exception(exc, callback=None):
 
     # Array of lines for the stack trace - might be useful later.
     # trace = traceback.format_exception(ex_type, ex, tb, limit=3)
-    if not callback:
-        log.exception(exc, extra={
-            'lineno': exc.stack[-1].lineno,
-            'filename': exc.stack[-1].filename,
-        })
-    else:
-        log.error(exc, extra={
-            'lineno': exc.stack[-1].lineno,
-            'filename': exc.stack[-1].filename,
-        })
-        if callback:
-            return callback[0](*callback[1])
+    log.exception(exc, extra={
+        'lineno': exc.stack[-1].lineno,
+        'filename': exc.stack[-1].filename,
+    })
 
 
 class log_handling(object):
@@ -98,7 +90,7 @@ class AppLogger(logbook.Logger):
     so it shows the original location.
     """
     @contextlib.contextmanager
-    def start_and_done(self, action_string, level='INFO', exit_level='DEBUG'):
+    def start_and_done(self, action_string, level='NOTICE', exit_level='DEBUG'):
         methods = {
             'INFO': self.info,
             'NOTICE': self.notice,

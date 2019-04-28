@@ -31,5 +31,8 @@ class Proxy:
             return delta.total_seconds()
         return None
 
+    def update_time(self):
+        self.last_used = datetime.now()
+
     def url(self, scheme='http'):
         return f"{scheme}://{self.host}:{self.port}/"

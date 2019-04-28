@@ -10,27 +10,33 @@ from instattack.logger import AppLogger
 
 class Handler(object):
 
-    arguments = ()
-
-    def __init__(self, **kwargs):
-
-        logger_name = kwargs.get('__name__') or self.__class__.__name__
-        self.log = AppLogger(logger_name)
+    def __init__(self, name):
+        self.log = AppLogger(name)
 
 
 class RequestHandler(Handler):
 
-    def __init__(self, method=None, **kwargs):
-        super(RequestHandler, self).__init__(**kwargs)
+    _user_agent = None
 
-        self.user_agent = random.choice(settings.USER_AGENTS)
+    def __init__(
+        self,
+        name,
+        method=None,
+        session_timeout=None,
+        connection_limit=None,
+        connection_force_close=None,
+        connection_limit_per_host=None,
+        connection_keepalive_timeout=None
+    ):
+        super(RequestHandler, self).__init__(name)
+
         self.method = method
 
-        self.connection_limit = kwargs['connection_limit']
-        self.connection_timeout = kwargs['connection_timeout']
-        self.connection_force_close = kwargs['connection_force_close']
-        self.connection_limit_per_host = kwargs['connection_limit_per_host']
-        self.connection_keepalive_timeout = kwargs['connection_keepalive_timeout']
+        self._connection_limit = connection_limit
+        self._session_timeout = session_timeout
+        self._connection_force_close = connection_force_close
+        self._connection_limit_per_host = connection_limit_per_host
+        self._connection_keepalive_timeout = connection_keepalive_timeout
 
     def _notify_request(self, context, retry=1):
         message = f'Sending {self.__method__} Request'
@@ -38,13 +44,19 @@ class RequestHandler(Handler):
             message = f'Sending {self.__method__} Request, Retry {retry}'
         self.log.debug(message, extra={'context': context})
 
+    @property
+    def user_agent(self):
+        if not self._user_agent:
+            self._user_agent = random.choice(settings.USER_AGENTS)
+        return self._user_agent
+
     def _headers(self):
         headers = settings.HEADER.copy()
         headers['user-agent'] = self.user_agent
         return headers
 
     @property
-    def connector(self):
+    def _connector(self):
         """
         TCPConnector
         -------------
@@ -55,13 +67,15 @@ class RequestHandler(Handler):
         """
         return aiohttp.TCPConnector(
             ssl=False,
-            force_close=self.connection_force_close,
-            limit=self.connection_limit,
-            limit_per_host=self.connection_limit_per_host,
-            keepalive_timeout=self.connection_keepalive_timeout,
+            force_close=self._connection_force_close,
+            limit=self._connection_limit,
+            limit_per_host=self._connection_limit_per_host,
+            keepalive_timeout=self._connection_keepalive_timeout,
             enable_cleanup_closed=True,
         )
 
     @property
-    def timeout(self):
-        return aiohttp.ClientTimeout(total=self.connection_timeout)
+    def _timeout(self):
+        return aiohttp.ClientTimeout(
+            total=self._session_timeout
+        )
