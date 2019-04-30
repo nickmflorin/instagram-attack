@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from enum import Enum
 
-from instattack.styles import Format, Colors, Styles
+from ..styles import Format, Colors, Styles
 from .utils import LogItemSet, LogItemLine, LogLabeledItem, LogItem
 
 

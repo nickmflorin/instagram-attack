@@ -5,8 +5,7 @@ import sys
 
 from plumbum import cli
 
-from instattack.settings import validate_log_level
-from instattack.logger import AppLogger, log_handling
+from instattack import AppLogger, log_handling, validate_log_level
 
 from .utils import method_switch
 

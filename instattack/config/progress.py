@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import progressbar
 
-from instattack.styles import Colors
+from .styles import Colors
 
 
 __all__ = ('CustomProgressbar', 'OptionalProgressbar', )

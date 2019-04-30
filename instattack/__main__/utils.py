@@ -1,7 +1,7 @@
 import asyncio
 from plumbum import cli
 
-from instattack.logger import AppLogger
+from instattack import AppLogger
 
 
 log = AppLogger(__file__)

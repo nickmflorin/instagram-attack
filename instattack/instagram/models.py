@@ -9,9 +9,8 @@ import json
 
 import aiohttp
 
-from instattack import exceptions, settings
-from instattack.styles import Colors
-from instattack.proxies.models import Proxy
+from instattack import Colors, exceptions, settings
+from instattack.proxies.models import RequestProxy
 
 
 @dataclass
@@ -27,7 +26,7 @@ class TaskContext:
 @dataclass
 class TokenContext(TaskContext):
 
-    proxy: Proxy
+    proxy: RequestProxy
     index: int = 0
 
     @property
@@ -60,7 +59,7 @@ class LoginAttemptContext(TaskContext):
 
     password: str
     token: str
-    proxy: Proxy
+    proxy: RequestProxy
     index: int = 0
     parent_index: int = 0
 
@@ -83,7 +82,7 @@ class InstagramResultErrors:
         try:
             return self.error[0]
         except IndexError:
-            raise exceptions.FatalException("There are no errors.")
+            raise exceptions.AppException("There are no errors.")
 
 
 @dataclass

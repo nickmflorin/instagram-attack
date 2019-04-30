@@ -1,7 +1,7 @@
 import asyncio
 from plumbum import cli
 
-from instattack.logger import log_handling
+from instattack import log_handling
 from instattack.proxies import ProxyHandler
 
 from .base import BaseApplication, Instattack, ConfigArgs
@@ -14,7 +14,6 @@ class ProxyPoolArgs(ConfigArgs):
 
     _pool_max_resp_time = {'GET': 8, 'POST': 6}
     _pool_max_error_rate = {'GET': 0.5, 'POST': 0.5}
-    _proxy_queue_timeout = {'GET': 8, 'POST': 8}
     _proxy_pool_timeout = {'GET': 25, 'POST': 25}
     _pool_min_req_proxy = {'GET': 3, 'POST': 3}
 
@@ -31,12 +30,6 @@ class ProxyPoolArgs(ConfigArgs):
         help="Maximum average response time for a given proxy in the pool.")
     def pool_max_resp_time(self, data):
         self._pool_max_resp_time = data
-
-    @method_switch('proxy_queue_timeout',
-        group=__group__,
-        default=_proxy_queue_timeout)
-    def proxy_queue_timeout(self, data):
-        self._proxy_queue_timeout = data
 
     @method_switch('proxy_pool_timeout',
         group=__group__,
@@ -60,7 +53,6 @@ class ProxyPoolArgs(ConfigArgs):
             'pool_min_req_proxy': self._pool_min_req_proxy[method],
             'pool_max_error_rate': self._pool_max_error_rate[method],
             'pool_max_resp_time': self._pool_max_resp_time[method],
-            'proxy_queue_timeout': self._proxy_queue_timeout[method],
             'proxy_pool_timeout': self._proxy_pool_timeout[method],
         }
 
@@ -112,7 +104,7 @@ class ProxyServerArgs(ConfigArgs):
     _proxy_countries = None
     _proxy_types = {
         'GET': [('HTTP', ('Anonymous', 'High')), 'HTTPS'],
-        'POST': ['HTTP', 'HTTPS'],
+        'POST': ['HTTPS'],
     }
     _post = {
         'GET': False,
@@ -178,13 +170,5 @@ class ProxyCollect(ProxyApplication):
         config = self.proxy_config(method=self._method)
         proxy_handler = ProxyHandler(method=self._method, proxies=proxies, **config)
 
-        self.log.critical('starting')
-
-        loop.run_until_complete(asyncio.gather(
-            # proxy_handler.consume(loop, progress=True, display=True),
-            proxy_handler.start(loop),
-            # proxy_handler.broker.start(),
-            # proxy_handler.pool.consume(loop),
-        ))
-        # loop.run_until_complete(proxy_handler.start(loop))
-        loop.run_until_complete(proxy_handler.save(overwrite=self.clear))
+        loop.run_until_complete(proxy_handler.start(loop))
+        loop.run_until_complete(proxy_handler.stop(loop, save=True, overwrite=self.clear))

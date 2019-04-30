@@ -4,13 +4,12 @@ import traceback
 import asyncio
 from plumbum import cli
 
-from instattack import exceptions
+from instattack import exceptions, log_handling
 
-from instattack.logger import log_handling
-
-from instattack.users.models import User
 from instattack.proxies import ProxyHandler
 from instattack.instagram import TokenHandler, ResultsHandler, PasswordHandler
+
+from instattack.data.models import User
 
 from .base import BaseApplication, Instattack, RequestArgs
 from .proxies import ProxyArgs
@@ -94,7 +93,7 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
             # Get Proxy Server Stopped Automatically
             token = task_results[0]
             if not token:
-                raise exceptions.FatalException("Token should not be null.")
+                raise exceptions.AppException("Token should not be null.")
             self.log.notice('Received Token', extra={'token': token})
 
             post_proxy_handler, password_handler = self.post_handlers(self.user)

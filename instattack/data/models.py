@@ -8,9 +8,9 @@ from datetime import datetime
 
 from instattack import settings
 
-from .utils import (create_new_user_files, check_user_files, create_user_dir,
-    create_data_dir, user_exists, read_user_file, update_attempts_file)
-from .generator import password_generator
+from .user_io import (create_new_user_files, check_user_files, create_user_dir,
+    create_users_data_dir, user_exists, read_user_file, update_attempts_file)
+from .password_generator import password_generator
 
 
 @dataclass
@@ -22,7 +22,7 @@ class User:
 
     def setup(self):
         if not self.exists:
-            create_data_dir(strict=False)
+            create_users_data_dir(strict=False)
             create_user_dir(self.username, strict=True)
             create_new_user_files(self.username)
         else:

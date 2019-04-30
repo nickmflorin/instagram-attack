@@ -1,21 +1,14 @@
 from __future__ import absolute_import
 
-from collections import Iterable
+from instattack import AppLogger
 
 from .exceptions import InvalidFileLine, InvalidWriteElement
 
 
-def ensure_iterable(arg):
-    if isinstance(arg, str):
-        return [arg]
-    elif not isinstance(arg, Iterable):
-        return [arg]
-    return arg
+log = AppLogger(__file__)
 
 
 def write_array_data(path, array):
-    from instattack.logger import AppLogger
-    log = AppLogger(__file__)
 
     lines = []
     for i, element in enumerate(array):
@@ -32,8 +25,6 @@ def write_array_data(path, array):
 
 
 def read_raw_data(filepath, limit=None):
-    from instattack.logger import AppLogger
-    log = AppLogger(__file__)  # noqa
 
     raw_data = filepath.read()
 

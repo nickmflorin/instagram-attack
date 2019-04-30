@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 @dataclass
-class Proxy:
+class RequestProxy:
 
     host: str
     port: int
@@ -24,7 +24,7 @@ class Proxy:
 
     @classmethod
     def from_proxybroker(cls, proxy):
-        return Proxy(
+        return RequestProxy(
             host=proxy.host,
             port=proxy.port,
             avg_resp_time=proxy.avg_resp_time,
@@ -56,5 +56,9 @@ class Proxy:
     def update_time(self):
         self.last_used = datetime.now()
 
+    @property
+    def address(self):
+        return f'{self.host}:{self.port}'
+
     def url(self, scheme='http'):
-        return f"{scheme}://{self.host}:{self.port}/"
+        return f"{scheme}://{self.address}/"

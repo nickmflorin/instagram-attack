@@ -9,18 +9,18 @@ class ProxyException(AppException):
 
 class NoProxyError(ProxyException):
 
-    __message__ = 'No More Proxies in Queue'
+    __message__ = 'No More Proxies'
 
-    def __str__(self):
-        return self.__message__
+
+class BrokerNoProxyError(NoProxyError):
+
+    __message__ = 'No More Proxies in Broker'
 
 
 class ProxyPoolException(ProxyException):
     pass
 
 
-class PoolNoProxyError(ProxyPoolException):
-    __message__ = 'No More Proxies; Reached Limit.'
+class PoolNoProxyError(NoProxyError):
 
-    def __str__(self):
-        return self.__message__
+    __message__ = 'No More Proxies in Pool'

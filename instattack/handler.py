@@ -1,6 +1,9 @@
 from __future__ import absolute_import
 
-from instattack.logger import AppLogger
+import asyncio
+import contextlib
+
+from instattack import AppLogger
 
 
 class MethodObj(object):
@@ -25,9 +28,24 @@ class MethodObj(object):
 class Handler(MethodObj):
 
     def __init__(self, method=None):
+        self._stopper = asyncio.Event()
+
         if method:
             self._setup(method=method)
         else:
             self.method = None
             self.__name__ = getattr(self, '__name__', self.__class__.__name__)
             self.log = AppLogger(self.__name__)
+
+    @contextlib.asynccontextmanager
+    async def stop(self, loop):
+        try:
+            self.log.info(f'Stopping {self.__name__}')
+            self._stopper.set()
+            yield
+        finally:
+            self.log.debug(f'Stopped {self.__name__}')
+
+    @property
+    def _stopped(self):
+        return self._stopper.is_set()

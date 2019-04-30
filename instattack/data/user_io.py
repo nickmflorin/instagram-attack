@@ -1,17 +1,14 @@
 from __future__ import absolute_import
 
-from instattack import settings
-from instattack.logger import AppLogger
-from instattack.utils import write_array_data, read_raw_data
+from instattack import AppLogger, settings
 
-from instattack.settings import get_users_data_dir, get_user_data_dir, get_user_file_path
-from instattack.exceptions import (
-    UserDirExists, UserFileExists, UserFileMissing, UserDirMissing, DirExists,
-    DirMissing)
+from .utils import write_array_data, read_raw_data
+from .paths import get_users_data_dir, get_user_data_dir, get_user_file_path
+from .exceptions import (
+    UserFileMissing, UserDirMissing, DirExists, DirMissing)
 
 
 log = AppLogger(__file__)
-
 
 """
 Some useful code playing around with file permissions and plumbum.  We shouldn't
@@ -41,7 +38,7 @@ control flow consistent and over cautious is never a bad thing.
 """
 
 
-def create_data_dir(strict=True):
+def create_users_data_dir(strict=True):
     try:
         path = get_users_data_dir(expected=False)
     except DirExists as e:
@@ -83,7 +80,7 @@ def check_user_files(username):
         get_users_data_dir(expected=True, strict=True)
     except DirMissing as e:
         log.warning(str(e))
-        create_data_dir(strict=True)
+        create_users_data_dir(strict=True)
 
     try:
         get_user_data_dir(username, expected=True, strict=True)

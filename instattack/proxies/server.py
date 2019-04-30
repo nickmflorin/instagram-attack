@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from proxybroker import Broker
 
-from instattack.handlers import MethodObj
+from instattack import MethodObj
 
 
 __all__ = ('CustomBroker', )
