@@ -4,7 +4,32 @@ from itertools import combinations
 
 
 class abstract_password_generator(object):
-    pass
+
+    def list_to_word(self, letters):
+        return ''.join(letters)
+
+    def mutate_chars(self, word, char, *indices):
+        # Skips First Letter
+        word = word.lower()
+        altered = list(word)[1:]
+
+        # Shouldn't hit exception here but just in case.
+        for ind in indices:
+            try:
+                altered[ind] = char
+            except IndexError:
+                continue
+        return self.list_to_word(list(word)[0] + altered)
+
+    def capitalize_at_indices(self, word, *indices):
+        word = word.lower()
+        altered = list(word)
+        for ind in indices:
+            try:
+                altered[ind] = altered[ind].upper()
+            except IndexError:
+                continue
+        return self.list_to_word(altered)
 
 
 class core_password_generator(object):
@@ -22,33 +47,12 @@ class case_alteration_generator(abstract_password_generator):
             yield case_alteration
 
     def alterations_of_case(self, word):
-        word = word[:].lower()
-
-        def first_char_upper(word):
-            altered = list(word)
-            altered = [altered[0].upper()] + altered[1:]
-            return ''.join(altered)
-
-        # This might not be totally necessary but whatever
-        def second_char_upper(word):
-            altered = list(word)
-            altered = [altered[0]] + [altered[1].upper()] + altered[2:]
-            return ''.join(altered)
-
         # TODO: Add setting for the maximum length of the word to make the entire
         # thing uppercase.
         yield word.lower()
-        yield word.upper()
-        yield first_char_upper(word)
-
-        # Skipping for Now to Make Faster
-
-        # if len(word) >= 2:
-        #     # Yields with just the second character uppercase and the first & second
-        #     # character uppercased.
-        #     yield second_char_upper(word)
-        #     first_upper = first_char_upper(word)
-        #     yield second_char_upper(first_upper)
+        yield self.capitalize_at_indices(word, 0)
+        yield self.capitalize_at_indices(word, 0, 1)
+        yield self.capitalize_at_indices(word, 1)
 
 
 class character_replacement_generator(abstract_password_generator):
@@ -98,26 +102,15 @@ class character_replacement_generator(abstract_password_generator):
         >>> alterations = alterations_replacing_character(word, 'p', '1')
         >>> ['a1ple', 'ap1le', 'a11le']
         """
-        def mutute_characters_at_indices(word, indices, char):
-            altered = list(word[1:])
-            for index in indices:
-                altered[index] = char
-            altered.insert(0, word[0])
-            altered = ''.join(altered)
-            return ''.join(altered)
-
         if char in word[1:]:
-
             where_present = [True if (c == char or c.upper() == char) else False for c in word[1:]]
             indices = [i for i in range(len(where_present)) if where_present[i]]
 
             count = word[1:].count(char)
-
             for i in range(count + 1):
                 combos = combinations(indices, i + 1)
                 for combo in combos:
-                    altered = mutute_characters_at_indices(word, combo, new_char)
-                    yield altered
+                    yield self.mutate_chars(word, new_char, combos)
 
 
 # TODO: Thsi will require not using generators at end product because we have
@@ -217,7 +210,6 @@ class password_generator(core_password_generator):
                 return True
 
         for base_alteration in self.base_generator():
-
             if base_alteration not in attempts:
                 if not safe_to_yield():
                     return

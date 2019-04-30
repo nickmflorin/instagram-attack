@@ -90,7 +90,7 @@ class AppLogger(logbook.Logger):
         })
 
     @contextlib.contextmanager
-    def start_and_done(self, action_string, level='NOTICE', exit_level='DEBUG'):
+    def start_and_done(self, action_string, level='WARNING', exit_level='DEBUG'):
         methods = {
             'INFO': self.info,
             'NOTICE': self.notice,

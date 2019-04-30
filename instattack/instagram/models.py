@@ -9,8 +9,8 @@ import json
 
 import aiohttp
 
-from instattack import exceptions
-from instattack.conf import settings, Colors
+from instattack import exceptions, settings
+from instattack.styles import Colors
 from instattack.proxies.models import Proxy
 
 

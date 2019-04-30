@@ -1,11 +1,8 @@
-#!/usr/bin/env python3
 import asyncio
 from plumbum import cli
 
 from instattack.logger import log_handling
-
 from instattack.proxies import ProxyHandler
-from instattack.proxies.utils import read_proxies
 
 from .base import BaseApplication, Instattack, ConfigArgs
 from .utils import method_switch
@@ -170,10 +167,6 @@ class ProxyTest(ProxyApplication):
 @ProxyApplication.subcommand('collect')
 class ProxyCollect(ProxyApplication):
 
-    # If show is set, the proxies will just be displayed, not saved.  Otherwise,
-    # they get shown and saved.
-    # show = cli.Flag("--show")
-
     # Only applicable if --show is False (i.e. we are saving).
     clear = cli.Flag("--clear")
 
@@ -185,25 +178,13 @@ class ProxyCollect(ProxyApplication):
         config = self.proxy_config(method=self._method)
         proxy_handler = ProxyHandler(method=self._method, proxies=proxies, **config)
 
+        self.log.critical('starting')
+
         loop.run_until_complete(asyncio.gather(
-            proxy_handler.produce(loop, progress=True, display=True),
-            proxy_handler.broker.find()
+            # proxy_handler.consume(loop, progress=True, display=True),
+            proxy_handler.start(loop),
+            # proxy_handler.broker.start(),
+            # proxy_handler.pool.consume(loop),
         ))
-
+        # loop.run_until_complete(proxy_handler.start(loop))
         loop.run_until_complete(proxy_handler.save(overwrite=self.clear))
-
-    @property
-    def current_proxies(self):
-        """
-        TODO: We don't really need this anymore, since we are doing the saving
-        in the proxy handler itself, but in the proxy handler itself it has no
-        way of guaranteeing that it finds the number of proxies we want that are
-        not already found, which might lead to values being less than the limit.
-        """
-        if self._current_proxies is None:
-            if self.clear:
-                self._current_proxies = []
-            else:
-                self._current_proxies = read_proxies(method=self._method)
-                self.log.notice(f'Currently {len(self._current_proxies)} Proxies Saved.')
-        return self._current_proxies

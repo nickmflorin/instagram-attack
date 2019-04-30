@@ -1,15 +1,13 @@
 from __future__ import absolute_import
 
-from plumbum import local
+from collections import Counter
 
-from instattack.conf import settings
-from instattack.conf.utils import validate_method
-
+from instattack.settings import get_proxy_file_path
 from instattack.logger import AppLogger
-from instattack.utils import convert_lines_to_text
+from instattack.utils import write_array_data, read_raw_data
+from instattack.exceptions import InvalidFileLine
 
 from .models import Proxy
-from .exceptions import InvalidFileLine
 
 
 log = AppLogger(__file__)
@@ -22,36 +20,72 @@ def parse_proxy(proxy):
     )
 
 
-def reverse_parse_proxy(line):
+def reverse_parse_proxy(index, line):
+    HOST = 'host'
+    PORT = 'port'
+    AVG_RESP_TIME = 'avg_resp_time'
+    ERROR_RATE = 'error_rate'
+
     line = line.strip()
 
     # TODO: We probably shouldn't issue a warning if this is the case and just
     # silently ignore.
     if line == "":
-        raise InvalidFileLine(line)
+        raise InvalidFileLine(index, line)
 
     if ',' not in line:
-        raise InvalidFileLine(line)
+        raise InvalidFileLine(index, line, 'No comma separation.')
 
     pieces = line.split(',')
-
     if len(pieces) != 3:
-        raise InvalidFileLine(line)
+        raise InvalidFileLine(index, line, 'Invalid comma separation.')
+
     try:
-        return Proxy(
-            host=str(pieces[0].split(':')[0]),
-            port=int(pieces[0].split(':')[1]),
-            avg_resp_time=float(pieces[1]),
-            error_rate=float(pieces[2]),
-        )
-    except (ValueError, IndexError, TypeError):
-        raise InvalidFileLine(line)
+        address = pieces[0]
+    except IndexError:
+        raise InvalidFileLine(index, line, 'Invalid comma separation.')
+    else:
+        if ':' not in address:
+            raise InvalidFileLine(index, line, reason='Missing `:`')
+        address_parts = address.split(':')
+        if len(address_parts) != 2:
+            raise InvalidFileLine(index, line, reason='Address invalid.')
 
+    try:
+        host = str(address_parts[0])
+    except IndexError:
+        raise InvalidFileLine(index, line, reason='Address invalid.')
+    except (ValueError, TypeError):
+        raise InvalidFileLine(index, line, f'Invalid {HOST} type coercion.')
 
-def get_proxy_file_path(method):
-    validate_method(method)
-    filename = "%s.txt" % method.lower()
-    return local.cwd / settings.PROXY_DIR / settings.DATA_DIR / filename
+    try:
+        port = int(address_parts[1])
+    except IndexError:
+        raise InvalidFileLine(index, line, reason='Address invalid.')
+    except (ValueError, TypeError):
+        raise InvalidFileLine(index, line, f'Invalid {PORT} type coercion.')
+
+    try:
+        avg_resp_time = float(pieces[1])
+    except IndexError:
+        raise InvalidFileLine(index, line, 'Invalid comma separation.')
+    except (ValueError, TypeError):
+        raise InvalidFileLine(index, line, f'Invalid {AVG_RESP_TIME} type coercion.')
+
+    try:
+        error_rate = float(pieces[2])
+    except IndexError:
+        raise InvalidFileLine(index, line, 'Invalid comma separation.')
+    except (ValueError, TypeError):
+        raise InvalidFileLine(index, line, f'Invalid {ERROR_RATE} type coercion.')
+
+    return Proxy(
+        host=host,
+        port=port,
+        avg_resp_time=avg_resp_time,
+        error_rate=error_rate,
+        errors=Counter()
+    )
 
 
 def read_proxies(method, limit=None, order_by=None):
@@ -66,19 +100,16 @@ def read_proxies(method, limit=None, order_by=None):
     if not filepath.is_file():
         raise FileNotFoundError('No such file: %s' % filepath)
 
-    raw_data = filepath.read()
-    raw_values = [val.strip() for val in raw_data.split('\n')]
-    if limit:
-        raw_values = raw_values[:limit]
+    raw_values = read_raw_data(filepath, limit=limit)
 
     proxies = []
-    for line in raw_values:
+    for i, line in enumerate(raw_values):
         try:
-            proxy = reverse_parse_proxy(line)
+            proxy = reverse_parse_proxy(i, line)
         except InvalidFileLine as e:
-            # Don't want to notify about blank lines.
-            if e.line != "":
-                log.error(str(e))
+            # Should not be an empty line because those should have been removed
+            # in the read_raw_data method.
+            log.error(e)
         else:
             proxies.append(proxy)
 
@@ -122,5 +153,4 @@ def write_proxies(method, proxies, overwrite=False):
                 add_proxies.append(proxy)
 
     to_write = [parse_proxy(proxy) for proxy in add_proxies]
-    data = convert_lines_to_text(to_write)
-    filepath.write(data, encoding='utf-8')
+    write_array_data(filepath, to_write)

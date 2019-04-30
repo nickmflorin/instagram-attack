@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 -B
 
 from .base import Instattack
 from .proxies import *  # noqa

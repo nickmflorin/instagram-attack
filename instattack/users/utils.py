@@ -1,12 +1,11 @@
 from __future__ import absolute_import
 
-from plumbum import local
-
-from instattack.conf import settings
+from instattack import settings
 from instattack.logger import AppLogger
-from instattack.utils import convert_lines_to_text
+from instattack.utils import write_array_data, read_raw_data
 
-from .exceptions import (
+from instattack.settings import get_users_data_dir, get_user_data_dir, get_user_file_path
+from instattack.exceptions import (
     UserDirExists, UserFileExists, UserFileMissing, UserDirMissing, DirExists,
     DirMissing)
 
@@ -42,48 +41,9 @@ control flow consistent and over cautious is never a bad thing.
 """
 
 
-def get_data_path(expected=True, strict=True):
-    path = local.cwd / settings.APP_NAME / settings.USER_DIR / settings.DATA_DIR
-
-    if strict and (not expected and path.exists()):
-        raise DirExists("%s/%s" % (path.dirname, path.name))
-
-    elif strict and (expected and not path.exists()):
-        raise DirMissing("%s/%s" % (path.dirname, path.name))
-
-    return path
-
-
-def get_user_path(username, expected=True, strict=True):
-    path = get_data_path(expected=True, strict=True) / username
-
-    if strict and (expected and not path.exists()):
-        raise UserDirMissing(username)
-
-    elif strict and (not expected and path.exists()):
-        raise UserDirExists(username)
-
-    return path
-
-
-def get_user_file_path(filename, username, expected=True, strict=True):
-    if '.txt' not in filename:
-        filename = f"{filename}.txt"
-
-    path = get_user_path(username, expected=True, strict=True) / filename
-
-    if strict and (expected and not path.exists()):
-        raise UserFileMissing(filename, username)
-
-    elif strict and (not expected and path.exists()):
-        raise UserFileExists(username, filename)
-
-    return path
-
-
 def create_data_dir(strict=True):
     try:
-        path = get_data_path(expected=False)
+        path = get_users_data_dir(expected=False)
     except DirExists as e:
         if strict:
             raise e
@@ -95,7 +55,7 @@ def create_data_dir(strict=True):
 
 def create_user_dir(username, strict=True):
 
-    user_path = get_user_path(username, expected=False, strict=strict)
+    user_path = get_user_data_dir(username, expected=False, strict=strict)
     user_path.mkdir()
     return user_path
 
@@ -120,13 +80,13 @@ def check_user_files(username):
     all files are present.
     """
     try:
-        get_data_path(expected=True, strict=True)
+        get_users_data_dir(expected=True, strict=True)
     except DirMissing as e:
         log.warning(str(e))
         create_data_dir(strict=True)
 
     try:
-        get_user_path(username, expected=True, strict=True)
+        get_user_data_dir(username, expected=True, strict=True)
     except UserDirMissing as e:
         log.warning(str(e))
         create_user_dir(username, strict=True)
@@ -150,8 +110,7 @@ def read_user_file(filename, username):
     filepath = get_user_file_path(filename, username)
     if not filepath.is_file():
         raise FileNotFoundError('No such file: %s' % filepath)
-    raw_data = filepath.read()
-    return [val.strip() for val in raw_data.split('\n')]
+    return read_raw_data(filepath)
 
 
 def write_attempts_file(attempts, username):
@@ -161,10 +120,7 @@ def write_attempts_file(attempts, username):
     except UserFileMissing as e:
         log.warning(str(e))
         create_user_file(settings.FILENAMES.ATTEMPTS, username, strict=True)
-
-    # TODO: Wrap around try/except maybe?
-    data = convert_lines_to_text(attempts)
-    path.write(data, encoding='utf-8')
+    write_array_data(path, attempts)
 
 
 def update_attempts_file(attempts, username):
@@ -183,12 +139,12 @@ def update_attempts_file(attempts, username):
 
 def user_exists(username):
     try:
-        get_data_path(expected=True, strict=True)
+        get_users_data_dir(expected=True, strict=True)
     except DirMissing as e:
         return False
 
     try:
-        get_user_path(username, expected=True, strict=True)
+        get_user_data_dir(username, expected=True, strict=True)
     except UserDirMissing:
         return False
 

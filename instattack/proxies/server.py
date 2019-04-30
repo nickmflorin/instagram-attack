@@ -2,13 +2,13 @@ from __future__ import absolute_import
 
 from proxybroker import Broker
 
-from instattack.logger import AppLogger
+from instattack.handlers import MethodObj
 
 
 __all__ = ('CustomBroker', )
 
 
-class CustomBroker(Broker):
+class CustomBroker(Broker, MethodObj):
     """
     Overridden to allow custom server to be used and convenience settings
     to be implemented directly from the settings module.
@@ -19,11 +19,12 @@ class CustomBroker(Broker):
     be kept in mind in case we want to reimplement the .serve() functionality.
     requests).
     """
-    log = AppLogger('Custom Proxy Broker')
+    __subname__ = 'Proxy Broker'
 
     def __init__(
         self,
         proxies,
+        method=None,
         max_tries=None,
         max_conn=None,
         timeout=None,
@@ -45,10 +46,10 @@ class CustomBroker(Broker):
             'countries': countries or [],
             'types': types
         }
-        self.log.debug('Broker Args %s' % self.broker_args)
+
+        self._setup(method=method)
         super(CustomBroker, self).__init__(proxies, **self.broker_args)
 
-    def find(self):
-        self.log.notice('Broker Starting to Find Proxies...')
-        self.log.debug('Broker Find Args %s' % self.find_args)
+    def start(self, loop):
+        self.log.notice(f'{self.__name__} Starting to Find Proxies...')
         return super(CustomBroker, self).find(**self.find_args)

@@ -1,4 +1,12 @@
+#!/usr/bin/env python3 -B
+
 from setuptools import setup, find_packages
+
+import sys
+import os
+
+sys.dont_write_bytecode = True
+os.system("export PYTHONDONTWRITEBYTECODE=yes")
 
 
 setup(

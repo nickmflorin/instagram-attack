@@ -16,20 +16,37 @@ class AppException(Exception):
         return self.message
 
 
-class ProxyServerException(Exception):
-
-    def __init__(self, host, port):
-        self.host = host
-        self.port = port
+class InvalidFileLine(AppException):
+    def __init__(self, index, line, reason=None):
+        self.index = index
+        self.line = line
+        self.reason = reason
 
     def __str__(self):
-        return f"Could not start proxy server on port {self.port}"
+        if self.line == "":
+            return f'Line {self.index} was an empty string.'
+        elif self.reason:
+            return f"Line at index {self.index} is invalid: {self.reason} \n {self.line}"
+        return f"Line at index {self.index} is invalid: \n {self.line}"
+
+
+class InvalidWriteElement(AppException):
+    def __init__(self, index, value):
+        self.index = index
+        self.value = value
+
+    def __str__(self):
+        if self.line == "":
+            return f'Cannot write element at index {self.index}, it is an empty string.'
+        return f"Cannot write element at index {self.index}, it is invalid: \n {self.line}"
 
 
 class FatalException(AppException):
     """
     Used for checks where we need to make sure something is available or operating
     properly, and if not, the system should shut down.
+
+    This needs to be deprecated.
     """
     pass
 
@@ -40,41 +57,97 @@ class InternalTimeout(FatalException):
     of attempts and we want to limit the number of attempts or total time
     just in case something is wrong.
     """
+
+    def __init__(self, seconds, reason):
+        self.seconds = seconds
+        self.reason = reason
+
+    def __str__(self):
+        return 'Timed out after %s seconds; Waiting: %s' % (self.seconds, self.reason)
+
+
+class HandlerException(AppException):
     pass
 
 
-class ApiException(AppException):
+class UsersException(AppException):
     pass
 
 
-class InstagramApiException(ApiException):
+class UserException(UsersException):
+    def __init__(self, username):
+        self.username = username
+
+
+class DirException(UsersException):
+
+    def __init__(self, name):
+        self.name = name
+
+
+class DirMissing(DirException):
+
+    def __str__(self):
+        return (
+            f'Directory {self.name} is missing.\n'
+            f'Was the directory {self.name} accidentally deleted?'
+        )
+
+
+class DirExists(DirException):
+
+    def __str__(self):
+        return (
+            f'Directory {self.name} already exists.\n'
+        )
+
+
+class UserDirException(UserException):
     pass
 
 
-class InstagramClientApiException(InstagramApiException):
-    __message__ = "Instagram Client Error"
+class UserDirMissing(UserDirException):
+
+    def __str__(self):
+        return (
+            f'User directory is missing for user {self.username}.\n'
+            f'Was directory for {self.username} accidentally deleted?'
+        )
 
 
-class InstagramResultError(InstagramClientApiException):
-    """
-    Used when we have received a valid response that we can get JSON from but
-    the response data indicates that there was an error.
-    """
-    __message__ = "Instagram Result Error"
+class UserDirExists(UserDirException):
+
+    def __str__(self):
+        return f'User directory already exists for user {self.username}.'
 
 
-class TokenNotInResponse(InstagramClientApiException):
-    """
-    Thrown if we receive a response with valid cookies but the xcrsftoken
-    cookie is not in the response cookies.
-    """
-    __message__ = "Token was not in the response cookies."
+class UserFileException(UserException):
+
+    def __init__(self, username, filename):
+        super(UserFileException, self).__init__(username)
+        self.filename = filename
 
 
-class ResultNotInResponse(InstagramClientApiException):
+class UserFileExists(UserFileException):
+
+    def __str__(self):
+        return f'File {self.filename} already exists for user {self.username}.'
+
+
+class UserFileMissing(UserFileException):
+
+    def __str__(self):
+        return (
+            f'File {self.filename} missing for user {self.username}.\n'
+            f'Was {self.filename} accidentally deleted?'
+        )
+
+
+class UserDoesNotExist(UserException):
     """
-    Thrown if we receive a response when trying to login that does not raise
-    a client exception but we cannot parse the JSON from the response to get
-    the result.
+    Will be used for cases where the Instagram username is invalid, but we
+    are currently not using this.
     """
-    __message__ = "The login result could not be obtained from the response."
+
+    def __str__(self):
+        return f"The user {self.username} does not exist."

@@ -7,20 +7,20 @@ class ProxyException(AppException):
     pass
 
 
-class ProxyPoolException(ProxyException):
-    pass
+class NoProxyError(ProxyException):
 
-
-class NoProxyError(ProxyPoolException):
-    __message__ = 'No More Proxies; Reached Limit.'
+    __message__ = 'No More Proxies in Queue'
 
     def __str__(self):
         return self.__message__
 
 
-class InvalidFileLine(ProxyException):
-    def __init__(self, line):
-        self.line = line
+class ProxyPoolException(ProxyException):
+    pass
+
+
+class PoolNoProxyError(ProxyPoolException):
+    __message__ = 'No More Proxies; Reached Limit.'
 
     def __str__(self):
-        return f"The following line is invalid: \n {self.line}"
+        return self.__message__

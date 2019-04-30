@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from enum import Enum
 
-from instattack.conf import Format, Colors, Styles
+from instattack.styles import Format, Colors, Styles
 from .utils import LogItemSet, LogItemLine, LogLabeledItem, LogItem
 
 
@@ -28,7 +28,7 @@ class RecordAttributes(Enum):
     PROXY = Format(color=Colors.YELLOW, wrapper="<%s>")
     TOKEN = Format(color=Colors.RED)
     STATUS_CODE = Format(color=Colors.RED, wrapper="[%s]")
-    METHOD = Format(color=Colors.CYAN, styles=Styles.NORMAL)
+    METHOD = Format(color=Colors.BLACK, styles=Styles.BOLD)
     TASK = Format(color=Colors.CYAN, styles=Styles.NORMAL, wrapper="(%s)")
     PASSWORD = Format(color=Colors.BLACK, styles=Styles.BOLD)
 

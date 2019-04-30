@@ -3,10 +3,10 @@ from __future__ import absolute_import
 import os
 from plumbum import local
 
-from instattack.conf import settings
-
 from dataclasses import dataclass
 from datetime import datetime
+
+from instattack import settings
 
 from .utils import (create_new_user_files, check_user_files, create_user_dir,
     create_data_dir, user_exists, read_user_file, update_attempts_file)
@@ -61,6 +61,7 @@ class User:
             raw_passwords=self.get_passwords(),
         )
         attempts = self.get_attempts()
+
         for password in generator(attempts, limit=limit):
             self.num_passwords += 1
             yield password

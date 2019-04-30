@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from platform import python_version
 
 import signal
@@ -6,7 +5,7 @@ import sys
 
 from plumbum import cli
 
-from instattack.conf.utils import validate_log_level
+from instattack.settings import validate_log_level
 from instattack.logger import AppLogger, log_handling
 
 from .utils import method_switch
@@ -66,6 +65,7 @@ class Instattack(BaseApplication):
     @log_handling('self')
     def main(self, *args):
         self.log.warning('Reminder: Look into plumbum colors instead of colorama')
+        self.log.warning('Reminder: Look into plumbum progressbar')
         self.validate(*args)
 
 

