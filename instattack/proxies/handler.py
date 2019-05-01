@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 import asyncio
 
-from instattack import OptionalProgressbar, Handler
+from instattack import Handler
 
 from .server import CustomBroker
 from .pool import CustomProxyPool
@@ -53,18 +53,7 @@ class ProxyHandler(Handler):
         self._proxies = proxies or asyncio.Queue()
         self._proxy_limit = proxy_limit
 
-        # When we customize the extension of our CustomProxPool we will probably
-        # provide more arguments directly here.
-        self.pool = CustomProxyPool(
-            self._proxies,
-            method=method,
-            timeout=proxy_pool_timeout,
-            min_req_proxy=pool_min_req_proxy,
-            max_error_rate=pool_max_error_rate,
-            max_resp_time=pool_max_resp_time,
-        )
-
-        self.broker = CustomBroker(
+        self._broker = CustomBroker(
             self._proxies,
             method=method,
             max_conn=broker_max_conn,
@@ -78,72 +67,43 @@ class ProxyHandler(Handler):
             types=proxy_types,
         )
 
-    async def run(self, loop, save=False, overwrite=False):
+        self.pool = CustomProxyPool(
+            self._proxies,
+            self._broker,
+            method=method,
+            timeout=proxy_pool_timeout,
+            min_req_proxy=pool_min_req_proxy,
+            max_error_rate=pool_max_error_rate,
+            max_resp_time=pool_max_resp_time,
+        )
+
+    async def run(self, loop, save=False, overwrite=False, prepopulate=True):
+        # TODO: Figure out when we would run into issues with the pool vs. the
+        # broker running out or proxies.  It should always hit BrokerNoProxyError
+        # first, I think?
         try:
-            await self.start(loop)
+            await self.start(loop, prepopulate=prepopulate)
         except BrokerNoProxyError as e:
             self.log.notice(e)
+        except PoolNoProxyError as e:
+            self.log.warning(e)
         finally:
             await self.stop(loop, save=save, overwrite=overwrite)
 
-    async def start(self, loop):
+    async def start(self, loop, prepopulate=True):
         async with self._start(loop):
-            return await asyncio.gather(
-                self.broker.start(loop),
-                self.pool.start(loop),
-            )
+            self._broker.start(loop)
+            asyncio.create_task(self.pool.start(loop, prepopulate=prepopulate))
+
+    async def ensure_shutdown(self, loop, save=False, overwrite=False):
+        if not self._stopped:
+            self.log.warning(f'{self.__name__} was never shutdown.')
+        return await self.stop(loop, save=save, overwrite=overwrite)
 
     async def stop(self, loop, save=False, overwrite=False):
         async with self._stop(loop):
-            self.broker.stop()
+            self._broker.stop()
             await self.pool.stop(loop, save=save, overwrite=overwrite)
-
-    async def produce(self, loop, current_proxies=None, progress=False, display=False):
-        """
-        Stop event should not be needed since we can break from the cycle
-        by putting None into the pool.  If the CustomProxyPool reaches it's limit,
-        (defined in the Broker) then PoolNoProxyError will be raised.
-
-        If it has not met it's limit yet, we are intentionally stopping it and
-        the value of the retrieved proxy will be None.
-        """
-        progress = OptionalProgressbar(max_value=self._proxy_limit, enabled=progress)
-
-        # We probably shouldn't need the stop event here since we put None in the
-        # queue but just in case.
-        while not self._stopped:
-            try:
-                proxy = await self.pool.get()
-
-            except PoolNoProxyError as e:
-                self.log.warning(e)
-                progress.finish()
-                await self.stop(loop)
-                break
-
-            # I think here instead of stopping we are just going to want to
-            # stop the broker maybe...
-            except BrokerNoProxyError as e:
-                self.log.warning(e)
-                progress.finish()
-                await self.stop(loop)
-                break
-
-            else:
-                # See docstring about None value.
-                if proxy is None:
-                    self.log.debug('Generator Found Null Proxy')
-                    progress.finish()
-                    await self.stop(loop)
-                    break
-
-                if display:
-                    self.log.info(f'Retrieved Proxy from {self.pool.__name__}', extra={
-                        'proxy': proxy,
-                        'other': f'Error Rate: {proxy.error_rate}, Avg Resp Time: {proxy.avg_resp_time}' # noqa
-                    })
-                progress.update()
-                await self.proxies.put(proxy)
 
     async def get(self):
         if self._stopped:
@@ -155,19 +115,3 @@ class ProxyHandler(Handler):
         # take awhile, since the timeout has to be large enough to start filling
         # it at time 0.
         return await self.pool.get()
-
-    async def confirmed(self, proxy):
-        proxy.update_time()
-        proxy.confirmed = True
-        proxy.times_used += 1
-        await self.pool.put(proxy)
-
-    async def used(self, proxy):
-        """
-        When we want to keep proxy in queue because we're not sure if it is
-        invalid (like when we get a Too Many Requests error) but we don't want
-        to note it as `confirmed` just yet.
-        """
-        proxy.update_time()
-        proxy.times_used += 1
-        await self.pool.put(proxy)

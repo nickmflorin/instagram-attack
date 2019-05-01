@@ -16,6 +16,10 @@ class MethodObj(object):
     def _setup(self, method=None):
         self.method = method or getattr(self, '__method__', None)
 
+        # Because subclasses will have the _stopped property.
+        if not hasattr(self, '_stopped'):
+            self._stopped = False
+
         if hasattr(self, '__subname__'):
             subname = self.__subname__
         elif hasattr(self, '__name__'):
@@ -25,6 +29,15 @@ class MethodObj(object):
 
         self.__name__ = f"{self.method.upper()} {subname}"
         self.log = AppLogger(self.__name__)
+
+    @contextlib.contextmanager
+    def _sync_start(self, loop):
+        try:
+            self.log.info(f'Starting {self.__name__}')
+            self._stopped = False
+            yield
+        finally:
+            self.log.debug(f'Finished {self.__name__}')
 
     @contextlib.asynccontextmanager
     async def _start(self, loop):
@@ -56,6 +69,15 @@ class Handler(MethodObj):
             self.method = None
             self.__name__ = getattr(self, '__name__', self.__class__.__name__)
             self.log = AppLogger(self.__name__)
+
+    @contextlib.contextmanager
+    def _sync_start(self, loop):
+        try:
+            self.log.info(f'Starting {self.__name__}')
+            self._stopper = asyncio.Event()
+            yield
+        finally:
+            self.log.debug(f'Finished {self.__name__}')
 
     @contextlib.asynccontextmanager
     async def _start(self, loop):

@@ -68,6 +68,12 @@ URLS = {
     'POST': INSTAGRAM_LOGIN_URL
 }
 
+# Used when reading proxies from text files and converting to models.
+DEFAULT_SCHEMES = {
+    'GET': 'HTTP',
+    'POST': 'HTTPS'
+}
+
 TEST_GET_REQUEST_URL = 'https://postman-echo.com/get'
 TEST_POST_REQUEST_URL = 'https://postman-echo.com/post'
 

@@ -6,31 +6,42 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from instattack import validate_method
+
 
 @dataclass
 class RequestProxy:
 
     host: str
     port: int
+    method: str
     avg_resp_time: float
     error_rate: float
     errors: field(default_factory=Counter)  # Not Currently Used
 
-    is_working: bool = True  # Not Currently Used
     confirmed: bool = False
     last_used: datetime = None
     num_requests: int = 0  # Not Currently Used
     schemes: tuple = ()
 
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return (self.host, self.port, self.method) == (other.host, other.port, other.method)
+
+    def __post_init__(self):
+        validate_method(self.method)
+
     @classmethod
-    def from_proxybroker(cls, proxy):
+    def from_proxybroker(cls, proxy, method):
         return RequestProxy(
             host=proxy.host,
             port=proxy.port,
+            method=method,
             avg_resp_time=proxy.avg_resp_time,
             error_rate=proxy.error_rate,
             errors=proxy.stat['errors'],
-            num_requests=proxy.stat['requests'],
+            num_requests=0,  # Our reference of num_requests differs from ProxyBroker
             schemes=proxy.schemes,
         )
 

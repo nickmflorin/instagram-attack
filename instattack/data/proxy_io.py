@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from collections import Counter
 
-from instattack import AppLogger
+from instattack import AppLogger, settings, validate_method
 from instattack.proxies.models import RequestProxy
 
 from .utils import write_array_data, read_raw_data
@@ -23,12 +23,13 @@ def parse_proxy(proxy):
     )
 
 
-def reverse_parse_proxy(index, line):
+def reverse_parse_proxy(index, line, method):
     HOST = 'host'
     PORT = 'port'
     AVG_RESP_TIME = 'avg_resp_time'
     ERROR_RATE = 'error_rate'
 
+    scheme = settings.DEFAULT_SCHEMES[method]
     line = line.strip()
 
     # TODO: We probably shouldn't issue a warning if this is the case and just
@@ -85,14 +86,17 @@ def reverse_parse_proxy(index, line):
     return RequestProxy(
         host=host,
         port=port,
+        method=method,
         avg_resp_time=avg_resp_time,
         error_rate=error_rate,
-        errors=Counter()
+        errors=Counter(),
+        # Have to include so that the pool can handle them appropriately.
+        schemes=(scheme, ),
     )
 
 
 def read_proxies(method, limit=None, order_by=None):
-
+    method = validate_method(method)
     filepath = get_proxy_file_path(method)
 
     # This might actually happen when initially running app without files
@@ -108,7 +112,7 @@ def read_proxies(method, limit=None, order_by=None):
     proxies = []
     for i, line in enumerate(raw_values):
         try:
-            proxy = reverse_parse_proxy(i, line)
+            proxy = reverse_parse_proxy(i, line, method)
         except InvalidFileLine as e:
             # Should not be an empty line because those should have been removed
             # in the read_raw_data method.
@@ -130,12 +134,15 @@ def write_proxies(method, proxies, overwrite=False):
     if not filepath.exists():
         filepath.touch()
 
-    add_proxies = proxies[:]
+    new_proxies = []
     if not overwrite:
-        add_proxies = read_proxies(method)
+        existing_proxies = read_proxies(method)
         for proxy in proxies:
-            if proxy not in add_proxies:
-                add_proxies.append(proxy)
+            if proxy not in existing_proxies and proxy not in new_proxies:
+                new_proxies.append(proxy)
 
-    to_write = [parse_proxy(proxy) for proxy in add_proxies]
+    all_proxies = new_proxies + existing_proxies
+    log.notice(f'Writing {len(new_proxies)} Unique Proxies to {filepath.name}.')
+    to_write = [parse_proxy(proxy) for proxy in all_proxies]
     write_array_data(filepath, to_write)
+    log.notice(f'Now {len(all_proxies)} Proxies in {filepath.name}.')

@@ -28,18 +28,18 @@ class ResultsHandler(Handler):
         self.attempts = asyncio.Queue()
         self.results = results
 
-    async def consume(self, loop, found_result_event):
+    async def start(self, loop, found_result_event):
         """
         Stop event is not needed for the GET case, where we are finding a token,
         because we can trigger the generator to stop by putting None in the queue.
         On the other hand, if we notice that a result is authenticated, we need
         the stop event to stop handlers mid queue.
         """
-        index = 0
-        with self.log.start_and_done('Consuming Results'):
+        async with self._start(loop):
             # When there are no more passwords, the Password Consumer will put
             # None in the results queue, triggering this loop to break and
             # the stop_event() to stop the Proxy Producer.
+            index = 0
             while True:
                 result = await self.results.get()
                 if result is None:
@@ -164,6 +164,51 @@ class TokenHandler(RequestHandler):
             raise TokenNotInResponse()
         return token
 
+    async def run(self, loop):
+        token = await self.start(loop)
+        await self.stop(loop)
+        return token
+
+    async def start(self, loop):
+        """
+        TODO:
+        -----
+        Might want to change this method to get_token and the fetch method to
+        consume, since the fetch method is really what is consuming the
+        proxies.
+        """
+        async with self._start(loop):
+            try:
+                async with aiohttp.ClientSession(
+                    connector=self._connector,
+                    timeout=self._timeout
+                ) as session:
+                    task = asyncio.ensure_future(self.fetch(session))
+
+                    with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
+                        token = await task
+                        if not token:
+                            raise TokenHandlerException("Token should be non-null here.")
+                        return token
+
+                    if timeout_mgr.state == timeout_mgr.TIMED_OUT:
+                        raise exceptions.InternalTimeout(
+                            self._token_max_fetch_time, "Waiting for token.")
+
+            # This now covers proxy errors for broker and pool, we should be more
+            # selective once we can differentiate how the two differ in timing.
+            except NoProxyError:
+                raise TokenHandlerException("Not enough allowable proxies to find token.")
+
+    async def stop(self, loop):
+        async with self._stop(loop):
+            # The main event loop should include the proxy_handler.stop() call
+            # through it's implementation of proxy_handler.run().  However, that
+            # only stops the proxy_handler if the limit was reached.  Here, we want
+            # to make sure it was stopped just in case we are exiting early.
+            if not self.proxy_handler.stopped:
+                await self.proxy_handler.stop(loop)
+
     async def fetch(self, session):
         """
         TODO
@@ -174,7 +219,7 @@ class TokenHandler(RequestHandler):
         note the time.
         """
         async def try_with_proxy(attempt=0):
-            self.log.debug('Waiting for Proxy')
+            self.log.debug('Waiting on Proxy Handler Proxy')
             proxy = await self.proxy_handler.get()
 
             context = TokenContext(index=attempt, proxy=proxy)
@@ -212,43 +257,6 @@ class TokenHandler(RequestHandler):
 
         # We might have to check if stop_event is set here.
         return await try_with_proxy()
-
-    async def stop(self, loop):
-        async with self._stop(loop):
-            await self.proxy_handler.stop(loop)
-
-    async def start(self, loop):
-        """
-        TODO:
-        -----
-        Might want to change this method to get_token and the fetch method to
-        consume, since the fetch method is really what is consuming the
-        proxies.
-        """
-        async with self._start(loop):
-            try:
-                async with aiohttp.ClientSession(
-                    connector=self._connector,
-                    timeout=self._timeout
-                ) as session:
-                    task = asyncio.ensure_future(self.fetch(session))
-
-                    with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
-                        self.log.debug('Waiting for Token Result')
-                        token = await task
-                        if not token:
-                            raise TokenHandlerException("Token should be non-null here.")
-
-                        self.log.debug('Received Token')
-                        await self.stop(loop)
-                        return token
-
-                    if timeout_mgr.state == timeout_mgr.TIMED_OUT:
-                        raise exceptions.InternalTimeout(
-                            self._token_max_fetch_time, "Waiting for token.")
-
-            except NoProxyError:
-                raise TokenHandlerException("Not enough allowable proxies to find token.")
 
 
 class PasswordHandler(RequestHandler):
@@ -331,6 +339,97 @@ class PasswordHandler(RequestHandler):
             if not result.conclusive:
                 raise InstagramResultError("Inconslusive result.")
             return result
+
+    async def prepopulate(self, loop, password_limit=None):
+        with self.log.start_and_done('Prepopulating Passwords'):
+            for password in self.user.get_new_attempts(limit=password_limit):
+                await self.passwords.put(password)
+
+    async def run(self, loop, found_result_event, token, results, progress=False,
+            password_limit=None):
+        await self.start(loop, found_result_event, token, results, progress=progress,
+            password_limit=password_limit)
+        await self.stop(loop, results, found_result_event)
+
+    async def start(self, loop, found_result_event, token, results,
+            progress=False, password_limit=None):
+        """
+        A stop event is required since if the results handler notices that we
+        found an authenticated result, it needs some way to communicate this to
+        the password consumer, since the password consumer will already have
+        a series of tasks queued up.
+
+        TODO:
+        ----
+
+        If the task_done() callback is not thread safe because of the
+        inability to call await self.results.put(result), we might have to go
+        back to using asyncio.as_completed() or limited_as_completed():
+
+        for fut in asyncio.as_completed(tasks):
+            fut = await fut
+            await self.results.put(fut)
+
+        for res in limited_as_completed(task_generator(), self.config.batch_size):
+            result = await res
+            await self.results.put(result)
+        """
+        async with self._start(loop):
+            await self.prepopulate(loop, password_limit=password_limit)
+
+            if self.passwords.qsize() == 0:
+                self.log.error('No Passwords to Try')
+                return
+
+            progress = OptionalProgressbar(label='Attempting Login',
+                max_value=self.passwords.qsize())
+
+            def task_done(fut):
+                result = fut.result()
+                if not result or not result.conclusive:
+                    raise PasswordHandlerException("Result should be valid and conslusive.")
+                # TODO: Make sure we do not run into any threading issues with this
+                # potentially not being thread safe.
+                progress.update()
+                results.put_nowait(result)
+
+            tasks = []
+            with self.log.start_and_done('Consuming Passwords'):
+
+                async with aiohttp.ClientSession(
+                    connector=self._connector,
+                    timeout=self._timeout
+                ) as session:
+                    index = 0
+                    while not self.passwords.empty() and not found_result_event.is_set():
+                        password = await self.passwords.get()
+                        context = LoginContext(index=index, token=token, password=password)
+
+                        task = asyncio.create_task(self.fetch(session, context))
+                        task.add_done_callback(task_done)
+                        tasks.append(task)
+
+                    self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
+                    await asyncio.gather(*tasks)
+
+            progress.finish()
+
+    async def stop(self, loop, results, found_result_event):
+        async with self._stop(loop):
+            # Triggered by results handler if it notices an authenticated result.
+            if found_result_event.is_set():
+                # Here we might want to cancel outstanding tasks that we are awaiting.
+                self.log.debug('Stop Event Noticed')
+            # Triggered by No More Passwords - No Authenticated Result
+            else:
+                await results.put(None)  # Stop Results Consumer
+
+            # The main event loop should include the proxy_handler.stop() call
+            # through it's implementation of proxy_handler.run().  However, that
+            # only stops the proxy_handler if the limit was reached.  Here, we want
+            # to make sure it was stopped just in case we are exiting early.
+            if not self.proxy_handler.stopped:
+                await self.proxy_handler.stop(loop)
 
     async def fetch(self, session, parent_context):
         """
@@ -427,85 +526,3 @@ class PasswordHandler(RequestHandler):
                 return await try_with_proxy(attempt=attempt + 1)
 
         return await try_with_proxy()
-
-    async def prepopulate(self, loop, password_limit=None):
-        with self.log.start_and_done('Prepopulating Passwords'):
-            for password in self.user.get_new_attempts(limit=password_limit):
-                await self.passwords.put(password)
-
-    async def stop(self, loop, results, found_result_event):
-        async with self._stop(loop):
-
-            # Triggered by results handler if it notices an authenticated result.
-            if found_result_event.is_set():
-                # Here we might want to cancel outstanding tasks that we are awaiting.
-                self.log.debug('Stop Event Noticed')
-                await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
-            # Triggered by No More Passwords - No Authenticated Result
-            else:
-                await results.put(None)  # Stop Results Consumer
-                await self.proxy_handler.stop()  # Stop Proxy Handler (Consumer and Broker)
-
-    async def start(self, loop, found_result_event, token, results,
-            progress=False, password_limit=None):
-        """
-        A stop event is required since if the results handler notices that we
-        found an authenticated result, it needs some way to communicate this to
-        the password consumer, since the password consumer will already have
-        a series of tasks queued up.
-
-        TODO:
-        ----
-
-        If the task_done() callback is not thread safe because of the
-        inability to call await self.results.put(result), we might have to go
-        back to using asyncio.as_completed() or limited_as_completed():
-
-        for fut in asyncio.as_completed(tasks):
-            fut = await fut
-            await self.results.put(fut)
-
-        for res in limited_as_completed(task_generator(), self.config.batch_size):
-            result = await res
-            await self.results.put(result)
-        """
-        async with self._start(loop):
-            await self.prepopulate(loop, password_limit=password_limit)
-
-            if self.passwords.qsize() == 0:
-                self.log.error('No Passwords to Try')
-                return await self.stop(loop, results, found_result_event)
-
-            progress = OptionalProgressbar(label='Attempting Login',
-                max_value=self.passwords.qsize())
-
-            def task_done(fut):
-                result = fut.result()
-                if not result or not result.conclusive:
-                    raise PasswordHandlerException("Result should be valid and conslusive.")
-                # TODO: Make sure we do not run into any threading issues with this
-                # potentially not being thread safe.
-                progress.update()
-                results.put_nowait(result)
-
-            tasks = []
-            with self.log.start_and_done('Consuming Passwords'):
-
-                async with aiohttp.ClientSession(
-                    connector=self._connector,
-                    timeout=self._timeout
-                ) as session:
-                    index = 0
-                    while not self.passwords.empty() and not found_result_event.is_set():
-                        password = await self.passwords.get()
-                        context = LoginContext(index=index, token=token, password=password)
-
-                        task = asyncio.create_task(self.fetch(session, context))
-                        task.add_done_callback(task_done)
-                        tasks.append(task)
-
-                    self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
-                    await asyncio.gather(*tasks)
-
-            progress.finish()
-            await self.stop(loop, results, found_result_event)

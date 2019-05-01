@@ -4,7 +4,8 @@ import traceback
 import asyncio
 from plumbum import cli
 
-from instattack import exceptions, log_handling
+from instattack import log_handling
+from instattack.exceptions import AppException
 
 from instattack.proxies import ProxyHandler
 from instattack.instagram import TokenHandler, ResultsHandler, PasswordHandler
@@ -69,16 +70,11 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
 
     def attack(self, loop):
 
-        results = asyncio.Queue()
-        results_handler = ResultsHandler(self.user, results)
-
         get_proxy_handler, token_handler = self.get_handlers()
         try:
             task_results = loop.run_until_complete(asyncio.gather(
-                token_handler.consume(loop),
-                get_proxy_handler.produce(loop),
-                get_proxy_handler.pool.consume(loop),
-                get_proxy_handler.broker.find(),
+                token_handler.run(loop),
+                get_proxy_handler.run(loop, save=False, prepopulate=True),
             ))
 
         except Exception as e:
@@ -86,27 +82,26 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
             e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
             self.log.handle_global_exception(e)
 
-            # Might not have been stopped if we hit an exception.
-            self.ensure_servers_shutdown(loop, get_proxy_handler)
+            loop.run_until_complete(get_proxy_handler.ensure_shutdown(loop))
 
         else:
-            # Get Proxy Server Stopped Automatically
             token = task_results[0]
             if not token:
-                raise exceptions.AppException("Token should not be null.")
+                raise AppException("Token should not be null.")
             self.log.notice('Received Token', extra={'token': token})
 
-            post_proxy_handler, password_handler = self.post_handlers(self.user)
             auth_result_found = asyncio.Event()
+            results = asyncio.Queue()
+
+            post_proxy_handler, password_handler = self.post_handlers(self.user)
+            results_handler = ResultsHandler(self.user, results)
 
             try:
                 task_results = loop.run_until_complete(asyncio.gather(
-                    results_handler.consume(loop, auth_result_found),
-                    password_handler.consume(loop, auth_result_found, token, results,
+                    results_handler.run(loop, auth_result_found),
+                    password_handler.run(loop, auth_result_found, token, results,
                         password_limit=self._pwlimit),
-                    post_proxy_handler.produce(loop),
-                    post_proxy_handler.pool.consume(loop),
-                    post_proxy_handler.broker.find(),
+                    post_proxy_handler.run(loop, save=False, prepopulate=True),
                 ))
 
             except Exception as e:
@@ -114,11 +109,7 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
                 e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
                 self.log.handle_global_exception(e)
 
-                # Might not have been stopped if we hit an exception, but should
-                # be stopped automatically if the block succeeds.  We will
-                # leave this for now to make sure.
-                self.ensure_servers_shutdown(loop, post_proxy_handler)
-                loop.run_until_complete(results_handler.dump(loop))
+                loop.run_until_complete(post_proxy_handler.ensure_shutdown(loop))
 
             else:
                 # Post Proxy Server Stopped Automatically
@@ -129,23 +120,19 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
                     })
 
             finally:
-                # Might not have been stopped if we hit an exception, but should
-                # be stopped automatically if the block succeeds.  We will
-                # leave this for now to make sure.
-                self.ensure_servers_shutdown(loop, get_proxy_handler, post_proxy_handler)
-                loop.run_until_complete(results_handler.dump(loop))
+                loop.run_until_complete(results_handler.stop(loop, save=True))
 
-    def ensure_servers_shutdown(self, loop, *handlers):
-        """
-        We have to run handler.server.stop() and handler.server.find()
-        directly from loop.run_until_complete() instead of using the
-        async methods start_server() and stop_server() - don't know why
-        but that is why we cannot restrict to handler._server_running.
-        """
-        for handler in handlers:
-            if not handler._stopped:
-                self.log.warning(f'{handler.method} Proxy Server Never Stopped.')
-                loop.run_until_complete(handler.stop())
+    # def ensure_servers_shutdown(self, loop, *handlers):
+    #     """
+    #     We have to run handler.server.stop() and handler.server.find()
+    #     directly from loop.run_until_complete() instead of using the
+    #     async methods start_server() and stop_server() - don't know why
+    #     but that is why we cannot restrict to handler._server_running.
+    #     """
+    #     for handler in handlers:
+    #         if not handler._stopped:
+    #             self.log.warning(f'{handler.method} Proxy Server Never Stopped.')
+    #             loop.run_until_complete(handler.stop())
 
     async def shutdown(self, loop, signal=None):
 

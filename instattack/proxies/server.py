@@ -51,5 +51,16 @@ class CustomBroker(Broker, MethodObj):
         super(CustomBroker, self).__init__(proxies, **self.broker_args)
 
     def start(self, loop):
-        self.log.notice(f'{self.__name__} Starting to Find Proxies...')
-        return super(CustomBroker, self).find(**self.find_args)
+        with self._sync_start(loop):
+            super(CustomBroker, self).find(**self.find_args)
+
+    def increment_limit(self):
+        """
+        Sometimes the proxy pool might notice something wrong with the proxies
+        that are being returned from the broker, and it cannot use one.  In that
+        case, if we still want to have the number of proxies defined by limit in
+        the pool, we have to increment the limit of the broker.
+
+        There might be other edge case logic we have to incorporate here.
+        """
+        self._limit += 1
