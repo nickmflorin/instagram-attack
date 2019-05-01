@@ -65,7 +65,7 @@ class ResultsHandler(Handler):
                     await self.attempts.put(result.context.password)
 
     async def stop(self, loop, save=True):
-        async with super(ResultsHandler, self).stop():
+        async with self._stop():
             if save:
                 await self.dump(loop)
 
@@ -214,7 +214,7 @@ class TokenHandler(RequestHandler):
         return await try_with_proxy()
 
     async def stop(self, loop):
-        async with super(TokenHandler, self).stop(loop):
+        async with self._stop(loop):
             await self.proxy_handler.stop(loop)
 
     async def start(self, loop):
@@ -225,7 +225,7 @@ class TokenHandler(RequestHandler):
         consume, since the fetch method is really what is consuming the
         proxies.
         """
-        with self.log.start_and_done('Finding Token'):
+        async with self._start(loop):
             try:
                 async with aiohttp.ClientSession(
                     connector=self._connector,
@@ -434,7 +434,7 @@ class PasswordHandler(RequestHandler):
                 await self.passwords.put(password)
 
     async def stop(self, loop, results, found_result_event):
-        async with super(PasswordHandler, self).stop(loop):
+        async with self._stop(loop):
 
             # Triggered by results handler if it notices an authenticated result.
             if found_result_event.is_set():
@@ -469,41 +469,43 @@ class PasswordHandler(RequestHandler):
             result = await res
             await self.results.put(result)
         """
-        await self.prepopulate(loop, password_limit=password_limit)
+        async with self._start(loop):
+            await self.prepopulate(loop, password_limit=password_limit)
 
-        if self.passwords.qsize() == 0:
-            self.log.error('No Passwords to Try')
-            return await self.stop(loop, results, found_result_event)
+            if self.passwords.qsize() == 0:
+                self.log.error('No Passwords to Try')
+                return await self.stop(loop, results, found_result_event)
 
-        progress = OptionalProgressbar(label='Attempting Login', max_value=self.passwords.qsize())
+            progress = OptionalProgressbar(label='Attempting Login',
+                max_value=self.passwords.qsize())
 
-        def task_done(fut):
-            result = fut.result()
-            if not result or not result.conclusive:
-                raise PasswordHandlerException("Result should be valid and conslusive.")
-            # TODO: Make sure we do not run into any threading issues with this
-            # potentially not being thread safe.
-            progress.update()
-            results.put_nowait(result)
+            def task_done(fut):
+                result = fut.result()
+                if not result or not result.conclusive:
+                    raise PasswordHandlerException("Result should be valid and conslusive.")
+                # TODO: Make sure we do not run into any threading issues with this
+                # potentially not being thread safe.
+                progress.update()
+                results.put_nowait(result)
 
-        tasks = []
-        with self.log.start_and_done('Consuming Passwords'):
+            tasks = []
+            with self.log.start_and_done('Consuming Passwords'):
 
-            async with aiohttp.ClientSession(
-                connector=self._connector,
-                timeout=self._timeout
-            ) as session:
-                index = 0
-                while not self.passwords.empty() and not found_result_event.is_set():
-                    password = await self.passwords.get()
-                    context = LoginContext(index=index, token=token, password=password)
+                async with aiohttp.ClientSession(
+                    connector=self._connector,
+                    timeout=self._timeout
+                ) as session:
+                    index = 0
+                    while not self.passwords.empty() and not found_result_event.is_set():
+                        password = await self.passwords.get()
+                        context = LoginContext(index=index, token=token, password=password)
 
-                    task = asyncio.create_task(self.fetch(session, context))
-                    task.add_done_callback(task_done)
-                    tasks.append(task)
+                        task = asyncio.create_task(self.fetch(session, context))
+                        task.add_done_callback(task_done)
+                        tasks.append(task)
 
-                self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
-                await asyncio.gather(*tasks)
+                    self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
+                    await asyncio.gather(*tasks)
 
-        progress.finish()
-        await self.stop(loop, results, found_result_event)
+            progress.finish()
+            await self.stop(loop, results, found_result_event)

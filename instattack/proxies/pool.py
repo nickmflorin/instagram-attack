@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from proxybroker import ProxyPool
 
 from instattack import MethodObj, settings, exceptions
-from instattack.data import read_proxies
+from instattack.data import read_proxies, write_proxies
 
 from .exceptions import ProxyPoolException, PoolNoProxyError, BrokerNoProxyError
 from .utils import filter_proxies
@@ -158,10 +158,11 @@ class CustomProxyPool(ProxyPool, MethodObj):
         self._min_req_proxy = min_req_proxy
         self._timeout = timeout
 
+        # self._stopped is defined in the MethodObj.
         # We need to use this so that we can tell the difference when the found
         # proxy is None as being intentionally put in the queue to stop the
         # consumer or because there are no more proxies left from the Broker.
-        self._stopped = False
+
         self._setup(method=method)
 
         # The entry count serves as a tie-breaker so that two tasks with the
@@ -218,46 +219,48 @@ class CustomProxyPool(ProxyPool, MethodObj):
         indicates that the ProxyBroker has reached its limit, so we raise the
         NoProxyError.
         """
+        async with self._start(loop):
+            # Don't prepopulate for now, for testing purposes
+            self.log.critical('Have to reimplement proxy pool repopulation.')
+            # await self.prepopulate(loop)
 
-        # Don't prepopulate for now, for testing purposes
-        # await self.prepopulate(loop)
-
-        while True:
-            self.log.info('Waiting on Proxy from Broker')
-            proxy = await self._proxies.get()
-            if proxy:
-                self.log.debug('Retrieved Proxy from Broker', extra={'proxy': proxy})
-                # self._proxies.task_done()  # In Original Code
-                if self.scheme not in proxy.schemes:
-                    # This should not be happening, we have to match the schemes to
-                    # the URLs.  The proxybroker code used to put the proxy in the queue
-                    # under this condition, but that makes no sense for our case.
-                    self.log.error('Expected Scheme not in Proxy Schemes', extra={
-                        'proxy': proxy
-                    })
+            while True:
+                self.log.info('Waiting on Proxy from Broker')
+                proxy = await self._proxies.get()
+                if proxy:
+                    self.log.debug('Retrieved Proxy from Broker', extra={'proxy': proxy})
+                    # self._proxies.task_done()  # In Original Code
+                    if self.scheme not in proxy.schemes:
+                        # This should not be happening, we have to match the schemes to
+                        # the URLs.  The proxybroker code used to put the proxy in the queue
+                        # under this condition, but that makes no sense for our case.
+                        self.log.error('Expected Scheme not in Proxy Schemes', extra={
+                            'proxy': proxy
+                        })
+                    else:
+                        # Not sure why the old code returned the proxy in the __import__
+                        # method which we adopted here, but I don't think it is necessary.
+                        # self.log.debug('Returning Proxy', extra={'proxy': proxy})
+                        # return proxy
+                        await self.put(proxy)
                 else:
-                    # Not sure why the old code returned the proxy in the __import__
-                    # method which we adopted here, but I don't think it is necessary.
-                    # self.log.debug('Returning Proxy', extra={'proxy': proxy})
-                    # return proxy
-                    self.log.debug('Queueing Proxy', extra={'proxy': proxy})
-                    await self.put(proxy)
-            else:
-                self.log.debug('No More Proxie in Broker')
-                if not self._stopped:
-                    raise BrokerNoProxyError()
-                else:
-                    # This block only gets reached after the self.put method is
-                    # called with a proxy value of None, which triggers the self.stop()
-                    # method.  That means that all we have to do here is exit
-                    # the loop.
-                    break
+                    self.log.debug('No More Proxies in Broker')
+                    if not self._stopped:
+                        raise BrokerNoProxyError()
+                    else:
+                        # This block only gets reached after the self.put method is
+                        # called with a proxy value of None, which triggers the self.stop()
+                        # method.  That means that all we have to do here is exit
+                        # the loop.
+                        break
 
-    async def stop(self):
-        with self.log.start_and_done(f"Stopping {self.__name__}"):
-            self._stopped = True
-            self._pool = []
+    async def stop(self, loop, save=False, overwrite=False):
+        # Context manager sets _stopped.
+        async with self._stop(loop):
             await self._proxies.put(None)
+            if save:
+                self.save(overwrite=overwrite)
+            self._pool = []
 
     def remove_proxy(self, proxy):
         """
@@ -266,27 +269,92 @@ class CustomProxyPool(ProxyPool, MethodObj):
         entry = self.proxy_finder.pop(proxy.address)
         entry[-1] = self.REMOVED
 
-    def add_proxy(self, proxy, priority=None):
+    def evaluate_proxy_before_insert(self, proxy):
+        """
+        Evaluates whether or not conditions are met for a given proxy before
+        it is inserted into the Queue.
+
+        We might want to start min_req_per_proxy to a higher level since we
+        are controlling how often they are used to avoid max request errors!!!
+
+        We can also prioritize by number of requests to avoid max request errors
+        """
+        if proxy.num_requests >= self._min_req_proxy:
+            self.log.warning('Discarding Proxy; Num Requests '
+                f'{proxy.num_requests} > {self._min_req_proxy}',
+                extra={'proxy': proxy})
+            return False
+        elif proxy.error_rate > self._max_error_rate:
+            self.log.warning(f'Discarding Proxy; Error Rate '
+                f'{proxy.error_rate} > {self._max_error_rate}',
+                extra={'proxy': proxy})
+            return False
+        elif proxy.avg_resp_time > self._max_resp_time:
+            self.log.warning(f'Discarding Proxy; Resp Time '
+                f'{proxy.avg_resp_time} > {self._max_resp_time}',
+                extra={'proxy': proxy})
+            return False
+        elif self.scheme not in proxy.schemes:
+            self.log.warning(f'Discarding Proxy; Scheme {self.scheme} Not Supported',
+                extra={'proxy': proxy})
+            return False
+
+    def evaluate_proxy_before_retrieval(self, proxy):
+        """
+        Not currently used - but we are going to have to somehow incorporate checks
+        into the proxy that we want to perform before returning from the heapq,
+        or possibly build into the priority of the heapq.
+
+        If we do it outside the context of the Proxy.priority value, this should
+        also ensure that evaluate_proxy_before_insert() is still called, since those
+        values are dynamic and will change over time.
+        """
+        # This needs to indicate that we still want to put it in the queue but
+        # we do not want to use it yet.
+        if proxy.last_used and proxy.time_since_used < 10:
+            return False
+
+        return True
+
+    async def get(self):
+        """
+        Retrieves a proxy from the prioritized heapq, which is populated in
+        the .start() task concurrently with whatever handler is accessing this
+        method.
+        """
+        if self._stopped:
+            raise ProxyPoolException("Cannot get proxy from stopped pool.")
+
+        # This might immediately raise no proxy error if there are none in the
+        # pool yet.
+        proxy = await self.pop_proxy()
+        self.log.debug('Retrieving Proxy from Pool', extra={
+            'proxy': proxy,
+            'other': proxy.stat
+        })
+        return proxy
+
+    async def put(self, proxy, priority=None):
         """
         Add a new proxy or udpate the priority of an existing proxy.
-
-        proxy in the queue to begin with?
-        if not proxy.last_used:
-            return proxy
-
-        # TODO: Move this value to settings.
-        elif proxy.time_since_used >= 10:
-            return proxy
-        else:
-            # Put Back in Queue and Keep Going
-            await self.proxies.put(proxy)
         """
         priority = priority or proxy.priority
 
-        if (proxy.num_requests >= self._min_req_proxy and
-                (proxy.error_rate > self._max_error_rate or
-                    proxy.avg_resp_time > self._max_resp_time)):
+        if proxy is None:
+            # ProxyBroker package might actually put None in when there are no
+            # more proxies in which case this can cause issues.
+            self.log.warning(f"{self.__class__.__name__} is Stopping")
+            await self.stop()
+            return
 
+        if not isinstance(proxy, RequestProxy):
+            proxy = RequestProxy.from_proxybroker(proxy)
+
+        valid = self.evaluate_proxy_before_insert(proxy)
+        if not valid:
+            # I don't think this should happen - but just in case, if the proxy
+            # is no longer valid, we want to remove from the pool.  This might
+            # happen for proxies where values change after use.
             if proxy.address in self.proxy_finder:
                 self.remove_proxy(proxy)
                 self.log.warning('Removed Proxy from Pool', extra={'proxy': proxy})
@@ -300,7 +368,10 @@ class CustomProxyPool(ProxyPool, MethodObj):
         entry = [priority, count, proxy]
         self.proxy_finder[proxy.address] = entry
 
-        self.log.debug('Adding Proxy to Pool', extra={'proxy': proxy})
+        self.log.debug('Adding Proxy to Pool', extra={
+            'proxy': proxy,
+            'other': proxy.stat
+        })
         heapq.heappush(self._pool, entry)
 
     async def pop_proxy(self):
@@ -329,90 +400,16 @@ class CustomProxyPool(ProxyPool, MethodObj):
         if timeout_mgr.state == timeout_mgr.TIMED_OUT:
             raise PoolNoProxyError()
 
-    async def get(self):
+    def save(self, overwrite=False):
         """
-        Retrieves a proxy from the prioritized heapq, which is populated in
-        the .start() task concurrently with whatever handler is accessing this
-        method.
+        TODO: We might want to move this to the pool itself.
         """
-        if self._stopped:
-            raise ProxyPoolException("Cannot get proxy from stopped pool.")
+        collected = []
+        for [priority, count, proxy] in self._pool:
+            if proxy is None:
+                self.log.warning('Found Null Proxy While Saving...')
+            else:
+                collected.append(proxy)
 
-        # This might immediately raise no proxy error if there are none in the
-        # pool yet.
-        proxy = await self.pop_proxy()
-        self.log.debug(
-            f'Priority: {proxy.priority} Proxy: {proxy.host}:{proxy.port} '
-            f'Stats: {proxy.stat}')
-        return proxy
-
-        # while True:
-        #     if len(self._pool) != 0:
-        #         priority, proxy = heapq.heappop(self._pool)
-        #         self.log.debug(
-        #             f'Priority: {priority} Proxy: {proxy.host}:{proxy.port} '
-        #             f'Stats: {proxy.stat}')
-        #         return proxy
-
-        # for priority, proxy in self._pool:
-        #     if self.scheme in proxy.schemes:
-        #         chosen = proxy
-        #         self._pool.remove((proxy.priority, proxy))
-
-        # else:
-        #     chosen = await self._import()
-
-        # self.log.debug('%s:%d stat: %s' % (chosen.host, chosen.port, chosen.stat))
-        # return chosen
-
-    # async def _import(self):
-    #     while True:
-    #         proxy = await self._proxies.get()
-    #         self._proxies.task_done()
-    #         if not proxy:
-    #             raise PoolNoProxyError('No more available proxies')
-    #         elif self.scheme not in proxy.schemes:
-    #             await self.put(proxy)
-    #         else:
-    #             return Proxy.from_proxybroker(proxy)
-
-    async def put(self, proxy):
-        """
-        TODO:
-        -----
-        We might want to start min_req_per_proxy to a higher level since we
-        are controlling how often they are used to avoid max request errors!!!
-
-        We can also prioritize by number of requests to avoid max request errors
-        """
-        # Overridden Portion - We might want to put None in the consumed proxies,
-        # so that the block that logs that the pool is stoping gets reached.
-        if proxy is None:
-            # ProxyBroker package might actually put None in when there are no
-            # more proxies in which case this can cause issues.
-            self.log.warning(f"{self.__class__.__name__} is Stopping")
-            await self.stop()
-            return
-
-        if not isinstance(proxy, RequestProxy):
-            proxy = RequestProxy.from_proxybroker(proxy)
-
-        self.add_proxy(proxy)
-        # if (proxy.priority, proxy) in self._pool:
-        #     self.log.warning('Found Duplicate Proxy in Pool', extra={'proxy': proxy})
-
-        # if (proxy.num_requests >= self._min_req_proxy and
-        #         (proxy.error_rate > self._max_error_rate or
-        #             proxy.avg_resp_time > self._max_resp_time)):
-        #     self.log.debug('%s:%d removed from proxy pool' % (proxy.host, proxy.port))
-        # else:
-        #     try:
-        #         heapq.heappush(self._pool, (proxy.priority, proxy))
-        #     except TypeError as e:
-        #         # TODO: Fix This - Might not be applicable anymore with new setup.
-        #         # Weird error from ProxyBroker that makes no sense...
-        #         # TypeError: '<' not supported between instances of 'Proxy' and 'Proxy'
-        #         self.log.warning(e)
-        #         self._pool.append((proxy.priority, proxy))
-
-        # self.log.debug('%s:%d stat: %s' % (proxy.host, proxy.port, proxy.stat))
+        self.log.notice(f'Saving {len(collected)} Proxies to {self.method.lower()}.txt.')
+        write_proxies(self.method, collected, overwrite=overwrite)

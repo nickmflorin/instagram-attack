@@ -170,5 +170,4 @@ class ProxyCollect(ProxyApplication):
         config = self.proxy_config(method=self._method)
         proxy_handler = ProxyHandler(method=self._method, proxies=proxies, **config)
 
-        loop.run_until_complete(proxy_handler.start(loop))
-        loop.run_until_complete(proxy_handler.stop(loop, save=True, overwrite=self.clear))
+        loop.run_until_complete(proxy_handler.run(loop, save=True, overwrite=self.clear))

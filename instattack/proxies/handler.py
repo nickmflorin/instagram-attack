@@ -1,10 +1,8 @@
 from __future__ import absolute_import
 
 import asyncio
-import stopit
 
-from instattack import OptionalProgressbar, Handler, exceptions
-from instattack.data import write_proxies
+from instattack import OptionalProgressbar, Handler
 
 from .server import CustomBroker
 from .pool import CustomProxyPool
@@ -80,11 +78,25 @@ class ProxyHandler(Handler):
             types=proxy_types,
         )
 
+    async def run(self, loop, save=False, overwrite=False):
+        try:
+            await self.start(loop)
+        except BrokerNoProxyError as e:
+            self.log.notice(e)
+        finally:
+            await self.stop(loop, save=save, overwrite=overwrite)
+
     async def start(self, loop):
-        return await asyncio.gather(
-            self.broker.start(loop),
-            self.pool.start(loop),
-        )
+        async with self._start(loop):
+            return await asyncio.gather(
+                self.broker.start(loop),
+                self.pool.start(loop),
+            )
+
+    async def stop(self, loop, save=False, overwrite=False):
+        async with self._stop(loop):
+            self.broker.stop()
+            await self.pool.stop(loop, save=save, overwrite=overwrite)
 
     async def produce(self, loop, current_proxies=None, progress=False, display=False):
         """
@@ -97,42 +109,41 @@ class ProxyHandler(Handler):
         """
         progress = OptionalProgressbar(max_value=self._proxy_limit, enabled=progress)
 
-        with self.log.start_and_done(f'Producing {self.__name__}'):
-            # We probably shouldn't need the stop event here since we put None in the
-            # queue but just in case.
-            while not self._stopped:
-                try:
-                    proxy = await self.pool.get()
+        # We probably shouldn't need the stop event here since we put None in the
+        # queue but just in case.
+        while not self._stopped:
+            try:
+                proxy = await self.pool.get()
 
-                except PoolNoProxyError as e:
-                    self.log.warning(e)
+            except PoolNoProxyError as e:
+                self.log.warning(e)
+                progress.finish()
+                await self.stop(loop)
+                break
+
+            # I think here instead of stopping we are just going to want to
+            # stop the broker maybe...
+            except BrokerNoProxyError as e:
+                self.log.warning(e)
+                progress.finish()
+                await self.stop(loop)
+                break
+
+            else:
+                # See docstring about None value.
+                if proxy is None:
+                    self.log.debug('Generator Found Null Proxy')
                     progress.finish()
                     await self.stop(loop)
                     break
 
-                # I think here instead of stopping we are just going to want to
-                # stop the broker maybe...
-                except BrokerNoProxyError as e:
-                    self.log.warning(e)
-                    progress.finish()
-                    await self.stop(loop)
-                    break
-
-                else:
-                    # See docstring about None value.
-                    if proxy is None:
-                        self.log.debug('Generator Found Null Proxy')
-                        progress.finish()
-                        await self.stop(loop)
-                        break
-
-                    if display:
-                        self.log.info(f'Retrieved Proxy from {self.pool.__name__}', extra={
-                            'proxy': proxy,
-                            'other': f'Error Rate: {proxy.error_rate}, Avg Resp Time: {proxy.avg_resp_time}' # noqa
-                        })
-                    progress.update()
-                    await self.proxies.put(proxy)
+                if display:
+                    self.log.info(f'Retrieved Proxy from {self.pool.__name__}', extra={
+                        'proxy': proxy,
+                        'other': f'Error Rate: {proxy.error_rate}, Avg Resp Time: {proxy.avg_resp_time}' # noqa
+                    })
+                progress.update()
+                await self.proxies.put(proxy)
 
     async def get(self):
         if self._stopped:
@@ -144,33 +155,6 @@ class ProxyHandler(Handler):
         # take awhile, since the timeout has to be large enough to start filling
         # it at time 0.
         return await self.pool.get()
-
-    async def stop(self, loop, save=False, overwrite=False):
-        async with super(ProxyHandler, self).stop(loop):
-            self.broker.stop()
-
-            # Have to do before we stop pool otherwise the handler will try to get
-            # a proxy from the stopped pool.
-            # await self.proxies.put(None)
-            await self.pool.stop()
-
-            if save:
-                await self.save(overwrite=overwrite)
-
-    async def save(self, overwrite=False):
-        """
-        TODO: We might want to move this to the pool itself.
-        """
-        collected = []
-        while not self.proxies.empty():
-            proxy = await self.proxies.get()
-            if proxy is None:
-                self.log.warning('Found Null Proxy While Saving...')
-            else:
-                collected.append(proxy)
-
-        self.log.notice(f'Saving {len(collected)} Proxies to {self.method.lower()}.txt.')
-        write_proxies(self.method, collected, overwrite=overwrite)
 
     async def confirmed(self, proxy):
         proxy.update_time()

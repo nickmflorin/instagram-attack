@@ -6,6 +6,8 @@ import contextlib
 from instattack import AppLogger
 
 
+# TODO: There has to be a cleaner way to handle the _stopped.
+
 class MethodObj(object):
 
     def __init__(self, method=None):
@@ -24,6 +26,24 @@ class MethodObj(object):
         self.__name__ = f"{self.method.upper()} {subname}"
         self.log = AppLogger(self.__name__)
 
+    @contextlib.asynccontextmanager
+    async def _start(self, loop):
+        try:
+            self.log.info(f'Starting {self.__name__}')
+            self._stopped = False
+            yield
+        finally:
+            self.log.debug(f'Finished {self.__name__}')
+
+    @contextlib.asynccontextmanager
+    async def _stop(self, loop):
+        try:
+            self.log.info(f'Stopping {self.__name__}')
+            yield
+        finally:
+            self._stopped = True
+            self.log.debug(f'Stopped {self.__name__}')
+
 
 class Handler(MethodObj):
 
@@ -38,7 +58,16 @@ class Handler(MethodObj):
             self.log = AppLogger(self.__name__)
 
     @contextlib.asynccontextmanager
-    async def stop(self, loop):
+    async def _start(self, loop):
+        try:
+            self.log.info(f'Starting {self.__name__}')
+            self._stopper = asyncio.Event()
+            yield
+        finally:
+            self.log.debug(f'Finished {self.__name__}')
+
+    @contextlib.asynccontextmanager
+    async def _stop(self, loop):
         try:
             self.log.info(f'Stopping {self.__name__}')
             self._stopper.set()
