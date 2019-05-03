@@ -69,27 +69,32 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
             loop.close()
 
     def attack(self, loop):
-
         get_proxy_handler, token_handler = self.get_handlers()
         try:
+            # It is way faster to prepopulate the proxy pool before we
+            # kickstart the consumers of those proxies and the handler itself.
+            loop.run_until_complete(get_proxy_handler.prepare(loop))
             task_results = loop.run_until_complete(asyncio.gather(
-                token_handler.run(loop),
-                get_proxy_handler.run(loop, save=False, prepopulate=True),
+                get_proxy_handler.start(loop, prepopulate=False, silent=True),
+                token_handler.start(loop),
             ))
 
         except Exception as e:
+            # This is where the loop.exception_handler() might be helpful.
             exc_info = sys.exc_info()
             e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
             self.log.handle_global_exception(e)
 
-            loop.run_until_complete(get_proxy_handler.ensure_shutdown(loop))
+            loop.run_until_complete(
+                get_proxy_handler.stop(loop, save=False),
+            )
 
         else:
             token = task_results[0]
             if not token:
                 raise AppException("Token should not be null.")
             self.log.notice('Received Token', extra={'token': token})
-
+            return
             auth_result_found = asyncio.Event()
             results = asyncio.Queue()
 
@@ -105,6 +110,7 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
                 ))
 
             except Exception as e:
+                # This is where the loop.exception_handler() might be helpful.
                 exc_info = sys.exc_info()
                 e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
                 self.log.handle_global_exception(e)

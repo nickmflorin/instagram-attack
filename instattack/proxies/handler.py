@@ -68,7 +68,6 @@ class ProxyHandler(Handler):
         )
 
         self.pool = CustomProxyPool(
-            self._proxies,
             self._broker,
             method=method,
             timeout=proxy_pool_timeout,
@@ -77,28 +76,41 @@ class ProxyHandler(Handler):
             max_resp_time=pool_max_resp_time,
         )
 
-    async def run(self, loop, save=False, overwrite=False, prepopulate=True):
-        # TODO: Figure out when we would run into issues with the pool vs. the
-        # broker running out or proxies.  It should always hit BrokerNoProxyError
-        # first, I think?
+    async def _silent_start(self, loop, prepopulate=True):
+        """
+        When running in attack mode, we don't want exceptions to be raised when
+        we run out of proxies, because the token handler or password handler
+        might still be processing them.
+        """
         try:
-            await self.start(loop, prepopulate=prepopulate)
+            await asyncio.gather(
+                self._broker.find(loop),
+                self.pool.start(loop, prepopulate=prepopulate)
+            )
         except BrokerNoProxyError as e:
-            self.log.notice(e)
+            self.log.warning(e)
         except PoolNoProxyError as e:
             self.log.warning(e)
-        finally:
-            await self.stop(loop, save=save, overwrite=overwrite)
 
-    async def start(self, loop, prepopulate=True):
+    async def prepare(self, loop):
+        return await self.pool.prepopulate(loop)
+
+    async def start(self, loop, prepopulate=True, silent=False):
+        """
+        When running concurrently with other tasks/handlers, we don't always
+        want to shut down the proxy handler when we hit the limit, because
+        the other handler might still be using those.
+        """
         async with self._start(loop):
-            self._broker.start(loop)
-            asyncio.create_task(self.pool.start(loop, prepopulate=prepopulate))
-
-    async def ensure_shutdown(self, loop, save=False, overwrite=False):
-        if not self._stopped:
-            self.log.warning(f'{self.__name__} was never shutdown.')
-        return await self.stop(loop, save=save, overwrite=overwrite)
+            if silent:
+                # We use this when we don't want exceptions to be raised when
+                # we run out of proxies.
+                await self._silent_start(loop, prepopulate=prepopulate)
+            else:
+                await asyncio.gather(
+                    self._broker.find(loop),
+                    self.pool.start(loop, prepopulate=prepopulate)
+                )
 
     async def stop(self, loop, save=False, overwrite=False):
         async with self._stop(loop):

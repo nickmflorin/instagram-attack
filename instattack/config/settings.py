@@ -1,4 +1,5 @@
 from __future__ import absolute_import
+from urllib.parse import urlparse
 
 
 USER_AGENTS = [
@@ -70,8 +71,8 @@ URLS = {
 
 # Used when reading proxies from text files and converting to models.
 DEFAULT_SCHEMES = {
-    'GET': 'HTTP',
-    'POST': 'HTTPS'
+    'GET': urlparse(URLS['GET']).scheme.upper(),
+    'POST': urlparse(URLS['POST']).scheme.upper()
 }
 
 TEST_GET_REQUEST_URL = 'https://postman-echo.com/get'

@@ -164,11 +164,6 @@ class TokenHandler(RequestHandler):
             raise TokenNotInResponse()
         return token
 
-    async def run(self, loop):
-        token = await self.start(loop)
-        await self.stop(loop)
-        return token
-
     async def start(self, loop):
         """
         TODO:
@@ -178,36 +173,19 @@ class TokenHandler(RequestHandler):
         proxies.
         """
         async with self._start(loop):
-            try:
-                async with aiohttp.ClientSession(
-                    connector=self._connector,
-                    timeout=self._timeout
-                ) as session:
-                    task = asyncio.ensure_future(self.fetch(session))
+            async with aiohttp.ClientSession(
+                connector=self._connector,
+                timeout=self._timeout
+            ) as session:
+                with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
+                    token = await self.fetch(session)
+                    if not token:
+                        raise TokenHandlerException("Token should be non-null here.")
+                    return token
 
-                    with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
-                        token = await task
-                        if not token:
-                            raise TokenHandlerException("Token should be non-null here.")
-                        return token
-
-                    if timeout_mgr.state == timeout_mgr.TIMED_OUT:
-                        raise exceptions.InternalTimeout(
-                            self._token_max_fetch_time, "Waiting for token.")
-
-            # This now covers proxy errors for broker and pool, we should be more
-            # selective once we can differentiate how the two differ in timing.
-            except NoProxyError:
-                raise TokenHandlerException("Not enough allowable proxies to find token.")
-
-    async def stop(self, loop):
-        async with self._stop(loop):
-            # The main event loop should include the proxy_handler.stop() call
-            # through it's implementation of proxy_handler.run().  However, that
-            # only stops the proxy_handler if the limit was reached.  Here, we want
-            # to make sure it was stopped just in case we are exiting early.
-            if not self.proxy_handler.stopped:
-                await self.proxy_handler.stop(loop)
+                if timeout_mgr.state == timeout_mgr.TIMED_OUT:
+                    raise exceptions.InternalTimeout(
+                        self._token_max_fetch_time, "Waiting for token.")
 
     async def fetch(self, session):
         """
@@ -220,8 +198,10 @@ class TokenHandler(RequestHandler):
         """
         async def try_with_proxy(attempt=0):
             self.log.debug('Waiting on Proxy Handler Proxy')
-            proxy = await self.proxy_handler.get()
 
+            # Might want to also catch BrokerNoProxyError and PoolNoProxyError
+            proxy = await self.proxy_handler.get()
+            self.log.debug('Got Proxy Handler Proxy', extra={'proxy': proxy})
             context = TokenContext(index=attempt, proxy=proxy)
             self._notify_request(context, retry=attempt)
 

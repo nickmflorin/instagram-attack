@@ -50,9 +50,9 @@ class CustomBroker(Broker, MethodObj):
         self._setup(method=method)
         super(CustomBroker, self).__init__(proxies, **self.broker_args)
 
-    def start(self, loop):
-        with self._sync_start(loop):
-            super(CustomBroker, self).find(**self.find_args)
+    async def find(self, loop):
+        async with self._start(loop):
+            await super(CustomBroker, self).find(**self.find_args)
 
     def increment_limit(self):
         """

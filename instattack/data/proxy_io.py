@@ -90,12 +90,13 @@ def reverse_parse_proxy(index, line, method):
         avg_resp_time=avg_resp_time,
         error_rate=error_rate,
         errors=Counter(),
+        saved=True,
         # Have to include so that the pool can handle them appropriately.
         schemes=(scheme, ),
     )
 
 
-def read_proxies(method, limit=None, order_by=None):
+def read_proxies(method, limit=None):
     method = validate_method(method)
     filepath = get_proxy_file_path(method)
 
@@ -118,10 +119,12 @@ def read_proxies(method, limit=None, order_by=None):
             # in the read_raw_data method.
             log.error(e)
         else:
-            proxies.append(proxy)
+            if proxy.address not in [p.address for p in proxies]:
+                proxies.append(proxy)
+            else:
+                log.warning(f'Found Duplicate Proxy in {filepath.name}.',
+                    extra={'proxy': proxy})
 
-    if order_by:
-        proxies = sorted(proxies, key=lambda x: getattr(x, order_by))
     return proxies
 
 
@@ -142,7 +145,10 @@ def write_proxies(method, proxies, overwrite=False):
                 new_proxies.append(proxy)
 
     all_proxies = new_proxies + existing_proxies
-    log.notice(f'Writing {len(new_proxies)} Unique Proxies to {filepath.name}.')
     to_write = [parse_proxy(proxy) for proxy in all_proxies]
-    write_array_data(filepath, to_write)
+    if len(new_proxies) == 0:
+        log.error('No new proxies to save.')
+    else:
+        log.notice(f'Writing {len(new_proxies)} Unique Proxies to {filepath.name}.')
     log.notice(f'Now {len(all_proxies)} Proxies in {filepath.name}.')
+    write_array_data(filepath, to_write)

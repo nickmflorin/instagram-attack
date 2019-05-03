@@ -30,31 +30,40 @@ class MethodObj(object):
         self.__name__ = f"{self.method.upper()} {subname}"
         self.log = AppLogger(self.__name__)
 
+    def _starting(self):
+        self.log.notice(f'Starting {self.__name__}')
+
+    def _stopping(self):
+        self.log.notice(f'Stopping {self.__name__}')
+
+    def _has_stopped(self):
+        self.log.debug(f'{self.__name__} Has Been Stopped')
+
     @contextlib.contextmanager
     def _sync_start(self, loop):
         try:
-            self.log.info(f'Starting {self.__name__}')
+            self._starting()
             self._stopped = False
             yield
         finally:
-            self.log.debug(f'Finished {self.__name__}')
+            return
 
     @contextlib.asynccontextmanager
     async def _start(self, loop):
         try:
-            self.log.info(f'Starting {self.__name__}')
+            self._starting()
             self._stopped = False
             yield
         finally:
-            self.log.debug(f'Finished {self.__name__}')
+            return
 
     @contextlib.asynccontextmanager
     async def _stop(self, loop):
         try:
-            self.log.info(f'Stopping {self.__name__}')
+            self._stopping()
             yield
         finally:
-            self._stopped = True
+            self._has_stopped()
             self.log.debug(f'Stopped {self.__name__}')
 
 
@@ -72,30 +81,30 @@ class Handler(MethodObj):
 
     @contextlib.contextmanager
     def _sync_start(self, loop):
+        self._stopper = asyncio.Event()
         try:
-            self.log.info(f'Starting {self.__name__}')
-            self._stopper = asyncio.Event()
+            self._starting()
             yield
         finally:
-            self.log.debug(f'Finished {self.__name__}')
+            return
 
     @contextlib.asynccontextmanager
     async def _start(self, loop):
+        self._stopper = asyncio.Event()
         try:
-            self.log.info(f'Starting {self.__name__}')
-            self._stopper = asyncio.Event()
+            self._starting()
             yield
         finally:
-            self.log.debug(f'Finished {self.__name__}')
+            return
 
     @contextlib.asynccontextmanager
     async def _stop(self, loop):
         try:
-            self.log.info(f'Stopping {self.__name__}')
+            self._stopping()
             self._stopper.set()
             yield
         finally:
-            self.log.debug(f'Stopped {self.__name__}')
+            self._has_stopped()
 
     @property
     def _stopped(self):

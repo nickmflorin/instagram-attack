@@ -3,6 +3,7 @@ from plumbum import cli
 
 from instattack import log_handling
 from instattack.proxies import ProxyHandler
+from instattack.proxies.exceptions import PoolNoProxyError, BrokerNoProxyError
 
 from .base import BaseApplication, Instattack, ConfigArgs
 from .utils import method_switch
@@ -103,7 +104,7 @@ class ProxyServerArgs(ConfigArgs):
 
     _proxy_countries = None
     _proxy_types = {
-        'GET': [('HTTP', ('Anonymous', 'High')), 'HTTPS'],
+        'GET': ['HTTPS'],
         'POST': ['HTTPS'],
     }
     _post = {
@@ -170,4 +171,12 @@ class ProxyCollect(ProxyApplication):
         config = self.proxy_config(method=self._method)
         proxy_handler = ProxyHandler(method=self._method, proxies=proxies, **config)
 
-        loop.run_until_complete(proxy_handler.run(loop, save=True, overwrite=self.clear))
+        try:
+            loop.run_until_complete(proxy_handler.start(loop, prepopulate=True))
+        except BrokerNoProxyError as e:
+            self.log.warning(e)
+        except PoolNoProxyError as e:
+            self.log.warning(e)
+        finally:
+            loop.run_until_complete(proxy_handler.stop(loop, save=True,
+                overwrite=self.clear))
