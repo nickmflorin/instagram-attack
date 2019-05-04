@@ -8,9 +8,9 @@ from datetime import datetime
 
 from instattack import settings
 
-from .user_io import (create_new_user_files, check_user_files, create_user_dir,
-    create_users_data_dir, user_exists, read_user_file, update_attempts_file)
-from .password_generator import password_generator
+from instattack.mgmt.utils import (create_new_user_files, check_user_files,
+    create_user_dir, create_users_data_dir, user_exists, read_user_file,
+    update_attempts_file, password_generator)
 
 
 @dataclass

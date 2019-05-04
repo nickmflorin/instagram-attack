@@ -29,8 +29,9 @@ plumbum.cli.terminal.prompt()
 Method performed in cli.Application after all components of main() have completed.
 """
 
-
 def main():
+    import traceback
+    import ipdb; ipdb.set_trace()
     Instattack.run()
 
 

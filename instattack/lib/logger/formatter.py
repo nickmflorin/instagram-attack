@@ -1,8 +1,7 @@
-from __future__ import absolute_import
+from instattack.lib.utils import (get_exception_request_method,
+    get_exception_message, get_exception_status_code)
 
-from .utils import (
-    get_exception_request_method, get_exception_message,
-    get_exception_status_code, LogItem, LogItemLine)
+from .utils import LogItem, LogItemLine
 from .formats import RecordAttributes, LoggingLevels, FORMAT_STRING
 
 

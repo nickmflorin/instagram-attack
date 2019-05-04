@@ -1,11 +1,13 @@
 from __future__ import absolute_import
 
-from instattack import AppLogger, settings
+from instattack import settings
+from instattack.lib.logger import AppLogger
 
-from .utils import write_array_data, read_raw_data
-from .paths import get_users_data_dir, get_user_data_dir, get_user_file_path
-from .exceptions import (
+from instattack.mgmt.exceptions import (
     UserFileMissing, UserDirMissing, DirExists, DirMissing)
+
+from .io import write_array_data, read_raw_data
+from .paths import get_users_data_dir, get_user_data_dir, get_user_file_path
 
 
 log = AppLogger(__file__)

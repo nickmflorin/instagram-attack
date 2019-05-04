@@ -2,19 +2,19 @@ from __future__ import absolute_import
 
 import asyncio
 import aiohttp
-import random
 import stopit
 
-from instattack import OptionalProgressbar, Handler, settings, exceptions
-from instattack.proxies.exceptions import NoProxyError
+from instattack import settings, exceptions
+from instattack.base import Handler
+from instattack.lib.utils import OptionalProgressbar, get_token_from_response
 
-from .models import InstagramResult, LoginAttemptContext, LoginContext
-from .utils import get_token_from_response
-from .models import TokenContext
+from instattack.models import (
+    InstagramResult, LoginAttemptContext, LoginContext, TokenContext)
 from .exceptions import (
     TokenHandlerException, ResultNotInResponse, TokenNotInResponse,
     InstagramClientApiException, InstagramResultError, TokenHandlerException,
     PasswordHandlerException)
+from .base import RequestHandler
 
 
 class ResultsHandler(Handler):
@@ -77,62 +77,6 @@ class ResultsHandler(Handler):
             self.user.update_password_attempts(attempts_list)
 
 
-class RequestHandler(Handler):
-
-    _user_agent = None
-
-    def __init__(
-        self,
-        method=None,
-        session_timeout=None,
-        connection_limit=None,
-        connection_force_close=None,
-        connection_limit_per_host=None,
-        connection_keepalive_timeout=None
-    ):
-        super(RequestHandler, self).__init__(method=method)
-
-        self._connection_limit = connection_limit
-        self._session_timeout = session_timeout
-        self._connection_force_close = connection_force_close
-        self._connection_limit_per_host = connection_limit_per_host
-        self._connection_keepalive_timeout = connection_keepalive_timeout
-
-    def _notify_request(self, context, retry=1):
-        message = f'Sending {self.__method__} Request'
-        if retry != 1:
-            message = f'Sending {self.__method__} Request, Retry {retry}'
-        self.log.debug(message, extra={'context': context})
-
-    @property
-    def user_agent(self):
-        if not self._user_agent:
-            self._user_agent = random.choice(settings.USER_AGENTS)
-        return self._user_agent
-
-    def _headers(self):
-        headers = settings.HEADER.copy()
-        headers['user-agent'] = self.user_agent
-        return headers
-
-    @property
-    def _connector(self):
-        return aiohttp.TCPConnector(
-            ssl=False,
-            force_close=self._connection_force_close,
-            limit=self._connection_limit,
-            limit_per_host=self._connection_limit_per_host,
-            keepalive_timeout=self._connection_keepalive_timeout,
-            enable_cleanup_closed=True,
-        )
-
-    @property
-    def _timeout(self):
-        return aiohttp.ClientTimeout(
-            total=self._session_timeout
-        )
-
-
 class TokenHandler(RequestHandler):
 
     __method__ = 'GET'
@@ -164,7 +108,7 @@ class TokenHandler(RequestHandler):
             raise TokenNotInResponse()
         return token
 
-    async def start(self, loop):
+    async def run(self, loop, lock):
         """
         TODO:
         -----
@@ -172,22 +116,23 @@ class TokenHandler(RequestHandler):
         consume, since the fetch method is really what is consuming the
         proxies.
         """
-        async with self._start(loop):
-            async with aiohttp.ClientSession(
-                connector=self._connector,
-                timeout=self._timeout
-            ) as session:
-                with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
-                    token = await self.fetch(session)
-                    if not token:
-                        raise TokenHandlerException("Token should be non-null here.")
-                    return token
+        # async with self._start(loop):
+        async with aiohttp.ClientSession(
+            connector=self._connector,
+            timeout=self._timeout
+        ) as session:
+            with stopit.SignalTimeout(self._token_max_fetch_time) as timeout_mgr:
+                self.log.debug('Waiting on Fetch')
+                token = await self.fetch(loop, lock, session)
+                if not token:
+                    raise TokenHandlerException("Token should be non-null here.")
+                return token
 
-                if timeout_mgr.state == timeout_mgr.TIMED_OUT:
-                    raise exceptions.InternalTimeout(
-                        self._token_max_fetch_time, "Waiting for token.")
+            if timeout_mgr.state == timeout_mgr.TIMED_OUT:
+                raise exceptions.InternalTimeout(
+                    self._token_max_fetch_time, "Waiting for token.")
 
-    async def fetch(self, session):
+    async def fetch(self, loop, lock, session):
         """
         TODO
         ----
@@ -199,8 +144,12 @@ class TokenHandler(RequestHandler):
         async def try_with_proxy(attempt=0):
             self.log.debug('Waiting on Proxy Handler Proxy')
 
-            # Might want to also catch BrokerNoProxyError and PoolNoProxyError
-            proxy = await self.proxy_handler.get()
+            # Might want to also catch PoolNoProxyError
+            # Not sure why proxy_handler.get() does not seem to be working?
+            # Well neither are working really.
+            async with lock:
+                proxy = await self.proxy_handler.pool.get()
+
             self.log.debug('Got Proxy Handler Proxy', extra={'proxy': proxy})
             context = TokenContext(index=attempt, proxy=proxy)
             self._notify_request(context, retry=attempt)
@@ -218,14 +167,28 @@ class TokenHandler(RequestHandler):
                         self.log.warning(e, extra={'context': context})
                         return await try_with_proxy(attempt=attempt + 1)
                     else:
-                        await self.proxy_handler.confirmed(proxy)
+                        async with lock:
+                            # We should maybe start storing num_successful_requests?
+                            proxy.num_requests += 1
+                            proxy.update_time()
+                            loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
+                            # await self.proxy_handler.pool.put(proxy)
                         return token
 
             except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
+                # We should maybe start storing num_successful_requests?
+                proxy.num_requests += 1
+                proxy.update_time()
+                proxy.errors[e.__class__.__name__] += 1
+                loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                 return await try_with_proxy(attempt=attempt + 1)
 
             except aiohttp.ClientError as e:
                 self.log.error(e, extra={'context': context})
+                proxy.num_requests += 1
+                proxy.update_time()
+                proxy.errors[e.__class__.__name__] += 1
+                loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                 return await try_with_proxy(attempt=attempt + 1)
 
             except asyncio.CancelledError:
@@ -233,6 +196,10 @@ class TokenHandler(RequestHandler):
 
             except (TimeoutError, asyncio.TimeoutError) as e:
                 self.log.error(e, extra={'context': context})
+                proxy.num_requests += 1
+                proxy.update_time()
+                proxy.errors[e.__class__.__name__] += 1
+                loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                 return await try_with_proxy(attempt=attempt + 1)
 
         # We might have to check if stop_event is set here.

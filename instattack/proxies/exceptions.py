@@ -12,6 +12,7 @@ class NoProxyError(ProxyException):
     __message__ = 'No More Proxies'
 
 
+# We don't raise this anymore because the pool just stops when it notices this.
 class BrokerNoProxyError(NoProxyError):
 
     __message__ = 'No More Proxies in Broker'

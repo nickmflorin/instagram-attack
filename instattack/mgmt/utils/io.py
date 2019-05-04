@@ -1,8 +1,8 @@
 from __future__ import absolute_import
 
-from instattack import AppLogger
+from instattack.lib.logger import AppLogger
 
-from .exceptions import InvalidFileLine, InvalidWriteElement
+from instattack.mgmt.exceptions import InvalidFileLine, InvalidWriteElement
 
 
 log = AppLogger(__file__)

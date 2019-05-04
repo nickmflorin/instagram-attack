@@ -1,9 +1,9 @@
 import asyncio
 from plumbum import cli
 
-from instattack import log_handling
-from instattack.proxies import ProxyHandler
-from instattack.proxies.exceptions import PoolNoProxyError, BrokerNoProxyError
+from instattack.lib.logger import log_handling
+from instattack.proxies.handlers import ProxyHandler
+from instattack.proxies.exceptions import PoolNoProxyError
 
 from .base import BaseApplication, Instattack, ConfigArgs
 from .utils import method_switch
@@ -154,6 +154,18 @@ class ProxyApplication(BaseApplication, ProxyArgs):
 
 @ProxyApplication.subcommand('test')
 class ProxyTest(ProxyApplication):
+    """
+    Will be used to test proxies against simple request URLs.
+    """
+    pass
+
+
+@ProxyApplication.subcommand('clean')
+class ProxyClean(ProxyApplication):
+    """
+    Will be used to remove duplicate proxies that are saved.  Potentially also
+    be used to update metrics if we get that far in this project.
+    """
     pass
 
 
@@ -170,13 +182,13 @@ class ProxyCollect(ProxyApplication):
         proxies = asyncio.Queue()
         config = self.proxy_config(method=self._method)
         proxy_handler = ProxyHandler(method=self._method, proxies=proxies, **config)
+        self.collect(loop, proxy_handler)
 
+    def collect(self, loop, handler):
         try:
-            loop.run_until_complete(proxy_handler.start(loop, prepopulate=True))
-        except BrokerNoProxyError as e:
-            self.log.warning(e)
+            loop.run_until_complete(handler.run(loop, prepopulate=True))
         except PoolNoProxyError as e:
-            self.log.warning(e)
+            self.log.error(e)
         finally:
-            loop.run_until_complete(proxy_handler.stop(loop, save=True,
-                overwrite=self.clear))
+            handler.save_proxies(overwrite=self.clear)
+            loop.run_until_complete(handler.stop(loop))

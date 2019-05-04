@@ -3,7 +3,7 @@ from __future__ import absolute_import
 import asyncio
 import contextlib
 
-from instattack import AppLogger
+from instattack.lib.logger import AppLogger
 
 
 # TODO: There has to be a cleaner way to handle the _stopped.
@@ -48,6 +48,15 @@ class MethodObj(object):
         finally:
             return
 
+    @contextlib.contextmanager
+    def _sync_stop(self, loop):
+        try:
+            self._stopping()
+            self._stopped = True
+            yield
+        finally:
+            self._has_stopped()
+
     @contextlib.asynccontextmanager
     async def _start(self, loop):
         try:
@@ -64,7 +73,6 @@ class MethodObj(object):
             yield
         finally:
             self._has_stopped()
-            self.log.debug(f'Stopped {self.__name__}')
 
 
 class Handler(MethodObj):

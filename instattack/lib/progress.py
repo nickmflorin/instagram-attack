@@ -1,11 +1,6 @@
-from __future__ import absolute_import
-
 import progressbar
 
 from .styles import Colors
-
-
-__all__ = ('CustomProgressbar', 'OptionalProgressbar', )
 
 
 # TODO: Replace with Plumbum Progressbar

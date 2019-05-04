@@ -2,12 +2,16 @@ from __future__ import absolute_import
 
 from collections import Counter
 
-from instattack import AppLogger, settings, validate_method
-from instattack.proxies.models import RequestProxy
+from instattack import settings
+from instattack.lib.logger import AppLogger
+from instattack.lib.utils import validate_method
 
-from .utils import write_array_data, read_raw_data
+from instattack.models import RequestProxy
+
+from instattack.mgmt.exceptions import InvalidFileLine
+
+from .io import write_array_data, read_raw_data
 from .paths import get_proxy_file_path
-from .exceptions import InvalidFileLine
 
 
 log = AppLogger(__file__)

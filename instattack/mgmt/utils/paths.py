@@ -2,9 +2,11 @@ from __future__ import absolute_import
 
 from plumbum import local
 
-from instattack import AppLogger, settings, validate_method
+from instattack import settings
+from instattack.lib.logger import AppLogger
+from instattack.lib.utils import validate_method
 
-from .exceptions import (
+from instattack.mgmt.exceptions import (
     DirExists, DirMissing, UserDirMissing, UserDirExists, UserFileMissing,
     UserFileExists)
 

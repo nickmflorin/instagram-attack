@@ -4,17 +4,17 @@ import traceback
 import asyncio
 from plumbum import cli
 
-from instattack import log_handling
 from instattack.exceptions import AppException
+from instattack.models import User
 
-from instattack.proxies import ProxyHandler
-from instattack.instagram import TokenHandler, ResultsHandler, PasswordHandler
+from instattack.lib.logger import log_handling
+from instattack.lib.utils import cancel_remaining_tasks
 
-from instattack.data.models import User
+from instattack.proxies.handlers import ProxyHandler
+from instattack.instagram.handlers import TokenHandler, ResultsHandler, PasswordHandler
 
 from .base import BaseApplication, Instattack, RequestArgs
 from .proxies import ProxyArgs
-from .utils import cancel_remaining_tasks
 
 
 @Instattack.subcommand('attack')
@@ -70,13 +70,15 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
 
     def attack(self, loop):
         get_proxy_handler, token_handler = self.get_handlers()
+
         try:
             # It is way faster to prepopulate the proxy pool before we
             # kickstart the consumers of those proxies and the handler itself.
-            loop.run_until_complete(get_proxy_handler.prepare(loop))
+            # loop.run_until_complete(get_proxy_handler.prepare(loop))
+            lock = asyncio.Lock()
             task_results = loop.run_until_complete(asyncio.gather(
-                get_proxy_handler.start(loop, prepopulate=False, silent=True),
-                token_handler.start(loop),
+                token_handler.run(loop, lock),
+                get_proxy_handler.run(loop, lock, prepopulate=True),
             ))
 
         except Exception as e:
@@ -85,11 +87,15 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
             e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
             self.log.handle_global_exception(e)
 
-            loop.run_until_complete(
-                get_proxy_handler.stop(loop, save=False),
-            )
+            # Do we really want to save proxies?
+            get_proxy_handler.save_proxies(overwrite=False)
+            loop.run_until_complete(get_proxy_handler.stop(loop))
 
         else:
+            # Do we really want to save proxies?
+            get_proxy_handler.save_proxies(overwrite=False)
+            loop.run_until_complete(get_proxy_handler.stop(loop))
+
             token = task_results[0]
             if not token:
                 raise AppException("Token should not be null.")

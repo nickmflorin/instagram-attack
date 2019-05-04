@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from argparse import ArgumentTypeError
 
-from .settings import LEVELS, METHODS
+from instattack.settings import LEVELS, METHODS
 
 
 __all__ = ('validate_log_level', 'validate_method', )

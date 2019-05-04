@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Any
 
-from instattack import validate_method
+from instattack.lib.utils import validate_method
 
 
 @dataclass
@@ -47,7 +47,6 @@ class RequestProxy:
         if other.__class__ is not self.__class__:
             return NotImplemented
         return self.comparison_data == other.comparison_data
-        #return (self.host, self.port, self.method) == (other.host, other.port, other.method)
 
     def __diff__(self, new_proxy):
         differences = ProxyDifferences(old_proxy=self, new_proxy=new_proxy)
@@ -74,6 +73,24 @@ class RequestProxy:
             num_requests=0,  # Our reference of num_requests differs from ProxyBroker
             schemes=proxy.schemes,
         )
+
+    def evaluate(self, num_requests=None, error_rate=None, resp_time=None, scheme=None):
+        """
+        Determines if the proxy meets the provided standards.
+        """
+        if self.num_requests >= num_requests:
+            return (False, 'Number of Requests Exceeds Limit')
+
+        elif self.error_rate > error_rate:
+            return (False, 'Error Rate too Large')
+
+        elif self.avg_resp_time > resp_time:
+            return (False, 'Avg. Response Time too Large')
+
+        elif scheme not in self.schemes:
+            return (False, f'Scheme {scheme} Not Supported')
+
+        return (True, None)
 
     @property
     def time_since_used(self):

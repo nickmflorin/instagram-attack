@@ -1,39 +1,10 @@
-import asyncio
 from plumbum import cli
 
-from instattack import AppLogger
+from instattack.lib.utils import is_numeric
+from instattack.lib.logger import AppLogger
 
 
 log = AppLogger(__file__)
-
-
-async def cancel_remaining_tasks(futures=None):
-    if not futures:
-        futures = asyncio.Task.all_tasks()
-
-    tasks = [task for task in futures if task is not
-         asyncio.tasks.Task.current_task()]
-    list(map(lambda task: task.cancel(), tasks))
-    await asyncio.gather(*tasks, return_exceptions=True)
-
-
-def is_numeric(value):
-    try:
-        float(value)
-    except ValueError:
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    else:
-        try:
-            return int(value)
-        except ValueError:
-            return float(value)
-        else:
-            if float(value) == int(value):
-                return int(value)
-            return float(value)
 
 
 def parse_dict_string(value, uppercase=False):

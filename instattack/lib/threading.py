@@ -1,26 +1,9 @@
-from __future__ import absolute_import
-
 import asyncio
+
 from itertools import islice
 
 
-def get_token_from_cookies(cookies):
-    # aiohttp ClientResponse cookies have .value attribute.
-    cookie = cookies.get('csrftoken')
-    if cookie:
-        return cookie.value
-
-
-def get_cookies_from_response(response):
-    return response.cookies
-
-
-def get_token_from_response(response):
-    cookies = get_cookies_from_response(response)
-    if cookies:
-        return get_token_from_cookies(cookies)
-
-
+# Not currently being used but we want to hold onto.
 def limited_as_completed(coros, limit):
     """
     Equivalent of asyncio.as_completed(tasks) except that it limits the number
@@ -47,3 +30,13 @@ def limited_as_completed(coros, limit):
                     return f.result()
     while len(futures) > 0:
         yield first_to_finish()
+
+
+async def cancel_remaining_tasks(futures=None):
+    if not futures:
+        futures = asyncio.Task.all_tasks()
+
+    tasks = [task for task in futures if task is not
+         asyncio.tasks.Task.current_task()]
+    list(map(lambda task: task.cancel(), tasks))
+    await asyncio.gather(*tasks, return_exceptions=True)
