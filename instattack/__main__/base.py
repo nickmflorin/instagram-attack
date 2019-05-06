@@ -1,11 +1,11 @@
 from platform import python_version
-
 import signal
 import sys
 
 from plumbum import cli
 
-from instattack.lib.logger import AppLogger, log_handling
+from instattack.control import Loggable
+from instattack.lib.logger import log_handling
 from instattack.lib.utils import validate_log_level
 
 from .utils import method_switch
@@ -37,9 +37,7 @@ Method performed in cli.Application after all components of main() have complete
 """
 
 
-class BaseApplication(cli.Application):
-
-    log = AppLogger(__file__)
+class BaseApplication(cli.Application, Loggable):
 
     # May want to catch other signals too - these are not currently being
     # used, but could probably be expanded upon.

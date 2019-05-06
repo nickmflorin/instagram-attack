@@ -24,7 +24,7 @@ class RecordAttributes(Enum):
 
     LABEL = Format(color=Colors.BLACK, styles=[Styles.DIM, Styles.UNDERLINE])
     MESSAGE = Format(color=Colors.BLACK, styles=Styles.NORMAL)
-    CHANNEL = Format(color=Colors.GRAY, styles=Styles.BOLD)
+    CHANNEL = Format(color=Colors.BLACK, styles=Styles.UNDERLINE)
     PROXY = Format(color=Colors.YELLOW, wrapper="<%s>")
     TOKEN = Format(color=Colors.RED)
     STATUS_CODE = Format(color=Colors.RED, wrapper="[%s]")
@@ -40,28 +40,38 @@ DATE_FORMAT_OBJ = Format(color=Colors.YELLOW, styles=Styles.DIM)
 DATE_FORMAT = DATE_FORMAT_OBJ('%Y-%m-%d %H:%M:%S')
 
 
-FORMAT_STRING = LogItemSet(
-    LogItemLine(
-        LogItem("channel", suffix=":", formatter=RecordAttributes.CHANNEL),
-        LogItem("formatted_level_name"),
-    ),
-    LogItem("formatted_message", indent=4),
-    LogItem("other_message", indent=4, formatter=RecordAttributes.MESSAGE),
+def FORMAT_STRING(no_indent=False):
 
-    LogLabeledItem('index', label="Attempt #",
-        formatter=Styles.BOLD, indent=6),
-    LogLabeledItem('parent_index', label="Password #",
-        formatter=Styles.BOLD, indent=6),
-    LogLabeledItem('password', label="Password",
-        formatter=RecordAttributes.PASSWORD, indent=6),
-    LogLabeledItem('proxy', label="Proxy",
-        formatter=RecordAttributes.PROXY, indent=6),
+    def opt_indent(val):
+        if not no_indent:
+            return val
+        return 0
 
-    LogItemLine(
-        LogItem("filename", suffix=",", formatter=Colors.GRAY),
-        LogItem("lineno", formatter=Styles.BOLD),
-        prefix="(",
-        suffix=")",
-        indent=4,
+    return (
+        LogItemSet(
+            LogItemLine(
+                LogItem("channel", suffix=":", formatter=RecordAttributes.CHANNEL),
+                LogItem("formatted_level_name"),
+            ),
+            LogItem("formatted_message", indent=opt_indent(4)),
+            LogItem("other_message", indent=opt_indent(4),
+                formatter=RecordAttributes.MESSAGE),
+
+            LogLabeledItem('index', label="Attempt #",
+                formatter=Styles.BOLD, indent=opt_indent(6)),
+            LogLabeledItem('parent_index', label="Password #",
+                formatter=Styles.BOLD, indent=opt_indent(6)),
+            LogLabeledItem('password', label="Password",
+                formatter=RecordAttributes.PASSWORD, indent=opt_indent(6)),
+            LogLabeledItem('proxy', label="Proxy",
+                formatter=RecordAttributes.PROXY, indent=opt_indent(6)),
+
+            LogItemLine(
+                LogItem("filename", suffix=",", formatter=Colors.GRAY),
+                LogItem("lineno", formatter=Styles.BOLD),
+                prefix="(",
+                suffix=")",
+                indent=opt_indent(4),
+            )
+        )
     )
-)

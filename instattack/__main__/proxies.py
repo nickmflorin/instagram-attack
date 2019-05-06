@@ -1,6 +1,10 @@
 import asyncio
 from plumbum import cli
 
+from instattack import db
+from instattack.models import Proxy
+from instattack.mgmt.utils import read_proxies_from_txt
+
 from instattack.lib.logger import log_handling
 from instattack.proxies.handlers import ProxyHandler
 from instattack.proxies.exceptions import PoolNoProxyError
@@ -169,6 +173,34 @@ class ProxyClean(ProxyApplication):
     pass
 
 
+@ProxyApplication.subcommand('migrate')
+class ProxyMigrate(ProxyApplication):
+    """
+    Stores proxies that we used to save in text files to the associated database
+    tables.
+    """
+    @log_handling('self')
+    def main(self):
+        db.create_tables()
+        self.migrate_proxies('POST')
+        self.migrate_proxies('GET')
+
+    def migrate_proxies(self, method):
+        self.log.notice(f'Migrating {method} Proxies from .txt File.')
+
+        get_proxies = read_proxies_from_txt(method=method)
+        for proxy in get_proxies:
+            _proxy = Proxy(
+                host=proxy.host,
+                port=proxy.port,
+                avg_resp_time=proxy.avg_resp_time,
+                error_rate=proxy.error_rate,
+                method=method,
+            )
+            db.session.add(_proxy)
+        db.session.commit()
+
+
 @ProxyApplication.subcommand('collect')
 class ProxyCollect(ProxyApplication):
 
@@ -185,8 +217,10 @@ class ProxyCollect(ProxyApplication):
         self.collect(loop, proxy_handler)
 
     def collect(self, loop, handler):
+        lock = asyncio.Lock()
+
         try:
-            loop.run_until_complete(handler.run(loop, prepopulate=True))
+            loop.run_until_complete(handler.run(loop, lock, prepopulate=True))
         except PoolNoProxyError as e:
             self.log.error(e)
         finally:

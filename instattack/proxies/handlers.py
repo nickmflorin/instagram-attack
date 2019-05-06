@@ -1,13 +1,14 @@
 import asyncio
 from proxybroker import Broker
 
-from instattack.base import Handler, MethodObj
+from instattack.control import Handler, Control
+from instattack.lib.utils import coro_exc_wrapper
 
 from .pool import CustomProxyPool
-from .exceptions import PoolNoProxyError, BrokerNoProxyError, ProxyException
+from .exceptions import ProxyException
 
 
-class CustomBroker(Broker, MethodObj):
+class CustomBroker(Broker, Control):
     """
     Overridden to allow custom server to be used and convenience settings
     to be implemented directly from the settings module.
@@ -23,7 +24,6 @@ class CustomBroker(Broker, MethodObj):
     def __init__(
         self,
         proxies,
-        method=None,
         max_tries=None,
         max_conn=None,
         timeout=None,
@@ -31,7 +31,8 @@ class CustomBroker(Broker, MethodObj):
         limit=None,
         post=False,
         countries=None,
-        types=None
+        types=None,
+        **kwargs,
     ):
         self.broker_args = {
             'max_tries': max_tries,
@@ -46,19 +47,20 @@ class CustomBroker(Broker, MethodObj):
             'types': types
         }
 
-        self._setup(method=method)
+        self.engage(**kwargs)
         super(CustomBroker, self).__init__(proxies, **self.broker_args)
 
     async def find(self, loop):
-        async with self._start(loop):
-            await super(CustomBroker, self).find(**self.find_args)
+        await self.start_event.wait()
+        async with self.starting(loop):
+            return await super(CustomBroker, self).find(**self.find_args)
 
     def stop(self, loop, *args, **kwargs):
         """
         This has to by a synchronous method because ProxyBroker attaches signals
         to the overridden stop method.
         """
-        with self._sync_stop(loop):
+        with self.stopping(loop):
             self._proxies.put_nowait(None)
             super(CustomBroker, self).stop(*args, **kwargs)
 
@@ -94,7 +96,6 @@ class ProxyHandler(Handler):
 
     def __init__(
         self,
-        method='GET',
         # Broker Arguments
         broker_req_timeout=None,
         broker_max_conn=None,
@@ -112,15 +113,15 @@ class ProxyHandler(Handler):
         # Handler Args
         proxy_pool_timeout=None,
         proxies=None,
+        **kwargs,
     ):
-        super(ProxyHandler, self).__init__(method=method)
+        super(ProxyHandler, self).__init__(**kwargs)
 
         self._proxies = proxies or asyncio.Queue()
         self._proxy_limit = proxy_limit
 
         self._broker = CustomBroker(
             self._proxies,
-            method=method,
             max_conn=broker_max_conn,
             max_tries=broker_max_tries,
             timeout=broker_req_timeout,
@@ -130,41 +131,50 @@ class ProxyHandler(Handler):
             post=post,
             countries=proxy_countries,
             types=proxy_types,
+            **kwargs,
         )
 
         self.pool = CustomProxyPool(
             self._broker,
-            method=method,
             timeout=proxy_pool_timeout,
             min_req_proxy=pool_min_req_proxy,
             max_error_rate=pool_max_error_rate,
             max_resp_time=pool_max_resp_time,
+            **kwargs,
         )
 
-    async def run(self, loop, lock, prepopulate=True):
+    async def run(self, loop, prepopulate=True):
         """
         When running concurrently with other tasks/handlers, we don't always
         want to shut down the proxy handler when we hit the limit, because
         the other handler might still be using those.
+
+        Using asyncio.gather() is not really necessary since the broker kicks
+        off on it's own, it also suppresses exceptions which is not desired
+        behavior.
         """
-        async with self._start(loop):
-            return await asyncio.gather(
+
+        # TODO: Test the operation without prepopulation, since it sometimes
+        # slows down too much when we are waiting on proxies from the finder.
+        async with self.starting(loop):
+            await asyncio.gather(
                 self._broker.find(loop),
-                self.pool.run(loop, lock, prepopulate=prepopulate)
+                self.pool.run(loop, prepopulate=prepopulate),
             )
 
-    async def stop(self, loop):
-        async with self._stop(loop):
+    async def stop(self, loop, save=False, overwrite=False):
+        async with self.stopping(loop):
             self._broker.stop(loop)
             # Stopping the broker will put None in the queue which should trigger
-            # the pool to set _stopped = True.  However, this might be faster.
-            await self.pool.stop(loop)
+            # the pool to set _stopped = True, which is necessary to make sure that
+            # it is not waiting forever.  However, this might be faster.
+            await self.pool.stop(loop, save=save, overwrite=overwrite)
 
     async def get(self):
-        if self._stopped:
+        if self.stopped:
             raise ProxyException('Cannot get proxy from stopped handler.')
         # Do not want to await, we want to return the couroutine?
         return await self.pool.get()
 
-    def save_proxies(self, overwrite=False):
-        self.pool.save(overwrite=overwrite)
+    async def save_proxies(self, overwrite=False):
+        return await self.pool.save(overwrite=overwrite)

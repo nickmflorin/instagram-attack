@@ -1,57 +1,29 @@
 import logbook
+import traceback
+import sys
 
 from .handlers import log_handling  # noqa
 
 
 class AppLogger(logbook.Logger):
 
-    def handle_global_exception(self, exc):
+    def traceback(self, ex, ex_traceback=None, raw=False):
         """
-        Can only handle instances of traceback.TracebackException.
-        Might want to look into asyncio utilities on loop for handling exceptions.
+        We are having problems with logbook and asyncio in terms of logging
+        exceptions with their traceback.  For now, this is a workaround that
+        works similiarly.
         """
-        tb = exc.exc_traceback
+        if ex_traceback is None:
+            ex_traceback = ex.__traceback__
 
-        log = tb.tb_frame.f_globals.get('log')
-        if not log:
-            log = tb.tb_frame.f_locals.get('log')
+        tb_lines = [
+            line.rstrip('\n') for line in
+            traceback.format_exception(ex.__class__, ex, ex_traceback)
+        ]
 
-        # Array of lines for the stack trace - might be useful later.
-        # trace = traceback.format_exception(ex_type, ex, tb, limit=3)
-        self.exception(exc, extra={
-            'lineno': exc.stack[-1].lineno,
-            'filename': exc.stack[-1].filename,
-        })
-
-    # @contextlib.contextmanager
-    # def start_and_done(self, action_string, level='WARNING', exit_level='DEBUG'):
-    #     methods = {
-    #         'INFO': self.info,
-    #         'NOTICE': self.notice,
-    #         'DEBUG': self.debug,
-    #         'WARNING': self.warning,
-    #     }
-    #     method = methods[level.upper()]
-    #     exit_method = methods[exit_level.upper()]
-
-    #     # This doesn't seem to be working...
-    #     stacks = traceback.extract_stack()
-    #     stacks = [
-    #         st for st in stacks if (all([
-    #             not st.filename.startswith('/Library/Frameworks/'),
-    #             not any([x in st.filename for x in ['stdin', 'stderr', 'stdout']]),
-    #             __file__ not in st.filename,
-    #         ]))
-    #     ]
-
-    #     try:
-    #         method(f'{action_string}...', extra={
-    #             'lineno': stacks[-1].lineno,
-    #             'filename': stacks[-1].filename,
-    #         })
-    #         yield
-    #     finally:
-    #         exit_method(f'Done {action_string}.', extra={
-    #             'lineno': stacks[-1].lineno,
-    #             'filename': stacks[-1].filename,
-    #         })
+        # This can be used if we want to just output the raw error.
+        if raw:
+            for line in tb_lines:
+                sys.stderr.write("%s\n" % line)
+        else:
+            self.error("\n".join(tb_lines), extra={'no_indent': True})

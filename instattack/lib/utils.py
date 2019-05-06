@@ -4,22 +4,7 @@ from .validation import *  # noqa
 from .progress import *  # noqa
 from .http import *  # noqa
 from .threading import *  # noqa
-
-
-def tb_context(frame):
-    return {
-        'lineno': frame.lineno,
-        'filename': frame.filename,
-    }
-
-
-def traceback_to(stack, back=0):
-    try:
-        frame = stack[back]
-    except IndexError:
-        raise ValueError('Not enough frames in stack.')
-    else:
-        return tb_context(frame)
+from .stack import *  # noqa
 
 
 def get_exception_status_code(exc):

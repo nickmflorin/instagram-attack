@@ -1,7 +1,5 @@
-import sys
-import traceback
-
 import asyncio
+import contextlib
 from plumbum import cli
 
 from instattack.exceptions import AppException
@@ -16,11 +14,16 @@ from instattack.instagram.handlers import TokenHandler, ResultsHandler, Password
 from .base import BaseApplication, Instattack, RequestArgs
 from .proxies import ProxyArgs
 
+import logbook
+
+log = logbook.Logger('TEST')
+
 
 @Instattack.subcommand('attack')
 class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
 
     __group__ = 'Instattack Attack'
+    __name__ = 'Attack Command'
 
     _token_max_fetch_time = cli.SwitchAttr(
         "--token_max_fetch_time", float,
@@ -34,125 +37,208 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
         group=__group__,
     )
 
-    def get_handlers(self):
-        config = self.request_config(method='GET')
-        config['token_max_fetch_time'] = self._token_max_fetch_time
+    def handle_exception(self, loop, context):
+        """
+        We are having trouble using log.exception() with exc_info=True and seeing
+        the stack trace, so we have a custom log.traceback() method for now.
 
-        proxy_handler = ProxyHandler(method='GET', **self.proxy_config(method='GET'))
-        token_handler = TokenHandler(proxy_handler, **config)
-        return proxy_handler, token_handler
+        >>> self.log.exception(exc, exc_info=True, extra=extra)
 
-    def post_handlers(self, user):
-        proxy_handler = ProxyHandler(method='POST', **self.proxy_config(method='POST'))
-        password_handler = PasswordHandler(self.user, proxy_handler,
-            **self.request_config(method='POST'))
-        return proxy_handler, password_handler
+        Not sure if we will keep it or not, since it might add some extra
+        customization availabilities, but it works right now.
+        """
+        extra = {}
+        if 'message' in context:
+            extra['other'] = context['message']
+
+        exc = context['exception']
+        self.log.traceback(exc)
+
+        loop.run_until_complete(self.shutdown(loop))
+        loop.close()
+
+    @contextlib.contextmanager
+    def loop_session(self):
+        """
+        TODO:
+        ----
+        Figure out when handle_exception is used vs. the exception
+        catches... it has something to do with asyncio.gather in the coroutines
+        run by loop.run_until_complete().
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+
+        loop.set_exception_handler(self.handle_exception)
+
+        try:
+            yield loop
+        finally:
+            loop.run_until_complete(self.shutdown(loop))
+            loop.close()
+            return
 
     @log_handling('self')
     def main(self, username):
         self.user = User(username)
         self.user.setup()
 
-        loop = asyncio.get_event_loop()
-        try:
-            self.attack(loop)
-
-        # This would likely be exceptions from the proxybroker package since
-        # our other exceptions are handled in main().
-        except Exception as e:
-            exc_info = sys.exc_info()
-            e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-            self.log.handle_global_exception(e)
-
-        finally:
-            loop.run_until_complete(self.shutdown(loop))
-            loop.close()
-
-    def attack(self, loop):
-        get_proxy_handler, token_handler = self.get_handlers()
-
-        try:
-            # It is way faster to prepopulate the proxy pool before we
-            # kickstart the consumers of those proxies and the handler itself.
-            # loop.run_until_complete(get_proxy_handler.prepare(loop))
-            lock = asyncio.Lock()
-            task_results = loop.run_until_complete(asyncio.gather(
-                token_handler.run(loop, lock),
-                get_proxy_handler.run(loop, lock, prepopulate=True),
-            ))
-
-        except Exception as e:
-            # This is where the loop.exception_handler() might be helpful.
-            exc_info = sys.exc_info()
-            e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-            self.log.handle_global_exception(e)
-
-            # Do we really want to save proxies?
-            get_proxy_handler.save_proxies(overwrite=False)
-            loop.run_until_complete(get_proxy_handler.stop(loop))
-
-        else:
-            # Do we really want to save proxies?
-            get_proxy_handler.save_proxies(overwrite=False)
-            loop.run_until_complete(get_proxy_handler.stop(loop))
-
-            token = task_results[0]
-            if not token:
-                raise AppException("Token should not be null.")
-            self.log.notice('Received Token', extra={'token': token})
-            return
-            auth_result_found = asyncio.Event()
-            results = asyncio.Queue()
-
-            post_proxy_handler, password_handler = self.post_handlers(self.user)
-            results_handler = ResultsHandler(self.user, results)
-
-            try:
-                task_results = loop.run_until_complete(asyncio.gather(
-                    results_handler.run(loop, auth_result_found),
-                    password_handler.run(loop, auth_result_found, token, results,
-                        password_limit=self._pwlimit),
-                    post_proxy_handler.run(loop, save=False, prepopulate=True),
-                ))
-
-            except Exception as e:
-                # This is where the loop.exception_handler() might be helpful.
-                exc_info = sys.exc_info()
-                e = traceback.TracebackException(exc_info[0], exc_info[1], exc_info[2])
-                self.log.handle_global_exception(e)
-
-                loop.run_until_complete(post_proxy_handler.ensure_shutdown(loop))
-
-            else:
-                # Post Proxy Server Stopped Automatically
-                result = task_results[0]
-                if result:
-                    self.log.notice(f'Authenticated User!', extra={
-                        'password': result.context.password
-                    })
-
-            finally:
-                loop.run_until_complete(results_handler.stop(loop, save=True))
-
-    # def ensure_servers_shutdown(self, loop, *handlers):
-    #     """
-    #     We have to run handler.server.stop() and handler.server.find()
-    #     directly from loop.run_until_complete() instead of using the
-    #     async methods start_server() and stop_server() - don't know why
-    #     but that is why we cannot restrict to handler._server_running.
-    #     """
-    #     for handler in handlers:
-    #         if not handler._stopped:
-    #             self.log.warning(f'{handler.method} Proxy Server Never Stopped.')
-    #             loop.run_until_complete(handler.stop())
+        with self.loop_session() as loop:
+            token = loop.run_until_complete(self.get_token(loop))
+            loop.run_until_complete(self.attack(loop, token))
 
     async def shutdown(self, loop, signal=None):
 
         if signal:
-            self.log.warning(f'Received exit signal {signal.name}...')
+            self.log.error(f'Received exit signal {signal.name}...')
 
-        with self.log.start_and_done('Shutting Down'):
-            with self.log.start_and_done('Cancelling Tasks'):
-                await cancel_remaining_tasks()
+        self.log.warning('[!] Shutting Down...')
+        await cancel_remaining_tasks()
+        loop.stop()
 
-            loop.stop()
+        self.log.notice('[!] Done')
+
+    async def get_token(self, loop):
+        """
+        TODO:
+        ----
+        Do we really want to save proxies?
+
+        NOTE:
+        -----
+        We cannot perform any actions in finally because if we hit an exception,
+        the loop will have been shutdown by that point.
+
+        It's possible that the proxy handler was not started fully before
+        exception was raised - in which case we can't double stop it.
+
+        Proxies will not be saved if it wasn't started, but that is probably
+        desired behavior.
+        """
+        get_proxy_handler, token_handler = self.get_handlers()
+
+        try:
+            results = await asyncio.gather(
+                token_handler.run(loop),
+                get_proxy_handler.run(loop, prepopulate=True),
+            )
+        except Exception as e:
+            # Do we really want to save proxies?
+            if not get_proxy_handler.stopped:
+                await get_proxy_handler.stop(loop, save=True)
+
+            # We need to force the shutdown with the exception handler.
+            self.handle_exception(loop, context={'exception': e})
+        else:
+            await get_proxy_handler.stop(loop, save=True)
+
+            token = results[0]
+            if not token:
+                raise AppException("Token should not be null.")
+            self.log.notice('Received Token', extra={'token': token})
+            return token
+
+    async def attack(self, loop, token):
+        """
+        TODO:
+        ----
+        Do we really want to save proxies?  If we do, we should filter out
+        proxies that have a certain amount of errors.
+
+        NOTE:
+        -----
+        We cannot perform any actions in finally because if we hit an exception,
+        the loop will have been shutdown by that point.
+
+        It's possible that the proxy handler was not started fully before
+        exception was raised - in which case we can't double stop it.
+
+        Proxies will not be saved if it wasn't started, but that is probably
+        desired behavior.
+        """
+        results_handler, post_proxy_handler, password_handler = self.post_handlers(self.user)
+        try:
+            results = loop.run_until_complete(asyncio.gather(
+                results_handler.run(loop),
+                password_handler.run(loop, token, password_limit=self._pwlimit),
+                post_proxy_handler.run(loop, prepopulate=True),
+            ))
+
+        except Exception as e:
+            # Do we really want to save POST proxies?
+            if not post_proxy_handler.stopped:
+                await post_proxy_handler.stop(loop, save=True)
+
+            # TODO: Is there a chance that the results handler or password
+            # handle was already stopped?
+
+            # Save Attempts Up Until This Point
+            await results_handler.stop(loop, save=True)
+            await password_handler.stop(loop)
+
+            # We need to force the shutdown with the exception handler.
+            self.handle_exception(loop, context={'exception': e})
+
+        else:
+            # TODO: Do we really want to save proxies?
+            # Proxy handler should not be stopped by this point.
+            await post_proxy_handler.stop(loop, save=True)
+
+            # Save All Attempts
+            await results_handler.stop(loop, save=True)
+            await password_handler.stop(loop)
+
+            # Post Proxy Server Stopped Automatically
+            result = results[0]
+            if result:
+                self.log.notice(f'Authenticated User!', extra={
+                    'password': result.context.password
+                })
+
+    def get_handlers(self):
+        config = self.request_config(method='GET')
+        config['token_max_fetch_time'] = self._token_max_fetch_time
+
+        lock = asyncio.Lock()
+        start_event = asyncio.Event()
+
+        proxy_handler = ProxyHandler(
+            method='GET',
+            lock=lock,
+            start_event=start_event,
+            **self.proxy_config(method='GET')
+        )
+        token_handler = TokenHandler(
+            proxy_handler,
+            start_event=start_event,
+            **config
+        )
+        return proxy_handler, token_handler
+
+    def post_handlers(self, user):
+        lock = asyncio.Lock()
+        auth_result_found = asyncio.Event()
+        results = asyncio.Queue()
+
+        # We actually don't need to provide the lock to the password
+        # and token handlers I think, since they don't access _pool directly.
+        results_handler = ResultsHandler(
+            user=self.user,
+            queue=results,
+            stop_event=auth_result_found
+        )
+        proxy_handler = ProxyHandler(
+            method='POST',
+            lock=lock,
+            **self.proxy_config(method='POST')
+        )
+        password_handler = PasswordHandler(
+            results,
+            proxy_handler,
+            user=self.user,
+            stop_event=auth_result_found,
+            **self.request_config(method='POST')
+        )
+        return results_handler, proxy_handler, password_handler

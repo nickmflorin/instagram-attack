@@ -76,4 +76,4 @@ def app_formatter(record, handler):
     format_context['lineno'] = flexible_retrieval('lineno')
     format_context['filename'] = flexible_retrieval('filename')
 
-    return FORMAT_STRING.format(**format_context)
+    return FORMAT_STRING(no_indent=record.extra.get('no_indent', False)).format(**format_context)

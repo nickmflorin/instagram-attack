@@ -29,7 +29,3 @@ class InternalTimeout(AppException):
 
     def __str__(self):
         return 'Timed out after %s seconds; Waiting: %s' % (self.seconds, self.reason)
-
-
-class HandlerException(AppException):
-    pass

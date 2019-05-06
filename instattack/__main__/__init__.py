@@ -1,5 +1,7 @@
 #!/usr/bin/env python3 -B
 
+from instattack import db
+
 from .base import Instattack
 from .proxies import *  # noqa
 from .attack import *  # noqa
@@ -29,9 +31,9 @@ plumbum.cli.terminal.prompt()
 Method performed in cli.Application after all components of main() have completed.
 """
 
+
 def main():
-    import traceback
-    import ipdb; ipdb.set_trace()
+    db.create_tables()
     Instattack.run()
 
 

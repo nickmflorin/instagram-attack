@@ -2,7 +2,7 @@ import aiohttp
 import random
 
 from instattack import settings
-from instattack.base import Handler
+from instattack.control import Handler
 
 
 class RequestHandler(Handler):
@@ -11,14 +11,14 @@ class RequestHandler(Handler):
 
     def __init__(
         self,
-        method=None,
         session_timeout=None,
         connection_limit=None,
         connection_force_close=None,
         connection_limit_per_host=None,
-        connection_keepalive_timeout=None
+        connection_keepalive_timeout=None,
+        **kwargs,
     ):
-        super(RequestHandler, self).__init__(method=method)
+        super(RequestHandler, self).__init__(**kwargs)
 
         self._connection_limit = connection_limit
         self._session_timeout = session_timeout

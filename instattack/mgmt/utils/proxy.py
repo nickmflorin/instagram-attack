@@ -7,17 +7,16 @@ from instattack.lib.logger import AppLogger
 from instattack.lib.utils import validate_method
 
 from instattack.models import RequestProxy
-
 from instattack.mgmt.exceptions import InvalidFileLine
 
-from .io import write_array_data, read_raw_data
+from .io import write_array_data, read_raw_data, stream_raw_data
 from .paths import get_proxy_file_path
 
 
 log = AppLogger(__file__)
 
 
-__all__ = ('write_proxies', 'read_proxies', )
+__all__ = ('write_proxies', 'read_proxies_from_txt', )
 
 
 def parse_proxy(proxy):
@@ -100,7 +99,7 @@ def reverse_parse_proxy(index, line, method):
     )
 
 
-def read_proxies(method, limit=None):
+def read_proxies_from_txt(method, limit=None):
     method = validate_method(method)
     filepath = get_proxy_file_path(method)
 
@@ -143,7 +142,7 @@ def write_proxies(method, proxies, overwrite=False):
 
     new_proxies = []
     if not overwrite:
-        existing_proxies = read_proxies(method)
+        existing_proxies = read_proxies_from_txt(method)
         for proxy in proxies:
             if proxy not in existing_proxies and proxy not in new_proxies:
                 new_proxies.append(proxy)
