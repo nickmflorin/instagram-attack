@@ -1,6 +1,5 @@
 #!/usr/bin/env python3 -B
-
-from instattack import db
+from plumbum import local  # noqa
 
 from .base import Instattack
 from .proxies import *  # noqa
@@ -33,7 +32,7 @@ Method performed in cli.Application after all components of main() have complete
 
 
 def main():
-    db.create_tables()
+    # Might want to do something like with local.cwd(...)
     Instattack.run()
 
 

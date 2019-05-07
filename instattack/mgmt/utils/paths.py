@@ -1,10 +1,7 @@
-from __future__ import absolute_import
-
 from plumbum import local
 
 from instattack import settings
 from instattack.lib.logger import AppLogger
-from instattack.lib.utils import validate_method
 
 from instattack.mgmt.exceptions import (
     DirExists, DirMissing, UserDirMissing, UserDirExists, UserFileMissing,
@@ -14,23 +11,10 @@ from instattack.mgmt.exceptions import (
 log = AppLogger(__file__)
 
 
-def _proxy_file_dir(app_name=True):
-    if app_name:
-        return local.cwd / settings.APP_NAME / settings.DATA_DIR / settings.PROXY_DIR
-    return local.cwd / settings.DATA_DIR / settings.PROXY_DIR
-
-
 def _user_data_dir(app_name=True):
     if app_name:
         return local.cwd / settings.APP_NAME / settings.DATA_DIR / settings.USER_DIR
     return local.cwd / settings.DATA_DIR / settings.USER_DIR
-
-
-def _get_proxy_data_dir():
-    path = _proxy_file_dir()
-    if not path.exists():
-        path = _proxy_file_dir(app_name=False)
-    return path
 
 
 def _get_users_data_dir():
@@ -38,21 +22,6 @@ def _get_users_data_dir():
     if not path.exists():
         path = _user_data_dir(app_name=False)
     return path
-
-
-def get_proxy_file_path(method):
-    """
-    `app_name` just allows us to run commands from the level deeper than the root
-    directory.
-
-    TODO: Incorporate the checks just in case we have to construct the files and
-    directories
-    """
-    path = _get_proxy_data_dir()
-
-    validate_method(method)
-    filename = "%s.txt" % method.lower()
-    return path / filename
 
 
 def get_users_data_dir(expected=True, strict=True):

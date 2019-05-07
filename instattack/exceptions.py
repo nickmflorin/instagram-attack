@@ -16,6 +16,10 @@ class AppException(Exception):
         return self.message
 
 
+class ArgumentError(AppException):
+    pass
+
+
 class InternalTimeout(AppException):
     """
     Thrown when we have internal logic that might wait on a result over a series

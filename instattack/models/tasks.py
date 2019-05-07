@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from .proxies import RequestProxy
+from instattack.proxies.models import Proxy
 
 
 @dataclass
@@ -19,7 +19,7 @@ class TaskContext:
 @dataclass
 class TokenContext(TaskContext):
 
-    proxy: RequestProxy
+    proxy: Proxy
     index: int = 0
 
     @property
@@ -52,7 +52,7 @@ class LoginAttemptContext(TaskContext):
 
     password: str
     token: str
-    proxy: RequestProxy
+    proxy: Proxy
     index: int = 0
     parent_index: int = 0
 

@@ -1,148 +1,17 @@
 import asyncio
 from plumbum import cli
 
-from instattack import db
-from instattack.models import Proxy
-from instattack.mgmt.utils import read_proxies_from_txt
-
+from instattack.exceptions import ArgumentError
 from instattack.lib.logger import log_handling
+from instattack.lib.utils import CustomProgressbar
+
+from instattack.proxies.models import Proxy, ProxyError
 from instattack.proxies.handlers import ProxyHandler
 from instattack.proxies.exceptions import PoolNoProxyError
+from instattack.proxies.deprecated import read_proxies_from_txt
 
-from .base import BaseApplication, Instattack, ConfigArgs
-from .utils import method_switch
-
-
-class ProxyPoolArgs(ConfigArgs):
-
-    __group__ = 'Proxy Pool'
-
-    _pool_max_resp_time = {'GET': 8, 'POST': 6}
-    _pool_max_error_rate = {'GET': 0.5, 'POST': 0.5}
-    _proxy_pool_timeout = {'GET': 25, 'POST': 25}
-    _pool_min_req_proxy = {'GET': 3, 'POST': 3}
-
-    @method_switch('pool_max_error_rate',
-        default=_pool_max_error_rate,
-        group=__group__,
-        help="Maximum error rate for a given proxy in the pool.")
-    def pool_max_error_rate(self, data):
-        self._pool_max_error_rate = data
-
-    @method_switch('pool_max_resp_time',
-        default=_pool_max_resp_time,
-        group=__group__,
-        help="Maximum average response time for a given proxy in the pool.")
-    def pool_max_resp_time(self, data):
-        self._pool_max_resp_time = data
-
-    @method_switch('proxy_pool_timeout',
-        group=__group__,
-        default=_proxy_pool_timeout)
-    def proxy_pool_timeout(self, data):
-        self._proxy_pool_timeout = data
-
-    @method_switch('pool_min_req_proxy',
-        group=__group__,
-        default=_pool_min_req_proxy,
-        help=(
-            "The minimum number of processed requests to estimate the quality "
-            "of proxy (in accordance with max_error_rate and max_resp_time)"
-        ))
-    def pool_min_req_proxy(self, data):
-        self._pool_min_req_proxy = data
-
-    def proxy_pool_config(self, method=None):
-        method = method or self._method
-        return {
-            'pool_min_req_proxy': self._pool_min_req_proxy[method],
-            'pool_max_error_rate': self._pool_max_error_rate[method],
-            'pool_max_resp_time': self._pool_max_resp_time[method],
-            'proxy_pool_timeout': self._proxy_pool_timeout[method],
-        }
-
-
-class ProxyBrokerArgs(ConfigArgs):
-
-    __group__ = "Proxy Broker"
-
-    _broker_max_conn = {'GET': 50, 'POST': 200}
-    _broker_max_tries = {'GET': 2, 'POST': 2}
-    _broker_req_timeout = {'GET': 5, 'POST': 5}
-    _broker_verify_ssl = False
-
-    @method_switch('broker_max_conn',
-        group=__group__,
-        default=_broker_max_conn,
-        help="The maximum number of concurrent checks of proxies.")
-    def broker_max_conn(self, data):
-        self._broker_max_conn = data
-
-    @method_switch('broker_max_tries',
-        group=__group__,
-        default=_broker_max_tries,
-        help="The maximum number of attempts to check a proxy.")
-    def broker_max_tries(self, data):
-        self._broker_max_tries = data
-
-    @method_switch('broker_req_timeout',
-        group=__group__,
-        default=_broker_req_timeout,
-        help="Timeout of a request in seconds")
-    def broker_req_timeout(self, data):
-        self._broker_req_timeout = data
-
-    def proxy_broker_config(self, method=None):
-        method = method or self._method
-        return {
-            'broker_req_timeout': self._broker_req_timeout[method],
-            'broker_max_conn': self._broker_max_conn[method],
-            'broker_max_tries': self._broker_max_tries[method],
-            'broker_verify_ssl': self._broker_verify_ssl,
-        }
-
-
-class ProxyServerArgs(ConfigArgs):
-
-    __group__ = 'Proxy Server'
-
-    _proxy_countries = None
-    _proxy_types = {
-        'GET': ['HTTPS'],
-        'POST': ['HTTPS'],
-    }
-    _post = {
-        'GET': False,
-        'POST': True,
-    }
-
-    _proxy_limit = {'GET': 50, 'POST': 200}
-
-    @method_switch('proxy_limit',
-        group=__group__,
-        default=_proxy_limit,
-        help="The maximum number of proxies.")
-    def proxy_limit(self, data):
-        self._proxy_limit = data
-
-    def proxy_server_config(self, method=None):
-        method = method or self._method
-        return {
-            'proxy_limit': self._proxy_limit[method],
-            'post': self._post[method],
-            'proxy_countries': self._proxy_countries,
-            'proxy_types': self._proxy_types[method],
-        }
-
-
-class ProxyArgs(ProxyPoolArgs, ProxyServerArgs, ProxyBrokerArgs):
-
-    def proxy_config(self, method=None):
-        config = {}
-        config.update(self.proxy_pool_config(method=method))
-        config.update(self.proxy_broker_config(method=method))
-        config.update(self.proxy_server_config(method=method))
-        return config
+from .args import ProxyArgs
+from .base import Instattack, BaseApplication
 
 
 @Instattack.subcommand('proxies')
@@ -170,7 +39,21 @@ class ProxyClean(ProxyApplication):
     Will be used to remove duplicate proxies that are saved.  Potentially also
     be used to update metrics if we get that far in this project.
     """
-    pass
+    @log_handling('self')
+    def main(self, arg):
+        with self.loop_session() as loop:
+            if arg == 'errors':
+                loop.run_until_complete(self.clean_errors())
+            else:
+                raise ArgumentError(f'Invalid argument {arg}.')
+
+    async def clean_errors(self):
+        progress = CustomProgressbar(ProxyError.count(), label='Cleaning Errors')
+        progress.start()
+        async for error in ProxyError.all():
+            await error.delete()
+            progress.update()
+        progress.finish()
 
 
 @ProxyApplication.subcommand('migrate')
@@ -178,27 +61,28 @@ class ProxyMigrate(ProxyApplication):
     """
     Stores proxies that we used to save in text files to the associated database
     tables.
+
+    Will eventually be deprecated but we need it for now.
     """
     @log_handling('self')
     def main(self):
-        db.create_tables()
-        self.migrate_proxies('POST')
-        self.migrate_proxies('GET')
+        with self.loop_session() as loop:
+            loop.run_until_complete(self.migrate_proxies(loop, 'POST'))
+            loop.run_until_complete(self.migrate_proxies(loop, 'GET'))
 
-    def migrate_proxies(self, method):
+    async def migrate_proxies(self, loop, method):
         self.log.notice(f'Migrating {method} Proxies from .txt File.')
 
-        get_proxies = read_proxies_from_txt(method=method)
-        for proxy in get_proxies:
-            _proxy = Proxy(
+        for proxy in read_proxies_from_txt(method):
+            proxy, created = await Proxy.get_or_create(
                 host=proxy.host,
                 port=proxy.port,
-                avg_resp_time=proxy.avg_resp_time,
-                error_rate=proxy.error_rate,
                 method=method,
+                defaults={
+                    'avg_resp_time': proxy.avg_resp_time,
+                    'error_rate': proxy.error_rate,
+                }
             )
-            db.session.add(_proxy)
-        db.session.commit()
 
 
 @ProxyApplication.subcommand('collect')
@@ -209,20 +93,26 @@ class ProxyCollect(ProxyApplication):
 
     @log_handling('self')
     def main(self):
-        loop = asyncio.get_event_loop()
+        with self.loop_session() as loop:
 
-        proxies = asyncio.Queue()
-        config = self.proxy_config(method=self._method)
-        proxy_handler = ProxyHandler(method=self._method, proxies=proxies, **config)
-        self.collect(loop, proxy_handler)
+            # Not really needed for this case but is needed for other cases that
+            # depend on the handler pool.
+            start_event = asyncio.Event()
+            lock = asyncio.Lock()
 
-    def collect(self, loop, handler):
-        lock = asyncio.Lock()
+            handler = ProxyHandler(
+                method=self._method,
+                lock=lock,
+                start_event=start_event,
+                **self.proxy_config(method=self._method),
+            )
+            loop.run_until_complete(self.collect(loop, handler))
 
+    async def collect(self, loop, handler):
         try:
-            loop.run_until_complete(handler.run(loop, lock, prepopulate=True))
+            await handler.run(loop, prepopulate=True)
         except PoolNoProxyError as e:
             self.log.error(e)
         finally:
-            handler.save_proxies(overwrite=self.clear)
-            loop.run_until_complete(handler.stop(loop))
+            await handler.save_proxies(overwrite=self.clear)
+            await handler.stop(loop)

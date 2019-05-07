@@ -1,42 +1,46 @@
 from __future__ import absolute_import
 
 from enum import Enum
+from plumbum import colors
 
-from ..styles import Format, Colors, Styles
-from .utils import LogItemSet, LogItemLine, LogLabeledItem, LogItem
-
-
-class LoggingLevels(Enum):
-
-    CRITICAL = (50, Format(color=Colors.RED, styles=[Styles.BRIGHT, Styles.UNDERLINE]))
-    ERROR = (40, Format(color=Colors.RED, styles=[Styles.NORMAL, Styles.BRIGHT]))
-    WARNING = (30, Format(color=Colors.YELLOW, styles=Styles.NORMAL))
-    NOTICE = (20, Format(color=Colors.GREEN, styles=Styles.NORMAL))
-    INFO = (20, Format(color=Colors.CYAN, styles=Styles.NORMAL))
-    DEBUG = (10, Format(color=Colors.BLACK, styles=Styles.NORMAL))
-
-    def __init__(self, code, format):
-        self.code = code
-        self.format = format
+from instattack.lib.utils import (
+    LogItemSet, LogItemLine, LogLabeledItem, LogItem, Format)
 
 
-class RecordAttributes(Enum):
-
-    LABEL = Format(color=Colors.BLACK, styles=[Styles.DIM, Styles.UNDERLINE])
-    MESSAGE = Format(color=Colors.BLACK, styles=Styles.NORMAL)
-    CHANNEL = Format(color=Colors.BLACK, styles=Styles.UNDERLINE)
-    PROXY = Format(color=Colors.YELLOW, wrapper="<%s>")
-    TOKEN = Format(color=Colors.RED)
-    STATUS_CODE = Format(color=Colors.RED, wrapper="[%s]")
-    METHOD = Format(color=Colors.BLACK, styles=Styles.BOLD)
-    TASK = Format(color=Colors.CYAN, styles=Styles.NORMAL, wrapper="(%s)")
-    PASSWORD = Format(color=Colors.BLACK, styles=Styles.BOLD)
+class FormattedEnum(Enum):
 
     def __init__(self, format):
         self.format = format
 
+    def __call__(self, text):
+        return self.format(text)
 
-DATE_FORMAT_OBJ = Format(color=Colors.YELLOW, styles=Styles.DIM)
+
+class LoggingLevels(FormattedEnum):
+
+    CRITICAL = Format(colors.fg('Magenta'), colors.underline, colors.bold)
+    ERROR = Format(colors.fg('Red'), colors.bold)
+    WARNING = Format(colors.fg('Orange3'), colors.bold)
+    NOTICE = Format(colors.fg('SpringGreen3'), colors.bold)
+    INFO = Format(colors.fg('DodgerBlue1'))
+    DEBUG = Format(colors.fg('DarkGray'))
+
+
+class RecordAttributes(FormattedEnum):
+
+    LABEL = Format(colors.black, colors.underline)
+    MESSAGE = Format(colors.black)
+    SPECIAL_MESSAGE = Format(colors.bg('LightGray'), colors.fg('Magenta'))
+    CHANNEL = Format(colors.black, colors.underline)
+    PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
+    TOKEN = Format(colors.red)
+    STATUS_CODE = Format(colors.red, wrapper="[%s]")
+    METHOD = Format(colors.black, colors.bold)
+    TASK = Format(colors.fg('LightBlue'), wrapper="(%s)")
+    PASSWORD = Format(colors.black, colors.bold)
+
+
+DATE_FORMAT_OBJ = Format(colors.yellow)
 DATE_FORMAT = DATE_FORMAT_OBJ('%Y-%m-%d %H:%M:%S')
 
 
@@ -58,17 +62,17 @@ def FORMAT_STRING(no_indent=False):
                 formatter=RecordAttributes.MESSAGE),
 
             LogLabeledItem('index', label="Attempt #",
-                formatter=Styles.BOLD, indent=opt_indent(6)),
+                formatter=Format(colors.bold), indent=opt_indent(6)),
             LogLabeledItem('parent_index', label="Password #",
-                formatter=Styles.BOLD, indent=opt_indent(6)),
+                formatter=Format(colors.bold), indent=opt_indent(6)),
             LogLabeledItem('password', label="Password",
                 formatter=RecordAttributes.PASSWORD, indent=opt_indent(6)),
             LogLabeledItem('proxy', label="Proxy",
                 formatter=RecordAttributes.PROXY, indent=opt_indent(6)),
 
             LogItemLine(
-                LogItem("filename", suffix=",", formatter=Colors.GRAY),
-                LogItem("lineno", formatter=Styles.BOLD),
+                LogItem("filename", suffix=",", formatter=Format(colors.fg('LightGray'))),
+                LogItem("lineno", formatter=Format(colors.bold)),
                 prefix="(",
                 suffix=")",
                 indent=opt_indent(4),

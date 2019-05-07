@@ -48,18 +48,23 @@ class LogItem(LogAbstractItem):
     def value(self, **context):
         value = context[self.id]
         if self.formatter:
-            value = self.formatter.format(value)
+            try:
+                new_value = self.formatter(value)
+            except TypeError:
+                value = "%s" % value
+            else:
+                return new_value
         return value
 
 
 class LogLabeledItem(LogItem):
 
     def __init__(self, id, label=None, formatter=None, indent=0):
-        from .formats import RecordAttributes
+        from instattack.lib.logger.formats import RecordAttributes
 
         prefix = None
         if label:
-            prefix = RecordAttributes.LABEL.format(label)
+            prefix = RecordAttributes.LABEL(label)
             prefix = "%s: " % prefix
 
         super(LogLabeledItem, self).__init__(

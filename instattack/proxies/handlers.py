@@ -9,17 +9,8 @@ from .exceptions import ProxyException
 
 
 class CustomBroker(Broker, Control):
-    """
-    Overridden to allow custom server to be used and convenience settings
-    to be implemented directly from the settings module.
 
-    Also, the proxybroker server stops the main event loop preventing multiple
-    brokers from being used.  Even though the .find() method does not use the
-    server, that was the original purpose of subclassing the broker and should
-    be kept in mind in case we want to reimplement the .serve() functionality.
-    requests).
-    """
-    __subname__ = 'Proxy Broker'
+    __name__ = 'Proxy Broker'
 
     def __init__(
         self,
@@ -53,7 +44,7 @@ class CustomBroker(Broker, Control):
     async def find(self, loop):
         await self.start_event.wait()
         async with self.starting(loop):
-            return await super(CustomBroker, self).find(**self.find_args)
+            await super(CustomBroker, self).find(**self.find_args)
 
     def stop(self, loop, *args, **kwargs):
         """
@@ -77,22 +68,8 @@ class CustomBroker(Broker, Control):
 
 
 class ProxyHandler(Handler):
-    """
-    We have to run handler.broker.stop() and handler.broker.find() instead
-    of having an async method on ProxyHandler like `start_server()`.  At this point,
-    I'm not exactly sure why - but it was causing issues.
 
-    TODO
-    ----
-    We want to eventually subclass CustomProxyPool more dynamically to use our
-    Proxy model and to be able to handle the validation and retrieval logic
-    of a proxy.
-
-    Once this is done, self.proxies will not be required anymore because we can
-    return directly from self.pool instead of populating results of self.pool
-    in self.proxies.
-    """
-    __subname__ = 'Proxy Handler'
+    __name__ = 'Proxy Handler'
 
     def __init__(
         self,
@@ -145,17 +122,17 @@ class ProxyHandler(Handler):
 
     async def run(self, loop, prepopulate=True):
         """
+        NOTE:
+        -----
         When running concurrently with other tasks/handlers, we don't always
         want to shut down the proxy handler when we hit the limit, because
         the other handler might still be using those.
 
-        Using asyncio.gather() is not really necessary since the broker kicks
-        off on it's own, it also suppresses exceptions which is not desired
-        behavior.
+        TODO:
+        ----
+        Test the operation without prepopulation, since it sometimes
+        slows down too much when we are waiting on proxies from the finder.
         """
-
-        # TODO: Test the operation without prepopulation, since it sometimes
-        # slows down too much when we are waiting on proxies from the finder.
         async with self.starting(loop):
             await asyncio.gather(
                 self._broker.find(loop),
@@ -173,7 +150,6 @@ class ProxyHandler(Handler):
     async def get(self):
         if self.stopped:
             raise ProxyException('Cannot get proxy from stopped handler.')
-        # Do not want to await, we want to return the couroutine?
         return await self.pool.get()
 
     async def save_proxies(self, overwrite=False):

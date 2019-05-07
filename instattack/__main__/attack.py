@@ -1,26 +1,21 @@
 import asyncio
-import contextlib
 from plumbum import cli
 
+from instattack.db import database_init
 from instattack.exceptions import AppException
 from instattack.models import User
 
 from instattack.lib.logger import log_handling
-from instattack.lib.utils import cancel_remaining_tasks
 
 from instattack.proxies.handlers import ProxyHandler
 from instattack.instagram.handlers import TokenHandler, ResultsHandler, PasswordHandler
 
-from .base import BaseApplication, Instattack, RequestArgs
-from .proxies import ProxyArgs
-
-import logbook
-
-log = logbook.Logger('TEST')
+from .base import Instattack
+from .args import RequestArgs, ProxyArgs
 
 
 @Instattack.subcommand('attack')
-class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
+class InstattackAttack(Instattack, RequestArgs, ProxyArgs):
 
     __group__ = 'Instattack Attack'
     __name__ = 'Attack Command'
@@ -37,71 +32,28 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
         group=__group__,
     )
 
-    def handle_exception(self, loop, context):
-        """
-        We are having trouble using log.exception() with exc_info=True and seeing
-        the stack trace, so we have a custom log.traceback() method for now.
-
-        >>> self.log.exception(exc, exc_info=True, extra=extra)
-
-        Not sure if we will keep it or not, since it might add some extra
-        customization availabilities, but it works right now.
-        """
-        extra = {}
-        if 'message' in context:
-            extra['other'] = context['message']
-
-        exc = context['exception']
-        self.log.traceback(exc)
-
-        loop.run_until_complete(self.shutdown(loop))
-        loop.close()
-
-    @contextlib.contextmanager
-    def loop_session(self):
-        """
-        TODO:
-        ----
-        Figure out when handle_exception is used vs. the exception
-        catches... it has something to do with asyncio.gather in the coroutines
-        run by loop.run_until_complete().
-        """
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.get_event_loop()
-
-        loop.set_exception_handler(self.handle_exception)
-
-        try:
-            yield loop
-        finally:
-            loop.run_until_complete(self.shutdown(loop))
-            loop.close()
-            return
-
     @log_handling('self')
     def main(self, username):
         self.user = User(username)
         self.user.setup()
 
         with self.loop_session() as loop:
+            loop.run_until_complete(database_init())
+
             token = loop.run_until_complete(self.get_token(loop))
+            if not token:
+                raise AppException("Token should not be null.")
+
+            self.log.notice('Received Token', extra={'token': token})
+            return
             loop.run_until_complete(self.attack(loop, token))
-
-    async def shutdown(self, loop, signal=None):
-
-        if signal:
-            self.log.error(f'Received exit signal {signal.name}...')
-
-        self.log.warning('[!] Shutting Down...')
-        await cancel_remaining_tasks()
-        loop.stop()
-
-        self.log.notice('[!] Done')
 
     async def get_token(self, loop):
         """
+        Uses proxies specifically for GET requests to synchronously make
+        requests to the INSTAGRAM_URL until a valid response is received with
+        a token that can be used for subsequent stages.
+
         TODO:
         ----
         Do we really want to save proxies?
@@ -124,6 +76,10 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
                 token_handler.run(loop),
                 get_proxy_handler.run(loop, prepopulate=True),
             )
+        # This can happen when shutting down due to an early error in the token
+        # handler or proxy handler.
+        # except asyncio.CancelledError:
+        #     pass
         except Exception as e:
             # Do we really want to save proxies?
             if not get_proxy_handler.stopped:
@@ -133,15 +89,15 @@ class InstattackAttack(BaseApplication, RequestArgs, ProxyArgs):
             self.handle_exception(loop, context={'exception': e})
         else:
             await get_proxy_handler.stop(loop, save=True)
-
-            token = results[0]
-            if not token:
-                raise AppException("Token should not be null.")
-            self.log.notice('Received Token', extra={'token': token})
-            return token
+            return results[0]
 
     async def attack(self, loop, token):
         """
+        Uses the token retrieved from the initial phase of the command to
+        iteratively try each password for the given user with the provided
+        token until a successful response is achieved for each password or
+        a successful authenticated response is achieved for any password.
+
         TODO:
         ----
         Do we really want to save proxies?  If we do, we should filter out

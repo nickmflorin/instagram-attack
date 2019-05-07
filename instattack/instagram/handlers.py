@@ -5,7 +5,7 @@ import aiohttp
 
 from instattack import settings
 from instattack.control import Handler
-from instattack.lib.utils import OptionalProgressbar, get_token_from_response
+from instattack.lib.utils import get_token_from_response
 
 from instattack.models import (
     InstagramResult, LoginAttemptContext, LoginContext, TokenContext)
@@ -167,38 +167,48 @@ class TokenHandler(RequestHandler):
                     try:
                         token = self._get_token_from_response(response)
                     except TokenNotInResponse as e:
-                        self.log.warning(e, extra={'context': context})
+                        self.log.error(e, extra={'context': context})
+
+                        # We should maybe start storing num_successful_requests?
+                        proxy.update_requests()
+
                         return await try_with_proxy(attempt=attempt + 1)
                     else:
                         # We should maybe start storing num_successful_requests?
-                        proxy.num_requests += 1
-                        proxy.update_time()
+                        # Add confirmed field here.
+                        proxy.update_requests()
 
-                        # Try to add to the loop with call_soon so that we can immediately
-                        # try again.
-                        # loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
+                        # Try to add to the loop with call_soon so that we can
+                        # immediately try again without waiting for the pool.
+                        # >>> loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                         await self.proxy_handler.pool.put(proxy)
                         return token
 
+            # Start storing number of successful requests.
             except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
                 # We should maybe start storing num_successful_requests?
-                proxy.num_requests += 1
-                proxy.update_time()
-                proxy.add_error(e)
+                self.log.error(e, extra={'context': context})
 
-                # Try to add to the loop with call_soon so that we can immediately
-                # try again.
+                # Since adding error requires saving the proxy, at least right
+                # now, maybe we should spit this off in a call_soon method as well.
+                await proxy.add_error(e)
+
+                # Try to add to the loop with call_soon so that we can
+                # immediately try again without waiting for the pool.
+                # >>> loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                 await self.proxy_handler.pool.put(proxy)
                 return await try_with_proxy(attempt=attempt + 1)
 
             except aiohttp.ClientError as e:
                 self.log.error(e, extra={'context': context})
-                proxy.num_requests += 1
-                proxy.update_time()
-                proxy.add_error(e)
 
-                # Try to add to the loop with call_soon so that we can immediately
-                # try again.
+                # Since adding error requires saving the proxy, at least right
+                # now, maybe we should spit this off in a call_soon method as well.
+                await proxy.add_error(e)
+
+                # Try to add to the loop with call_soon so that we can
+                # immediately try again without waiting for the pool.
+                # >>> loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                 await self.proxy_handler.pool.put(proxy)
                 return await try_with_proxy(attempt=attempt + 1)
 
@@ -207,12 +217,14 @@ class TokenHandler(RequestHandler):
 
             except (TimeoutError, asyncio.TimeoutError) as e:
                 self.log.error(e, extra={'context': context})
-                proxy.num_requests += 1
-                proxy.update_time()
-                proxy.add_error(e)
 
-                # Try to add to the loop with call_soon so that we can immediately
-                # try again.
+                # Since adding error requires saving the proxy, at least right
+                # now, maybe we should spit this off in a call_soon method as well.
+                await proxy.add_error(e)
+
+                # Try to add to the loop with call_soon so that we can
+                # immediately try again without waiting for the pool.
+                # >>> loop.call_soon_threadsafe(self.proxy_handler.pool.put, proxy)
                 await self.proxy_handler.pool.put(proxy)
                 return await try_with_proxy(attempt=attempt + 1)
 

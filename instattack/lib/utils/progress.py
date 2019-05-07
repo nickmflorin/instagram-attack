@@ -1,6 +1,7 @@
 import progressbar
+from plumbum import colors
 
-from .styles import Colors
+from .utils import Format
 
 
 # TODO: Replace with Plumbum Progressbar
@@ -18,7 +19,7 @@ class CustomProgressbar(progressbar.ProgressBar):
 
         widgets = self.widgets[:]
         if label:
-            label = f"{Colors.BLUE.format(label)}: "
+            label = f"{Format(colors.blue)(label)}: "
             widgets.insert(0, label)
 
         super(CustomProgressbar, self).__init__(

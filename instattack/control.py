@@ -10,6 +10,9 @@ from instattack.lib.utils import get_caller, is_async
 __all__ = ('Control', 'Handler', 'Loggable', )
 
 
+log = AppLogger(__file__)
+
+
 class DynamicProperty(object):
     """
     Base class for properties that provide basic configuration and control
@@ -78,32 +81,36 @@ class DynamicStopper(DynamicProperty):
             self.data[instance] = self.default
 
         if value is False:
-            self.data[instance] = self._stop(instance)
-        elif value is True:
             self.data[instance] = self._start(instance)
+        elif value is True:
+            self.data[instance] = self._stop(instance)
         else:
             raise ValueError('Dynamic property `stopped` must be boolean.')
 
     def _stop(self, instance):
         currently_stopped = self.data[instance]
         if currently_stopped:
-            raise ValueError(f'Cannot stop {instance.name}, it is already stopped.')
-        if getattr(instance, 'stop_event', None):
-            instance.stop_event.set()
+            log.warning(f'Should not have to stop {instance.name}, it is already stopped.')
+            return currently_stopped
         else:
-            instance._stopped = True
-        return True
+            if getattr(instance, 'stop_event', None):
+                instance.stop_event.set()
+            else:
+                instance._stopped = True
+            return True
 
     def _start(self, instance):
 
         currently_stopped = self.data[instance]
         if not currently_stopped:
-            raise ValueError(f'Cannot start {instance.name}, it is not stopped.')
-        if getattr(instance, 'stop_event', None):
-            instance.stop_event.clear()
+            log.warning(f'Should not have to start {instance.name}, it was already started.')
+            return currently_stopped
         else:
-            instance._stopped = False
-        return False
+            if getattr(instance, 'stop_event', None):
+                instance.stop_event.clear()
+            else:
+                instance._stopped = False
+            return False
 
 
 class Loggable(object):
@@ -143,28 +150,40 @@ class Control(Loggable):
         func = get_caller(correction=2)
         is_asynchronous = is_async(func)
 
+        preemptively_started = False
+        if not self.stopped:
+            preemptively_started = True
+
+        self.stopped = False
+
         @contextlib.asynccontextmanager
         async def _start():
-            self.stopped = False
             try:
-                self.log.notice(f'Starting {self.name}')
+                if preemptively_started:
+                    log.warning(f'Should not have to start {self.name}, it was already started.')
+                else:
+                    self.log.notice(f'Starting {self.name}')
                 yield
             except Exception as e:
                 raise e
             else:
-                self.log.debug(f'{self.name} Was Successfully Started')
+                if not preemptively_started:
+                    self.log.debug(f'{self.name} Was Successfully Started')
                 return
 
         @contextlib.contextmanager
         def _sync_start():
-            self.stopped = False
             try:
-                self.log.notice(f'Starting {self.name}')
+                if preemptively_started:
+                    log.warning(f'Should not have to start {self.name}, it was already started.')
+                else:
+                    self.log.notice(f'Starting {self.name}')
                 yield
             except Exception as e:
                 raise
             else:
-                self.log.debug(f'{self.name} Was Successfully Started')
+                if not preemptively_started:
+                    self.log.debug(f'{self.name} Was Successfully Started')
                 return
 
         if is_asynchronous:
@@ -175,31 +194,38 @@ class Control(Loggable):
         func = get_caller(correction=2)
         is_asynchronous = is_async(func)
 
+        preemptively_stopped = False
         if self.stopped:
-            raise ValueError(f'Cannot stop {self.name}, it is already stopped.')
+            preemptively_stopped = True
 
         @contextlib.asynccontextmanager
         async def _stop():
             # self.stopped = True
             try:
-                self.log.notice(f'Stopping {self.name}')
+                if preemptively_stopped:
+                    log.warning(f'Should not have to stop {self.name}, it is already stopped.')
+                else:
+                    self.log.notice(f'Stopping {self.name}')
                 yield
             except Exception as e:
                 raise e
             else:
-                self.log.debug(f'{self.name} Was Successfully Stopped')
+                if not preemptively_stopped:
+                    self.log.debug(f'{self.name} Was Successfully Stopped')
                 return
 
         @contextlib.contextmanager
         def _sync_stop():
             # self.stopped = True
             try:
-                self.log.notice(f'Stopping {self.name}')
+                if preemptively_stopped:
+                    log.warning(f'Should not have to stop {self.name}, it is already stopped.')
                 yield
             except Exception as e:
                 raise e
             else:
-                self.log.debug(f'{self.name} Was Successfully Stopped')
+                if not preemptively_stopped:
+                    self.log.debug(f'{self.name} Was Successfully Stopped')
                 return
 
         if is_asynchronous:

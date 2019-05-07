@@ -1,10 +1,22 @@
 import aiohttp
+from plumbum import colors
 
-from .validation import *  # noqa
-from .progress import *  # noqa
-from .http import *  # noqa
-from .threading import *  # noqa
-from .stack import *  # noqa
+
+class Format(object):
+    def __init__(self, *args, wrapper=None):
+        self.colors = args
+        self.wrapper = wrapper
+
+    def __call__(self, text):
+        # TODO: Figure out how to dynamically create color tuples.
+        if self.wrapper:
+            text = self.wrapper % text
+
+        c = colors.do_nothing
+        for i in range(len(self.colors)):
+            c = c & self.colors[i]
+
+        return (c | text)
 
 
 def get_exception_status_code(exc):

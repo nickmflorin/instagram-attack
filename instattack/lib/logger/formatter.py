@@ -1,7 +1,7 @@
 from instattack.lib.utils import (get_exception_request_method,
-    get_exception_message, get_exception_status_code)
+    get_exception_message, get_exception_status_code, LogItem, LogItemLine,
+    Format)
 
-from .utils import LogItem, LogItemLine
 from .formats import RecordAttributes, LoggingLevels, FORMAT_STRING
 
 
@@ -21,11 +21,15 @@ def format_exception_message(exc, level):
     )
 
 
-def format_log_message(msg, level):
+def format_log_message(msg, level, extra=None):
+    extra = extra or {}
     if isinstance(msg, Exception):
         return format_exception_message(msg, level)
     else:
-        return LogItem('message', formatter=level).format(message=msg)
+        if extra.get('highlight'):
+            return LogItem('message',
+                formatter=RecordAttributes.SPECIAL_MESSAGE).format(message=msg)
+        return LogItem('message', formatter=Format(level.format.colors[0])).format(message=msg)
 
 
 def app_formatter(record, handler):
@@ -61,7 +65,8 @@ def app_formatter(record, handler):
     level = LoggingLevels[record.level_name]
     format_context['channel'] = record.channel
     format_context['formatted_level_name'] = level.format(record.level_name)
-    format_context['formatted_message'] = format_log_message(record.message, level)
+    format_context['formatted_message'] = format_log_message(
+        record.message, level, extra=record.extra)
 
     # TODO: Might want to format 'other' message differently.
     format_context['other_message'] = flexible_retrieval('other')
@@ -76,4 +81,6 @@ def app_formatter(record, handler):
     format_context['lineno'] = flexible_retrieval('lineno')
     format_context['filename'] = flexible_retrieval('filename')
 
-    return FORMAT_STRING(no_indent=record.extra.get('no_indent', False)).format(**format_context)
+    return FORMAT_STRING(
+        no_indent=record.extra.get('no_indent', False),
+    ).format(**format_context)

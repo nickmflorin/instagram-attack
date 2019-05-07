@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from plumbum import colors
+
 from dacite import from_dict
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,10 +10,8 @@ import json
 import aiohttp
 
 from instattack import exceptions, settings
-from instattack.lib.styles import Colors
 
 from .tasks import LoginAttemptContext
-from .proxies import RequestProxy
 
 
 @dataclass
@@ -44,8 +44,8 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return Colors.GREEN.format(string_rep)
-        return Colors.RED.format(string_rep)
+            return (colors.green & colors.bold | string_rep)
+        return (colors.red & colors.bold | string_rep)
 
     @classmethod
     def from_dict(cls, data, context):
