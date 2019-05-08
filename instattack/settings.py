@@ -32,7 +32,6 @@ APP_NAME = 'instattack'
 DB_NAME = APP_NAME
 
 USER_DIR = "users"
-DATA_DIR = "mgmt"
 PROXY_DIR = "proxies"
 
 

@@ -4,6 +4,7 @@ from plumbum import local  # noqa
 from .base import Instattack
 from .proxies import *  # noqa
 from .attack import *  # noqa
+from .users import *  # noqa
 
 """
 Plumbum Modules That We Should Implement

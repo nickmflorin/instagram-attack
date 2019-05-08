@@ -1,14 +1,13 @@
 import asyncio
 from plumbum import cli
 
-from instattack.exceptions import ArgumentError
-from instattack.lib.logger import log_handling
-from instattack.lib.utils import CustomProgressbar
+from lib import CustomProgressbar, log_handling
 
-from instattack.proxies.models import Proxy, ProxyError
-from instattack.proxies.handlers import ProxyHandler
-from instattack.proxies.exceptions import PoolNoProxyError
-from instattack.proxies.deprecated import read_proxies_from_txt
+from instattack.exceptions import ArgumentError, PoolNoProxyError
+
+from instattack.models import Proxy, ProxyError
+from instattack.handlers import ProxyHandler
+from instattack.handlers.proxies.deprecated import read_proxies_from_txt
 
 from .args import ProxyArgs
 from .base import Instattack, BaseApplication
@@ -110,9 +109,8 @@ class ProxyCollect(ProxyApplication):
 
     async def collect(self, loop, handler):
         try:
-            await handler.run(loop, prepopulate=True)
+            await handler.run(loop, prepopulate=False, save=True)
         except PoolNoProxyError as e:
             self.log.error(e)
         finally:
-            await handler.save_proxies(overwrite=self.clear)
             await handler.stop(loop)

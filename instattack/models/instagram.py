@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
-from plumbum import colors
-
-from dacite import from_dict
-from dataclasses import dataclass
-from datetime import datetime
-from typing import List, Optional
-import json
-
 import aiohttp
 
-from instattack import exceptions, settings
+from dataclasses import dataclass
+from typing import List, Any, Optional
 
+from .proxies import Proxy
 from .tasks import LoginAttemptContext
+
+
+__all__ = ('InstagramResult', )
 
 
 @dataclass

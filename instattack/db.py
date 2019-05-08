@@ -2,8 +2,8 @@ import os
 
 from tortoise import Tortoise
 
+from lib import AppLogger
 from instattack import settings
-from instattack.lib.logger import AppLogger
 
 
 SQLITE = 'sqlite:///{DB}'
@@ -18,7 +18,7 @@ async def database_init(dbname=None):
     db_url = SQLITE.format(DB=db_path)
     await Tortoise.init(
         db_url=db_url,
-        modules={'models': ['instattack.proxies.models']}
+        modules={'models': ['instattack.models']}
     )
     # Generate the schema
     await Tortoise.generate_schemas()

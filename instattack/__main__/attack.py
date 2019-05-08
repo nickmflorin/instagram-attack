@@ -1,14 +1,14 @@
 import asyncio
 from plumbum import cli
 
+from lib import log_handling
+
 from instattack.db import database_init
 from instattack.exceptions import AppException
 from instattack.models import User
 
-from instattack.lib.logger import log_handling
-
-from instattack.proxies.handlers import ProxyHandler
-from instattack.instagram.handlers import TokenHandler, ResultsHandler, PasswordHandler
+from instattack.handlers import (
+    ProxyHandler, TokenHandler, ResultsHandler, PasswordHandler)
 
 from .base import Instattack
 from .args import RequestArgs, ProxyArgs

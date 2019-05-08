@@ -7,46 +7,27 @@ import tortoise
 
 from plumbum import cli
 
+from lib import validate_log_level, cancel_remaining_tasks, log_handling
+
 from instattack.db import database_init
-from instattack.control import Loggable
-from instattack.lib.logger import log_handling
-from instattack.lib.utils import validate_log_level, cancel_remaining_tasks
-
-
-"""
-Plumbum Modules That We Should Implement
-
-Plumbum Docs
-https://plumbum.readthedocs.io/en/latest/quickref.html
-
-PROGNAME = Custom program name and/or color
-VERSION = Custom version
-DESCRIPTION = Custom description (or use docstring)
-COLOR_GROUPS = Colors of groups (dictionary)
-COLOR_USAGE = Custom color for usage statement
-
-Plumbum Progress Bar
-Plumbum Colors
-
-Plumbum User Input
-plumbum.cli.terminal.readline()
-plumbum.cli.terminal.ask()
-plumbum.cli.terminal.choose()
-plumbum.cli.terminal.prompt()
-
-.cleanup()
-Method performed in cli.Application after all components of main() have completed.
-"""
+from instattack.handlers.control import Loggable
 
 
 class BaseApplication(cli.Application, Loggable):
     """
     Used so that we can easily extend Instattack without having to worry about
     overriding the main method.
-    """
 
-    # May want to catch other signals too - these are not currently being
-    # used, but could probably be expanded upon.
+    TODO
+    ----
+
+    .cleanup()
+    Method performed in cli.Application after all components of main() have
+    completed.
+
+    May want to catch other signals too - these are not currently being
+    used, but could probably be expanded upon.
+    """
     SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
     level = cli.SwitchAttr("--level", validate_log_level, default='INFO')

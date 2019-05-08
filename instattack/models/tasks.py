@@ -3,7 +3,9 @@ from dataclasses import dataclass
 
 import aiohttp
 
-from instattack.proxies.models import Proxy
+from .proxies import Proxy
+
+__all__ = ('TokenContext', 'LoginContext', 'LoginAttemptContext', )
 
 
 @dataclass

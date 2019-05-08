@@ -6,11 +6,11 @@ from plumbum import local
 from dataclasses import dataclass
 from datetime import datetime
 
-from instattack import settings
-
-from instattack.mgmt.utils import (create_new_user_files, check_user_files,
+from lib import (create_new_user_files, check_user_files,
     create_user_dir, create_users_data_dir, user_exists, read_user_file,
     update_attempts_file, password_generator)
+
+from instattack import settings
 
 
 @dataclass
