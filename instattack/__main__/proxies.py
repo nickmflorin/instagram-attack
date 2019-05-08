@@ -7,7 +7,6 @@ from instattack.exceptions import ArgumentError, PoolNoProxyError
 
 from instattack.models import Proxy, ProxyError
 from instattack.handlers import ProxyHandler
-from instattack.handlers.proxies.deprecated import read_proxies_from_txt
 
 from .args import ProxyArgs
 from .base import Instattack, BaseApplication
@@ -53,35 +52,6 @@ class ProxyClean(ProxyApplication):
             await error.delete()
             progress.update()
         progress.finish()
-
-
-@ProxyApplication.subcommand('migrate')
-class ProxyMigrate(ProxyApplication):
-    """
-    Stores proxies that we used to save in text files to the associated database
-    tables.
-
-    Will eventually be deprecated but we need it for now.
-    """
-    @log_handling('self')
-    def main(self):
-        with self.loop_session() as loop:
-            loop.run_until_complete(self.migrate_proxies(loop, 'POST'))
-            loop.run_until_complete(self.migrate_proxies(loop, 'GET'))
-
-    async def migrate_proxies(self, loop, method):
-        self.log.notice(f'Migrating {method} Proxies from .txt File.')
-
-        for proxy in read_proxies_from_txt(method):
-            proxy, created = await Proxy.get_or_create(
-                host=proxy.host,
-                port=proxy.port,
-                method=method,
-                defaults={
-                    'avg_resp_time': proxy.avg_resp_time,
-                    'error_rate': proxy.error_rate,
-                }
-            )
 
 
 @ProxyApplication.subcommand('collect')

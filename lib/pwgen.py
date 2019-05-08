@@ -3,21 +3,38 @@ from itertools import combinations
 
 class abstract_password_generator(object):
 
-    def list_to_word(self, letters):
+    @classmethod
+    def list_to_word(cls, letters):
         return ''.join(letters)
 
-    def mutate_chars(self, word, char, *indices):
+    @classmethod
+    def all_combinations(cls, iterable):
+        """
+        Returns all combinations for all counts up to the length of the iterable.
+
+        Usage:
+        >>> value = ['a', 'b', 'c']
+        >>> all_combinations(value)
+        >>> [('a', ), ('b', ), ('c', ), ('a', 'b'), ('a', 'c'), ...]
+        """
+        all_combos = []
+        for i in range(len(iterable) + 1):
+            combos = combinations(iterable, i + 1)
+            all_combos.extend(combos)
+        return all_combos
+
+    @classmethod
+    def mutate_chars_at_indices(cls, word, char, *args):
         # Skips First Letter
-        word = word.lower()
-        altered = list(word)[1:]
+        altered = list(word)
 
         # Shouldn't hit exception here but just in case.
-        for ind in indices:
+        for ind in args:
             try:
                 altered[ind] = char
             except IndexError:
                 continue
-        return self.list_to_word(list(word)[0] + altered)
+        return cls.list_to_word(altered)
 
     def capitalize_at_indices(self, word, *indices):
         word = word.lower()
@@ -32,7 +49,6 @@ class abstract_password_generator(object):
 
 class core_password_generator(object):
     def __init__(self, alterations=None, common_numbers=None, raw_passwords=None):
-
         self.alterations = alterations or []
         self.common_numbers = common_numbers or []
         self.raw_passwords = raw_passwords or []
@@ -40,11 +56,11 @@ class core_password_generator(object):
 
 class case_alteration_generator(abstract_password_generator):
 
-    def __call__(self, word):
-        for case_alteration in self.alterations_of_case(word):
+    async def gen(self, word):
+        async for case_alteration in self.alterations_of_case.gen(word):
             yield case_alteration
 
-    def alterations_of_case(self, word):
+    async def alterations_of_case(self, word):
         # TODO: Add setting for the maximum length of the word to make the entire
         # thing uppercase.
         yield word.lower()
@@ -60,34 +76,63 @@ class character_replacement_generator(abstract_password_generator):
         'a': ('3', '@'),
     }
 
-    def __call__(self, word):
-        for char, new_chars in self.COMMON_CHAR_REPLACEMENTS.items():
-            yield from self.alterations_replacing_characters(
-                word, char, new_chars)
+    @classmethod
+    def gen(cls, word):
+        # Using `Whisperingi`, we do not get `Whisper!ngi` in results...
+        # See test.py
+        raise Exception('This is still not working!')
+        alterations = []
+        for char, new_chars in cls.COMMON_CHAR_REPLACEMENTS.items():
+            altered = cls.replace_with_chars(word, char, new_chars)
+            alterations.extend(altered)
+        return alterations
 
-    def alterations_replacing_characters(self, word, char, new_chars):
+    @classmethod
+    def find_char_indices(cls, word, char):
+        indices = []
+
+        def evaluate(c):
+            if c.lower() == char.lower():
+                return True
+            return False
+
+        unique_chars = list(set(word))
+        if char in unique_chars:
+            where_present = [evaluate(c) for c in word]
+            indices = [i for i, x in enumerate(where_present) if x]
+        return indices
+
+    @classmethod
+    def replace_with_chars(cls, word, char, char_set):
         """
-        Given a word, a character to replace and an iterable of characters to use
-        in it's place, generates all possible combinations of the word with all possible
-        frequencies of the `char`(s) existence in the word replaced with all
-        possible combination of the new_chars.
+        Given a character to replace and a series or single character, returns
+        all possible words with that character replaced by all the characters
+        in the series.
 
         Usage:
-
         >>> word = "apple"
-        >>> alterations = alterations_replacing_character(word, 'p', ('b', '3'))
-        >>> ['a3ple', 'ap3le', 'a33le', 'abple', 'apble', 'abble', 'ab3le', 'a3ble']
+        >>> alterations = alterations_replacing_character(word, 'p', ('1', '5'))
+        >>> ['a1ple', 'ap1le', 'a11le', 'a5ple', 'ap5le', 'a55le', 'a51le', ...]
         """
-        for i, new_char in enumerate(new_chars):
-            char_alterations = self.alterations_replacing_character(word, char, new_char)
-            for alteration in char_alterations:
-                yield alteration
+        count = 0
+        alterations = []
 
-                if i >= 1:
-                    yield from self.alterations_replacing_character(
-                        alteration, char, new_chars[i - 1])
+        while count < len(char_set):
+            replacement = char_set[count]
+            if not alterations:
+                alterations = cls.replace_with_char(word, char, replacement)
+            else:
+                for i in range(len(alterations)):
+                    # The character can not be in the alteration if all instances
+                    # were replaced with the new characters.
+                    if char in alterations[i]:
+                        altered = cls.replace_with_char(alterations[i], char, replacement)
+                        alterations.extend(altered)
+            count += 1
+        return alterations
 
-    def alterations_replacing_character(self, word, char, new_char):
+    @classmethod
+    def replace_with_char(cls, word, char, new_char):
         """
         Given a character to replace and a replacement, returns all different
         formattions of the word with the character(s) in the word replaced with
@@ -99,23 +144,27 @@ class character_replacement_generator(abstract_password_generator):
         >>> word = "apple"
         >>> alterations = alterations_replacing_character(word, 'p', '1')
         >>> ['a1ple', 'ap1le', 'a11le']
-        """
-        if char in word[1:]:
-            where_present = [True if (c == char or c.upper() == char) else False for c in word[1:]]
-            indices = [i for i in range(len(where_present)) if where_present[i]]
 
-            count = word[1:].count(char)
-            for i in range(count + 1):
-                combos = combinations(indices, i + 1)
-                for combo in combos:
-                    yield self.mutate_chars(word, new_char, combos)
+        TODO
+        ---
+        Maybe add a limit for how many different formations of the same character
+        we replace, for words that might have high frequencies of a single char.
+        """
+        indices = cls.find_char_indices(word, char)
+        all_ind_combos = cls.all_combinations(indices)
+
+        alterations = []
+        for ind_combo in all_ind_combos:
+            altered = cls.mutate_chars_at_indices(word, new_char, *ind_combo)
+            alterations.append(altered)
+        return alterations
 
 
 # TODO: Thsi will require not using generators at end product because we have
 # to have history of words to generate combinations with.
 class base_combination_generator(abstract_password_generator):
 
-    def __call__(self, word):
+    def gen(self, word):
         pass
 
 
@@ -125,7 +174,7 @@ class base_alteration_generator(abstract_password_generator):
     different sub-generators that make up this generator.
     """
 
-    def __call__(self, word):
+    async def gen(self, word):
         cases = case_alteration_generator()
         for case_altered in cases(word):
             yield case_altered
@@ -145,7 +194,7 @@ class base_core_generator(core_password_generator):
     to make logic easier in more complicated sub generators.
     """
 
-    def __call__(self):
+    async def gen(self):
         generator = base_alteration_generator()
         for password in self.raw_passwords:
             for alteration in generator(password):
@@ -159,7 +208,7 @@ class numeric_core_generator(core_password_generator):
     with previous number sequences.
     """
 
-    def __call__(self, word):
+    async def gen(self, word):
         for numeric_sequence in self.common_numbers:
             yield from self.alterations_before_after(word, numeric_sequence)
 
@@ -177,8 +226,8 @@ class alteration_core_generator(core_password_generator):
     of doing this.
     """
 
-    def __call__(self, word):
-        for alteration in self.alterations:
+    async def gen(self, word):
+        async for alteration in self.alterations:
             yield from self.alterations_after_word(word, alteration)
 
     def alterations_after_word(self, word, alteration):
@@ -198,7 +247,7 @@ class password_generator(core_password_generator):
         self.numeric_generator = numeric_core_generator(**kwargs)
         self.alteration_generator = alteration_core_generator(**kwargs)
 
-    def __call__(self, attempts=None, limit=None):
+    async def gen(self, attempts=None, limit=None):
         attempts = attempts or []
         self.count = 0
 
@@ -207,25 +256,25 @@ class password_generator(core_password_generator):
                 self.count += 1
                 return True
 
-        for base_alteration in self.base_generator():
+        async for base_alteration in self.base_generator.gen():
             if base_alteration not in attempts:
                 if not safe_to_yield():
                     return
                 yield base_alteration
 
-            for alteration in self.alteration_generator(base_alteration):
+            async for alteration in self.alteration_generator.gen(base_alteration):
                 if alteration not in attempts:
                     if not safe_to_yield():
                         return
                     yield alteration
 
-            for numeric_alteration in self.numeric_generator(base_alteration):
+            async for numeric_alteration in self.numeric_generator.gen(base_alteration):
                 if numeric_alteration not in attempts:
-                        if not safe_to_yield():
-                            return
-                        yield numeric_alteration
+                    if not safe_to_yield():
+                        return
+                    yield numeric_alteration
 
-                for num_alteration in self.alteration_generator(numeric_alteration):
+                async for num_alteration in self.alteration_generator.gen(numeric_alteration):
                     if num_alteration not in attempts:
                         if not safe_to_yield():
                             return

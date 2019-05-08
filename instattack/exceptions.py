@@ -115,30 +115,23 @@ class InvalidFileLine(AppException):
         return f"Line at index {self.index} is invalid: \n {self.line}"
 
 
-class InvalidWriteElement(AppException):
-    def __init__(self, index, value):
-        self.index = index
-        self.value = value
-
-    def __str__(self):
-        if self.line == "":
-            return f'Cannot write element at index {self.index}, it is an empty string.'
-        return f"Cannot write element at index {self.index}, it is invalid: \n {self.line}"
-
-
 class UsersException(AppException):
     pass
 
 
 class UserException(UsersException):
-    def __init__(self, username):
-        self.username = username
+    def __init__(self, user):
+        self.user = user
 
 
 class DirException(UsersException):
 
     def __init__(self, name):
         self.name = name
+
+
+class UserDirException(UserException):
+    pass
 
 
 class DirMissing(DirException):
@@ -158,29 +151,23 @@ class DirExists(DirException):
         )
 
 
-class UserDirException(UserException):
-    pass
-
-
 class UserDirMissing(UserDirException):
-
     def __str__(self):
         return (
-            f'User directory is missing for user {self.username}.\n'
-            f'Was directory for {self.username} accidentally deleted?'
+            f'User directory is missing for user {self.user.username}.\n'
+            f'Was directory for {self.user.username} accidentally deleted?'
         )
 
 
 class UserDirExists(UserDirException):
-
     def __str__(self):
-        return f'User directory already exists for user {self.username}.'
+        return f'User directory already exists for user {self.user.username}.'
 
 
 class UserFileException(UserException):
 
-    def __init__(self, username, filename):
-        super(UserFileException, self).__init__(username)
+    def __init__(self, user, filename):
+        super(UserFileException, self).__init__(user)
         self.filename = filename
 
 

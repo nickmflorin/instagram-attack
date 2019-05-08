@@ -32,20 +32,6 @@ APP_NAME = 'instattack'
 DB_NAME = APP_NAME
 
 USER_DIR = "users"
-PROXY_DIR = "proxies"
-
-
-class FILENAMES(object):
-
-    PASSWORDS = "passwords"
-    ATTEMPTS = "attempts"
-    ALTERATIONS = "alterations"
-    NUMBERS = "common_numbers"
-
-
-USER_FILES = [FILENAMES.PASSWORDS, FILENAMES.ATTEMPTS, FILENAMES.NUMBERS,
-    FILENAMES.ALTERATIONS]
-
 
 # Instagram Requests
 HEADER = {
@@ -76,6 +62,7 @@ DEFAULT_SCHEMES = {
     'POST': urlparse(URLS['POST']).scheme.upper()
 }
 
+# Not Currently Used, but Useful
 TEST_GET_REQUEST_URL = 'https://postman-echo.com/get'
 TEST_POST_REQUEST_URL = 'https://postman-echo.com/post'
 
