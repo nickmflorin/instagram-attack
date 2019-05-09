@@ -37,6 +37,8 @@ class BaseApplication(cli.Application, Loggable):
         """
         TODO:
         ----
+        We might want to make this more flexible so that we don't necessarily
+        need to access the loop but can initialize the database.
 
         Look into situations in which the following:
         >>> loop.set_exception_handler(self.handle_exception)

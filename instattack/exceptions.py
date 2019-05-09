@@ -174,23 +174,13 @@ class UserFileException(UserException):
 class UserFileExists(UserFileException):
 
     def __str__(self):
-        return f'File {self.filename} already exists for user {self.username}.'
+        return f'The file {self.filename}.txt already exists for user {self.user.username}.'
 
 
 class UserFileMissing(UserFileException):
 
     def __str__(self):
         return (
-            f'File {self.filename} missing for user {self.username}.\n'
-            f'Was {self.filename} accidentally deleted?'
+            f'The file {self.filename}.txt is missing for user {self.user.username}.\n'
+            f'Was {self.filename}.txt accidentally deleted?'
         )
-
-
-class UserDoesNotExist(UserException):
-    """
-    Will be used for cases where the Instagram username is invalid, but we
-    are currently not using this.
-    """
-
-    def __str__(self):
-        return f"The user {self.username} does not exist."

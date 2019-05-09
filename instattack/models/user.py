@@ -3,13 +3,14 @@ from __future__ import absolute_import
 from tortoise.models import Model
 from tortoise import fields
 
-from lib import AppLogger, password_generator, read_raw_data
+from lib import AppLogger, stream_raw_data
 
 from instattack import settings
 from instattack.exceptions import (
     UserDirMissing, UserDirExists, UserFileMissing, UserFileExists,
     DirMissing)
 
+from .passwords import password_gen
 from .utils import get_users_data_dir, create_users_data_dir
 
 
@@ -29,7 +30,13 @@ class UserAttempt(Model):
 
 
 class User(Model):
-
+    """
+    TODO
+    ----
+    Since we do not setup the user directories on retrieval from DB, only on
+    save, there is a potential we will hit a bug if we try to read from the
+    files and they were deleted.
+    """
     id = fields.IntField(pk=True)
     username = fields.CharField(max_length=30)
 
@@ -55,16 +62,16 @@ class User(Model):
             return []
         return attempts
 
-    async def get_new_attempts(self, limit=None):
+    async def generate_attempts(self, limit=None):
         """
         For now, just returning current passwords for testing, but we will
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        generator = password_generator(
-            common_numbers=self.get_numbers(),
+        generator = password_gen(
+            numerics=self.get_numbers(),
             alterations=self.get_alterations(),
-            raw_passwords=self.get_passwords(),
+            raw=self.get_passwords(),
         )
         attempts = await self.get_attempts()
 
@@ -89,7 +96,7 @@ class User(Model):
     @property
     def directory_setup(self):
         try:
-            get_users_data_dir(expected=True, strict=True)
+            get_users_data_dir(expected=True)
         except DirMissing as e:
             return False
         try:
@@ -99,7 +106,7 @@ class User(Model):
         return True
 
     def get_directory(self, expected=True, strict=True, filename=None):
-        path = get_users_data_dir(expected=True, strict=True) / self.username
+        path = get_users_data_dir(expected=True) / self.username
 
         if strict:
             if expected and not path.exists():
@@ -153,26 +160,48 @@ class User(Model):
                 log.warning(str(e))
                 self.initialize_file(filename)
 
-    def read_file(self, filename):
+    async def read_file(self, filename):
         """
         TODO:
         -----
         If the file is for whatever reason non-existent, we should probably
         still create it and not issue an exception.
         """
-        if filename not in settings.USER_FILES:
+        if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
         filepath = self.get_file_path(filename)
         if not filepath.is_file():
             raise FileNotFoundError('No such file: %s' % filepath)
-        return read_raw_data(filepath)
 
-    def get_passwords(self):
-        return self.read_file(self.PASSWORDS)
+        yield stream_raw_data(filepath)
 
-    def get_alterations(self):
-        return self.read_file(self.ALTERATIONS)
+    async def get_passwords(self):
+        """
+        TODO
+        ----
+        Since we do not setup the user directories on retrieval from DB, only on
+        save, there is a potential we will hit a bug if we try to read from the
+        files and they were deleted.
+        """
+        yield self.read_file(self.PASSWORDS)
 
-    def get_numbers(self):
-        return self.read_file(self.NUMBERS)
+    async def get_alterations(self):
+        """
+        TODO
+        ----
+        Since we do not setup the user directories on retrieval from DB, only on
+        save, there is a potential we will hit a bug if we try to read from the
+        files and they were deleted.
+        """
+        yield self.read_file(self.ALTERATIONS)
+
+    async def get_numbers(self):
+        """
+        TODO
+        ----
+        Since we do not setup the user directories on retrieval from DB, only on
+        save, there is a potential we will hit a bug if we try to read from the
+        files and they were deleted.
+        """
+        yield self.read_file(self.NUMBERS)

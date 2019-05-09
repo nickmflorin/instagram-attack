@@ -1,8 +1,9 @@
-from instattack import settings
-from instattack.exceptions import DirExists
+from plumbum import local
 
-from .logger import AppLogger
-from .paths import get_users_data_dir
+from lib import AppLogger
+
+from instattack import settings
+from instattack.exceptions import DirExists, DirMissing
 
 
 log = AppLogger(__file__)
@@ -47,48 +48,17 @@ def create_users_data_dir(strict=True):
         return path
 
 
-def _user_data_dir(app_name=True):
-    return local.cwd / settings.APP_NAME / settings.USER_DIR
+def get_users_data_dir(expected=True):
+    """
+    TODO:
+    ----
+    Find a way to make this relative so we do not get stuck if we are running
+    commands from nested portions of the app.
+    """
+    directory = local.cwd / settings.USER_DIR
 
-
-def _get_users_data_dir():
-    path = _user_data_dir()
-    if not path.exists():
-        path = _user_data_dir(app_name=False)
-    return path
-
-
-def get_users_data_dir(expected=True, strict=True):
-    path = _get_users_data_dir()
-
-    if strict and (not expected and path.exists()):
-        raise DirExists("%s/%s" % (path.dirname, path.name))
-
-    elif strict and (expected and not path.exists()):
-        raise DirMissing("%s/%s" % (path.dirname, path.name))
-
-    return path
-
-
-# def write_attempts_file(attempts, username):
-#     try:
-#         path = get_user_file_path(settings.FILENAMES.ATTEMPTS, username,
-#             expected=True, strict=True)
-#     except UserFileMissing as e:
-#         log.warning(str(e))
-#         create_user_file(settings.FILENAMES.ATTEMPTS, username, strict=True)
-#     write_array_data(path, attempts)
-
-
-# def update_attempts_file(attempts, username):
-
-#     current_attempts = read_user_file(settings.FILENAMES.ATTEMPTS, username)
-#     unique_attempts = 0
-
-#     for attempt in attempts:
-#         if attempt not in current_attempts:
-#             unique_attempts += 1
-#             current_attempts.append(attempt)
-
-#     log.notice(f"Saving {unique_attempts} unique additional attempts.")
-#     write_attempts_file(current_attempts, username)
+    if expected and not directory.exists():
+        raise DirMissing(directory)
+    elif not expected and directory.exists():
+        raise DirExists(directory)
+    return directory

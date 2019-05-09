@@ -3,7 +3,6 @@ from plumbum import cli
 
 from lib import log_handling
 
-from instattack.db import database_init
 from instattack.exceptions import AppException
 from instattack.models import User
 
@@ -38,7 +37,6 @@ class InstattackAttack(Instattack, RequestArgs, ProxyArgs):
         self.user.setup()
 
         with self.loop_session() as loop:
-            loop.run_until_complete(database_init())
 
             token = loop.run_until_complete(self.get_token(loop))
             if not token:

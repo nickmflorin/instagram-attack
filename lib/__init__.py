@@ -1,5 +1,4 @@
 from .io import *  # noqa
-from .pwgen import *  # noqa
 from .logger import *  # noqa
 from .validation import *  # noqa
 from .threading import *  # noqa
