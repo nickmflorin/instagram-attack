@@ -5,13 +5,10 @@ from tortoise import fields
 
 from lib import AppLogger, stream_raw_data
 
-from instattack import settings
-from instattack.exceptions import (
-    UserDirMissing, UserDirExists, UserFileMissing, UserFileExists,
-    DirMissing)
+from instattack.exceptions import UserDirDoesNotExist, UserFileDoesNotExist
 
 from .passwords import password_gen
-from .utils import get_users_data_dir, create_users_data_dir
+from .utils import get_data_dir
 
 
 log = AppLogger(__file__)
@@ -84,124 +81,91 @@ class User(Model):
         await super(User, self).save(*args, **kwargs)
 
     def setup(self):
-        # TODO: See if we can do this everytime the user is saved or fetched
-        # from the database.
-        if not self.directory_setup:
-            create_users_data_dir(strict=False)
-            self.initialize_directory()
-            self.initialize_files()
+        """
+        TODO:
+        ----
+        We do this when a user is saved to the database, but we should see if
+        we can do it everytime the user is also retrieved from the database.
+        """
+        directory = self.directory()
+        if not directory.exists():
+            directory.mkdir()
+            self.create_files()
         else:
             self.verify_files()
 
-    @property
-    def directory_setup(self):
-        try:
-            get_users_data_dir(expected=True)
-        except DirMissing as e:
-            return False
-        try:
-            self.get_directory(expected=True, strict=True)
-        except UserDirMissing:
-            return False
-        return True
+    def teardown(self):
+        """
+        TODO
+        ----
+        Do this on an overridden .delete() method.
+        """
+        directory = self.directory()
+        if directory.exists():
+            directory.delete()
 
-    def get_directory(self, expected=True, strict=True, filename=None):
-        path = get_users_data_dir(expected=True) / self.username
+    def directory(self):
+        return get_data_dir() / self.username
 
-        if strict:
-            if expected and not path.exists():
-                raise UserDirMissing(self)
+    def create_directory(self):
+        directory = self.directory()
+        if not directory.exists():
+            directory.mkdir()
+        return directory
 
-            elif not expected and path.exists():
-                raise UserDirExists(self)
+    def file_path(self, filename, strict=False):
+        directory = self.directory()
+        if not directory.exists():
+            raise UserDirDoesNotExist(directory)
 
-        if filename:
-            if '.txt' not in filename:
-                filename = f"{filename}.txt"
-            return path / filename
+        if '.txt' not in filename:
+            filename = f"{filename}.txt"
+
+        path = directory / filename
+        if strict and (not path.exists() or not path.is_file()):
+            raise UserFileDoesNotExist(path, self)
         return path
 
-    def get_file_path(self, filename, expected=True, strict=True):
-
-        path = self.get_directory(filename=filename)
-        if strict:
-            if expected and not path.exists():
-                raise UserFileMissing(self, filename)
-
-            elif not expected and path.exists():
-                raise UserFileExists(self, filename)
-
-        return path
-
-    def initialize_directory(self):
-        # Will raise an exception if the directory is already there.
-        user_path = self.get_directory(expected=False, strict=True)
-        user_path.mkdir()
-        return user_path
-
-    def initialize_file(self, filename):
-        # Will raise an exception if the file is already there.
-        filepath = self.get_file_path(filename, expected=False, strict=True)
-        filepath.touch()
+    def create_file(self, filename):
+        filepath = self.file_path(filename)
+        if not filepath.exist():
+            filepath.touch()
         return filepath
 
-    def initialize_files(self):
+    def create_files(self):
         """
         Called when creating a new user.
         """
         for filename in self.FILES:
-            self.initialize_file(filename)
+            self.create_file(filename)
 
     def verify_files(self):
         for filename in self.FILES:
-            try:
-                self.get_file_path(filename, expected=True, strict=True)
-            except UserFileMissing as e:
-                log.warning(str(e))
-                self.initialize_file(filename)
+            filepath = self.file_path(filename)
+            if not filepath.exists() or not filepath.is_file():
+                # TODO: In rare care where the path is a directory, we may want
+                # to delete it.
+                e = UserFileDoesNotExist(filepath, self)
+                log.warning(e)
+                self.create_file(filename)
 
     async def read_file(self, filename):
-        """
-        TODO:
-        -----
-        If the file is for whatever reason non-existent, we should probably
-        still create it and not issue an exception.
-        """
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
-        filepath = self.get_file_path(filename)
-        if not filepath.is_file():
-            raise FileNotFoundError('No such file: %s' % filepath)
+        try:
+            filepath = self.file_path(filename, strict=True)
+        except UserFileDoesNotExist as e:
+            self.log.warning(e)
+            filepath = self.create_file(filename)
 
         yield stream_raw_data(filepath)
 
     async def get_passwords(self):
-        """
-        TODO
-        ----
-        Since we do not setup the user directories on retrieval from DB, only on
-        save, there is a potential we will hit a bug if we try to read from the
-        files and they were deleted.
-        """
         yield self.read_file(self.PASSWORDS)
 
     async def get_alterations(self):
-        """
-        TODO
-        ----
-        Since we do not setup the user directories on retrieval from DB, only on
-        save, there is a potential we will hit a bug if we try to read from the
-        files and they were deleted.
-        """
         yield self.read_file(self.ALTERATIONS)
 
     async def get_numbers(self):
-        """
-        TODO
-        ----
-        Since we do not setup the user directories on retrieval from DB, only on
-        save, there is a potential we will hit a bug if we try to read from the
-        files and they were deleted.
-        """
         yield self.read_file(self.NUMBERS)

@@ -1,12 +1,7 @@
 from plumbum import local
 
-from lib import AppLogger
-
 from instattack import settings
-from instattack.exceptions import DirExists, DirMissing
 
-
-log = AppLogger(__file__)
 
 """
 Some useful code playing around with file permissions and plumbum.  We shouldn't
@@ -36,29 +31,14 @@ control flow consistent and over cautious is never a bad thing.
 """
 
 
-def create_users_data_dir(strict=True):
-    try:
-        path = get_users_data_dir(expected=False)
-    except DirExists as e:
-        if strict:
-            raise e
-        log.warning(str(e))
-    else:
-        path.mkdir()
-        return path
-
-
-def get_users_data_dir(expected=True):
+def get_data_dir():
     """
     TODO:
     ----
     Find a way to make this relative so we do not get stuck if we are running
     commands from nested portions of the app.
     """
-    directory = local.cwd / settings.USER_DIR
-
-    if expected and not directory.exists():
-        raise DirMissing(directory)
-    elif not expected and directory.exists():
-        raise DirExists(directory)
-    return directory
+    path = local.cwd / settings.USER_DIR
+    if not path.exists():
+        path.mkdir()
+    return path

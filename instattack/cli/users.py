@@ -43,15 +43,23 @@ class UsersShowApplication(UsersApplication):
     pass
 
 
-@UsersShowApplication.subcommand('passwords')
-class UsersShowPasswordsApplication(UsersApplication):
+class UserOperation(UsersApplication):
 
     @log_handling('self')
-    def main(self, username):
-        with self.loop_session() as loop:
-            loop.run_until_complete(self.show_passwords(username))
+    def main(self, *args):
+        if len(args) != 1:
+            self.log.error('Must provide single username argument.')
+            return
 
-    async def show_passwords(self, username):
+        username = args[0]
+        with self.loop_session() as loop:
+            loop.run_until_complete(self.operation(username))
+
+
+@UsersShowApplication.subcommand('passwords')
+class ShowUserPasswords(UserOperation):
+
+    async def operation(self, username):
         user = await self.get_user(username)
         if not user:
             self.log.error('User does not exist.')
@@ -61,15 +69,25 @@ class UsersShowPasswordsApplication(UsersApplication):
             self.log.info(pw)
 
 
+@UsersApplication.subcommand('delete')
+class DeleteUser(UserOperation):
+
+    async def operation(self, username):
+        user = await self.get_user(username)
+        if not user:
+            self.log.error('User does not exist.')
+        else:
+            self.log.info('Removing user directory...')
+            user.teardown()
+            self.log.info('Deleting user from database...')
+            await user.delete()
+            self.log.notice('Success.')
+
+
 @UsersApplication.subcommand('add')
-class AddUserApplication(UsersApplication):
+class AddUser(UserOperation):
 
-    @log_handling('self')
-    def main(self, username):
-        with self.loop_session() as loop:
-            loop.run_until_complete(self.add_user(username))
-
-    async def add_user(self, username):
+    async def operation(self, username):
         user = await self.get_user(username)
         if not user:
             user = await User.create(username=username)
