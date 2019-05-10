@@ -2,6 +2,9 @@ from enum import Enum
 from plumbum import colors
 
 
+DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+
 class Format(object):
     def __init__(self, *args, wrapper=None):
         self.colors = args
@@ -30,20 +33,21 @@ class FormattedEnum(Enum):
 
 class LoggingLevels(FormattedEnum):
 
-    CRITICAL = Format(colors.fg('Magenta'), colors.underline, colors.bold)
-    ERROR = Format(colors.fg('Red'), colors.bold)
-    WARNING = Format(colors.fg('Orange3'), colors.bold)
-    NOTICE = Format(colors.fg('SpringGreen3'), colors.bold)
-    INFO = Format(colors.fg('DodgerBlue1'))
+    CRITICAL = Format(colors.fg('Magenta'), colors.bold)
+    ERROR = Format(colors.fg('Red'), colors.underline)
+    WARNING = Format(colors.fg('Gold3A'))
+    NOTICE = Format(colors.fg('Green4'))
+    INFO = Format(colors.fg('DeepSkyBlue2'))
     DEBUG = Format(colors.fg('DarkGray'))
 
 
 class RecordAttributes(FormattedEnum):
 
+    DATETIME = Format(colors.fg('LightYellow3'))
     LABEL = Format(colors.black, colors.underline)
     MESSAGE = Format(colors.black)
     SPECIAL_MESSAGE = Format(colors.bg('LightGray'), colors.fg('Magenta'))
-    CHANNEL = Format(colors.black, colors.underline)
+    CHANNEL = Format(colors.fg('Grey3'))
     PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
     TOKEN = Format(colors.red)
     STATUS_CODE = Format(colors.red, wrapper="[%s]")

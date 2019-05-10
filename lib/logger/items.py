@@ -1,36 +1,4 @@
-from .formats import Format, RecordAttributes
-from .http import get_exception_status_code, get_exception_request_method
-from .err_handling import get_exception_message
-
-
-__all__ = ('Format', )
-
-
-def format_exception_message(exc, level):
-    FORMAT_EXCEPTION_MESSAGE = LogItemLine(
-        LogItem('method', formatter=RecordAttributes.METHOD),
-        LogItem('message', formatter=level),
-        LogItem('status_code', formatter=RecordAttributes.STATUS_CODE),
-    )
-
-    message = get_exception_message(exc)
-
-    return FORMAT_EXCEPTION_MESSAGE.format(
-        status_code=get_exception_status_code(exc),
-        message=message,
-        method=get_exception_request_method(exc)
-    )
-
-
-def format_log_message(msg, level, extra=None):
-    extra = extra or {}
-    if isinstance(msg, Exception):
-        return format_exception_message(msg, level)
-    else:
-        if extra.get('highlight'):
-            return LogItem('message',
-                formatter=RecordAttributes.SPECIAL_MESSAGE).format(message=msg)
-        return LogItem('message', formatter=Format(level.format.colors[0])).format(message=msg)
+from .formats import RecordAttributes
 
 
 class LogAbstractItem(object):
@@ -121,6 +89,7 @@ class LogItemSet(LogAbstractItemSet):
     def value(self, **context):
         formatted_items = []
         for item in self.items:
+            item.can_format(**context)
             if item.can_format(**context):
                 formatted_items.append(item.format(**context))
         return "\n" + "\n".join(formatted_items)

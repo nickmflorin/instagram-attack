@@ -1,5 +1,7 @@
 from __future__ import absolute_import
 
+from aioitertools import chain
+
 from tortoise.models import Model
 from tortoise import fields
 
@@ -10,6 +12,8 @@ from instattack.exceptions import UserDirDoesNotExist, UserFileDoesNotExist
 from .passwords import password_gen
 from .utils import get_data_dir
 
+
+from async_generator import async_generator, yield_, yield_from_
 
 log = AppLogger(__file__)
 
@@ -52,29 +56,6 @@ class User(Model):
 
     class Meta:
         unique_together = ('id', 'username', )
-
-    async def get_attempts(self):
-        attempts = await self.fetch_related('attempts')
-        if not attempts:
-            return []
-        return attempts
-
-    async def generate_attempts(self, limit=None):
-        """
-        For now, just returning current passwords for testing, but we will
-        eventually want to generate alterations and compare to existing
-        password attempts.
-        """
-        generator = password_gen(
-            numerics=self.get_numbers(),
-            alterations=self.get_alterations(),
-            raw=self.get_passwords(),
-        )
-        attempts = await self.get_attempts()
-
-        async for password in generator(attempts, limit=limit):
-            self.num_passwords += 1
-            yield password
 
     async def save(self, *args, **kwargs):
         self.setup()
@@ -128,7 +109,7 @@ class User(Model):
 
     def create_file(self, filename):
         filepath = self.file_path(filename)
-        if not filepath.exist():
+        if not filepath.exists() or not filepath.is_file():
             filepath.touch()
         return filepath
 
@@ -149,7 +130,7 @@ class User(Model):
                 log.warning(e)
                 self.create_file(filename)
 
-    async def read_file(self, filename):
+    def streamed_data(self, filename, limit=None):
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
@@ -159,13 +140,34 @@ class User(Model):
             self.log.warning(e)
             filepath = self.create_file(filename)
 
-        yield stream_raw_data(filepath)
+        return stream_raw_data(filepath, limit=limit)
 
-    async def get_passwords(self):
-        yield self.read_file(self.PASSWORDS)
+    async def get_passwords(self, limit=None):
+        async for line in self.streamed_data(self.PASSWORDS, limit=limit):
+            yield line
 
-    async def get_alterations(self):
-        yield self.read_file(self.ALTERATIONS)
+    async def get_alterations(self, limit=None):
+        async for line in self.streamed_data(self.ALTERATIONS, limit=limit):
+            yield line
 
-    async def get_numbers(self):
-        yield self.read_file(self.NUMBERS)
+    async def get_numerics(self, limit=None):
+        async for line in self.streamed_data(self.NUMBERS, limit=limit):
+            yield line
+
+    async def get_attempts(self, limit=None):
+        attempts = await self.fetch_related('attempts')
+        if not attempts:
+            return []
+        if limit:
+            return attempts[:limit]
+        return attempts
+
+    async def generate_attempts(self, limit=None):
+        """
+        For now, just returning current passwords for testing, but we will
+        eventually want to generate alterations and compare to existing
+        password attempts.
+        """
+        generator = password_gen(self, limit=limit)
+        async for password in generator():
+            yield password

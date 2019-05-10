@@ -1,14 +1,20 @@
 from itertools import combinations
 
 
-class abstract_gen(object):
+class mutation_gen(object):
 
-    @classmethod
-    def list_to_word(cls, letters):
+    def __init__(self, word):
+        self.word = word
+
+    def list_to_word(self, letters):
         return ''.join(letters)
 
-    @classmethod
-    def all_combinations(cls, iterable, choose=None):
+    def mutate_char_at_index(self, word, ind, char):
+        altered = list(word)
+        altered[ind] = char
+        return self.list_to_word(altered)
+
+    def all_combinations(self, iterable, choose=None):
         """
         Returns all combinations for all counts up to the length of the iterable.
 
@@ -24,8 +30,7 @@ class abstract_gen(object):
             all_combos.extend(combos)
         return all_combos
 
-    @classmethod
-    def find_indices_with_char(cls, word, char):
+    def find_indices_with_char(self, char):
         """
         Returns a list of indices where a given character exists in a word.
 
@@ -39,14 +44,15 @@ class abstract_gen(object):
                 return True
             return False
 
-        unique_chars = list(set(word))
+        # We might want to limit this to everything except the first char?
+        unique_chars = list(set(self.word))
         if char in unique_chars:
-            where_present = [evaluate(c) for c in word]
+            where_present = [evaluate(c) for c in self.word]
             indices = [i for i, x in enumerate(where_present) if x]
         return indices
 
-    def capitalize_at_indices(self, word, *indices):
-        word = word.lower()
+    def capitalize_at_indices(self, *indices):
+        word = self.word.lower()
         altered = list(word)
         for ind in indices:
             try:

@@ -1,7 +1,7 @@
 import progressbar
 from plumbum import colors
 
-from .formats import Format
+from .logger.formats import Format
 
 
 # TODO: Replace with Plumbum Progressbar

@@ -10,10 +10,6 @@ async def coro_exc_wrapper(coro, loop):
         loop.call_exception_handler({'message': str(e), 'exception': e})
 
 
-def is_async(caller):
-    return asyncio.iscoroutinefunction(caller)
-
-
 # Not currently being used but we want to hold onto.
 def limited_as_completed(coros, limit):
     """

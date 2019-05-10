@@ -5,7 +5,7 @@ import signal
 import sys
 import tortoise
 
-from plumbum import cli
+from plumbum import cli, colors
 
 from lib import validate_log_level, cancel_remaining_tasks, log_handling
 

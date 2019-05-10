@@ -33,10 +33,13 @@ async def stream_raw_data(filepath, limit=None):
     count = 0
     async with aiofiles.open(filepath) as f:
         async for line in f:
+            line = line.replace("\n", "")
             if line == "":
                 exc = InvalidFileLine(i, val)  # noqa
                 # log.error(exc) Don't Log Empty Lines for Now
             else:
-                if limit and count == limit - 1:
+                if not limit or count < limit:
+                    yield line
+                    count += 1
+                else:
                     break
-                yield line

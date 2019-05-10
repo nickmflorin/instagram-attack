@@ -1,9 +1,9 @@
 from itertools import product
 
-from .base import abstract_gen
+from .base import mutation_gen
 
 
-class char_gen(abstract_gen):
+class char_gen(mutation_gen):
     """
     Terminology
     -----------
@@ -46,15 +46,13 @@ class char_gen(abstract_gen):
         'p': ('3', '@'),
     }
 
-    @classmethod
-    async def gen(cls, word):
-        for char, new_chars in cls.COMMON_CHAR_REPLACEMENTS.items():
-            altered = cls.replace_char_with_chars(word, char, new_chars)
+    async def __call__(self):
+        for char, new_chars in self.COMMON_CHAR_REPLACEMENTS.items():
+            altered = self.replace_character(char, new_chars)
             for alteration in altered:
                 yield alteration
 
-    @classmethod
-    def replace_character(cls, word, char, new_chars):
+    def replace_character(self, char, new_chars):
         """
         Given a character to replace and a series or single character, returns
         all possible words with that character replaced by all the characters
@@ -71,13 +69,12 @@ class char_gen(abstract_gen):
         we replace, for words that might have high frequencies of a single char.
         """
         alterations = []
-        for mutations in cls.get_mutations(word, char, new_chars):
-            altered = cls.apply_mutations(word, mutations)
+        for mutations in self.get_mutations(char, new_chars):
+            altered = self.apply_mutations(mutations)
             alterations.append(altered)
         return alterations
 
-    @classmethod
-    def get_mutations(cls, word, char, new_chars):
+    def get_mutations(self, char, new_chars):
         """
         Returns a series of mutations for a given word, character to replace
         and series of new characters.
@@ -95,12 +92,12 @@ class char_gen(abstract_gen):
         """
         all_mutations = []
 
-        replacement_combos = cls.get_replacement_combinations(word, char, new_chars)
+        replacement_combos = self.get_replacement_combinations(char, new_chars)
         for replacements in replacement_combos:
             # The result of flatten_replacements will be something along the lines
             # of:
             # >>> [[(1, 'b'), (1, 'x')], [(2, 'b'), (2, 'x')]]
-            flat = cls.flatten_replacements(replacements)
+            flat = self.flatten_replacements(replacements)
             # Find each different set of replacements with the index for each
             # replacement in the set being unique.  The result will be something
             # along the lines of:
@@ -109,8 +106,7 @@ class char_gen(abstract_gen):
             all_mutations.extend(mutations)
         return all_mutations
 
-    @classmethod
-    def get_replacements(cls, word, char, new_chars):
+    def get_replacements(self, char, new_chars):
         """
         Given a word, a character in the word and a set of new characters,
         returns an iterable of tuples (index, new_chars), where index refers
@@ -120,13 +116,12 @@ class char_gen(abstract_gen):
         >>> [(1, ('b', 'x')), (2, ('b', 'x')), (5, ('b', 'x'))]
         """
         mutations_by_index = []
-        indices = cls.find_indices_with_char(word, char)
+        indices = self.find_indices_with_char(char)
         for ind in indices:
             mutations_by_index.append((ind, (new_chars)))
         return mutations_by_index
 
-    @classmethod
-    def get_replacement_combinations(cls, word, char, new_chars):
+    def get_replacement_combinations(self, char, new_chars):
         """
         Get all combinations replacements for a given word, character in the
         word and set of new characters.
@@ -142,22 +137,20 @@ class char_gen(abstract_gen):
         >>>    ((1, ('b', 'x')), (2, ('b', 'x')), (5, ('b', 'x')))
         >>> ]
         """
-        replacements = cls.get_replacements(word, char, new_chars)
-        return cls.all_combinations(replacements)
+        replacements = self.get_replacements(char, new_chars)
+        return self.all_combinations(replacements)
 
-    @classmethod
-    def flatten_replacements(cls, replacements):
+    def flatten_replacements(self, replacements):
         """
         Flattens a series replacements into an iterable of flattened replacement
         tuples.
         """
         flattened = []
         for replacement in replacements:
-            flattened.append(cls.flatten_replacement(replacement))
+            flattened.append(self.flatten_replacement(replacement))
         return flattened
 
-    @classmethod
-    def flatten_replacement(cls, replacement):
+    def flatten_replacement(self, replacement):
         """
         Flattens a replacement (ind, (char1, char2, ...)) into an iterable
         where each iterable is defined by the replacement index with a different
@@ -170,14 +163,8 @@ class char_gen(abstract_gen):
             flat_replacement.append((replacement[0], ch))
         return flat_replacement
 
-    @classmethod
-    def apply_mutation(cls, word, ind, char):
-        altered = list(word)
-        altered[ind] = char
-        return cls.list_to_word(altered)
-
-    @classmethod
-    def apply_mutations(cls, word, mutations):
+    def apply_mutations(self, mutations):
+        word = self.word
         for mut in mutations:
-            word = cls.apply_mutation(word, *mut)
+            word = self.mutate_char_at_index(word, *mut)
         return word

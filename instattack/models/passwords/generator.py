@@ -1,15 +1,15 @@
 from lib import AppLogger
 
-from .base import abstract_gen
+from .base import mutation_gen
 
-from .char_replacement import char_gen
-from .case_alteration import case_gen
+from .char_gen import char_gen
+from .case_gen import case_gen
 
 
 log = AppLogger(__file__)
 
 
-class base_combination_generator(abstract_gen):
+class base_combination_generator(mutation_gen):
     """
     TODO
     ----
@@ -19,12 +19,10 @@ class base_combination_generator(abstract_gen):
     we will want to try to combine certain shorter passwords that we have
     tried or are the originals.
     """
-
-    def gen(self, word):
-        pass
+    pass
 
 
-class numeric_gen(abstract_gen):
+class numeric_gen(mutation_gen):
     """
     TODO:
     ----
@@ -33,35 +31,33 @@ class numeric_gen(abstract_gen):
     numbers, which might require not using generators and combining numbers
     with previous number sequences.
     """
-    @classmethod
-    async def gen(self, word, numeric):
+    async def __call__(self, numeric):
         # Skipping for now to make faster
         # yield self.numeric_before(word, numeric)
-        yield self.numeric_after(word, numeric)
+        yield self.numeric_after(numeric)
 
-    def numeric_before(self, word, numeric):
-        return "%s%s" % (numeric, word)
+    def numeric_before(self, numeric):
+        return "%s%s" % (numeric, self.word)
 
-    def numeric_after(self, word, numeric):
-        return "%s%s" % (word, numeric)
+    def numeric_after(self, numeric):
+        return "%s%s" % (self.word, numeric)
 
 
-class alteration_gen(abstract_gen):
+class alteration_gen(mutation_gen):
 
-    @classmethod
-    async def gen(cls, word, alteration):
+    async def __call__(self, alteration):
         # Skipping for now to make faster
         # yield self.alteration_before(word, numeric)
-        yield cls.alteration_after(word, alteration)
+        yield self.alteration_after(alteration)
 
-    def alteration_before(cls, word, alteration):
-        return "%s%s" % (alteration, word)
+    def alteration_before(self, alteration):
+        return "%s%s" % (alteration, self.word)
 
-    def alteration_after(cls, word, alteration):
-        return "%s%s" % (word, alteration)
+    def alteration_after(self, alteration):
+        return "%s%s" % (self.word, alteration)
 
 
-class custom_gen(abstract_gen):
+class custom_gen(mutation_gen):
     """
     Custom alterations that are not necessarily defined by values in the
     alterations or common numbers text files.
@@ -76,12 +72,13 @@ class custom_gen(abstract_gen):
         char_gen,
     ]
 
-    @classmethod
-    async def gen(cls, word):
-        combos = cls.all_combinations(cls.generators)
+    async def __call__(self):
+        combos = self.all_combinations(self.generators)
         for combo in combos:
             for gen in combo:
-                yield gen.gen(word)
+                initialized = gen(self.word)
+                async for item in initialized():
+                    yield item
 
 
 class password_gen(object):
@@ -103,32 +100,73 @@ class password_gen(object):
         custom_gen,
     ]
 
-    def __init__(self, alterations=None, numerics=None, raw=None, limit=None):
-        self.alterations = alterations or []
-        self.numerics = numerics or []
-        self.raw = raw or []
-        self.attempts = []
-
+    def __init__(self, user, limit=None):
+        self.user = user
         self.count = 0
+        self.duplicates = []
         self.limit = limit
 
-    @property
-    def safe_to_yield(self):
-        if not self.limit or self.count < self.limit:
-            return True
-        return False
+    def yield_with(self, value):
+        self.generated.append(value)
+        return value
 
-    async def safe_yield(self, gen):
-        while self.safe_to_yield:
-            try:
-                val = await gen.__anext__()
-                if val not in self.attempts:
-                    yield val
-                    self.count += 1
-                else:
-                    log.warning('Found duplicate generated password %s.' % val)
-            except StopAsyncIteration:
-                break
+    async def __call__(self):
+        # Not sure if it makes sense to apply certain generators and not others.
+        # combos = cls.all_combinations(cls.generators)
+        # Definitely have to look over this logic and make sure we are not doing
+        # anything completely unnecessary.
+        self.count = 0
+        self.attempts = await self.user.get_attempts()
+        self.generated = []
+        self.duplicates = []
+
+        async for password in self.user.get_passwords():
+            async for alteration in self.safe_yield(custom_gen(password)):
+                yield self.yield_with(alteration)
+
+                async for alteration in self.user.get_alterations():
+                    async for altered in self.safe_yield(alteration_gen(alteration), alteration):
+                        yield self.yield_with(altered)
+
+                async for num_alteration in self.user.get_numerics():
+                    async for altered in self.safe_yield(numeric_gen(alteration), num_alteration):
+                        yield self.yield_with(altered)
+
+            async for user_alteration in self.user.get_alterations():
+                async for altered in self.safe_yield(alteration_gen(password), user_alteration):
+                    yield self.yield_with(altered)
+
+        log.notice(f'Generated {len(self.generated)} Passwords')
+        log.notice(f'There Were {len(self.duplicates)} Generated Duplicates')
+
+    def safe_to_yield(self, val):
+        if self.limit and not self.count < self.limit:
+            return False
+        elif val in self.attempts:
+            return False
+        elif val in self.generated:
+            # Don't log for each one, this is bound to happen a lot, but we want
+            # to know how often it is happening.
+            self.duplicates.append(val)
+            return False
+        return True
+
+    async def safe_yield(self, gen, *args):
+        async for value in gen(*args):
+            if self.safe_to_yield(value):
+                yield value
+                self.count += 1
+
+        # while self.safe_to_yield:
+        #     try:
+        #         val = await generator.__anext__()
+        #         if val not in self.attempts:
+        #             yield val
+        #             self.count += 1
+        #         else:
+        #             log.warning('Found duplicate generated password %s.' % val)
+        #     except StopAsyncIteration:
+        #         break
 
     async def apply_alterations(self, word):
         async for alteration in self.alterations:

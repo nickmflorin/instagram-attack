@@ -3,7 +3,7 @@ from __future__ import absolute_import
 import contextlib
 from weakref import WeakKeyDictionary
 
-from lib import get_caller, is_async
+from lib import is_async_caller
 from lib import AppLogger
 
 
@@ -86,8 +86,7 @@ class Control(Loggable):
         self.queue = queue
 
     def starting(self, loop):
-        func = get_caller(correction=2)
-        is_asynchronous = is_async(func)
+        is_asynchronous = is_async_caller()
 
         @contextlib.asynccontextmanager
         async def _start():
@@ -116,8 +115,9 @@ class Control(Loggable):
         return _sync_start()
 
     def stopping(self, loop):
-        func = get_caller(correction=2)
-        is_asynchronous = is_async(func)
+        # func = get_caller(correction=2)
+        # is_asynchronous = is_async(func)
+        is_asynchronous = is_async_caller()
 
         @contextlib.asynccontextmanager
         async def _stop():
