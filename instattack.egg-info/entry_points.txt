@@ -1,0 +1,3 @@
+[console_scripts]
+manage = instattack.__main__:main
+

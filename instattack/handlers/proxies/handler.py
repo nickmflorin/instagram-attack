@@ -1,6 +1,6 @@
 import asyncio
 
-from lib import coro_exc_wrapper
+from instattack.lib import coro_exc_wrapper
 from instattack.exceptions import ProxyException
 from instattack.handlers.base import Handler
 

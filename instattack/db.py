@@ -2,7 +2,7 @@ import os
 
 from tortoise import Tortoise
 
-from lib import AppLogger
+from instattack.lib import AppLogger
 from instattack import settings
 
 

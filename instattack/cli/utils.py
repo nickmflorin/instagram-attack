@@ -1,7 +1,7 @@
 from plumbum import cli
 
-from lib import is_numeric
-from lib import AppLogger
+from instattack.lib import is_numeric
+from instattack.lib import AppLogger
 
 
 log = AppLogger(__file__)

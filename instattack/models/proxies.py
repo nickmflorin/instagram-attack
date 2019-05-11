@@ -11,7 +11,7 @@ from typing import List, Any
 from tortoise.models import Model
 from tortoise import fields
 
-from lib import validate_method
+from instattack.lib import validate_method
 from instattack import settings
 
 

@@ -1,16 +1,17 @@
 from plumbum.path import LocalPath
-from lib import AppLogger, dir_str
+
 from .base import AppException
 
 
-log = AppLogger(__file__)
+def dir_str(path):
+    return "%s/%s" % (path.dirname, path.name)
 
 
 class PathException(AppException):
 
     def __init__(self, path):
+
         if isinstance(path, str):
-            log.warning('Must start supplying plumbum paths to exceptions.')
             path = LocalPath(path)
 
         self.path = path
@@ -19,6 +20,12 @@ class PathException(AppException):
         self.filename = None
         if self.path.is_file():
             self.filename = self.pathname.name
+
+
+class EnvFileMissing(PathException):
+
+    def __str__(self):
+        return f"The .env file does not exist at {dir_str(self.filepath)}."
 
 
 class DirDoesNotExist(PathException):

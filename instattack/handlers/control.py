@@ -3,8 +3,8 @@ from __future__ import absolute_import
 import contextlib
 from weakref import WeakKeyDictionary
 
-from lib import is_async_caller
-from lib import AppLogger
+from instattack.lib import is_async_caller
+from instattack.lib import AppLogger
 
 
 __all__ = ('Control', 'Loggable', )
@@ -91,7 +91,7 @@ class Control(Loggable):
         @contextlib.asynccontextmanager
         async def _start():
             try:
-                self.log.notice(f'Starting {self.name}')
+                self.log.info(f'Starting {self.name}')
                 yield
             except Exception as e:
                 raise e
@@ -102,7 +102,7 @@ class Control(Loggable):
         @contextlib.contextmanager
         def _sync_start():
             try:
-                self.log.notice(f'Starting {self.name}')
+                self.log.info(f'Starting {self.name}')
                 yield
             except Exception as e:
                 raise
@@ -122,7 +122,7 @@ class Control(Loggable):
         @contextlib.asynccontextmanager
         async def _stop():
             try:
-                self.log.notice(f'Stopping {self.name}')
+                self.log.info(f'Stopping {self.name}')
                 yield
             except Exception as e:
                 raise e
@@ -133,7 +133,7 @@ class Control(Loggable):
         @contextlib.contextmanager
         def _sync_stop():
             try:
-                self.log.notice(f'Stopping {self.name}')
+                self.log.info(f'Stopping {self.name}')
                 yield
             except Exception as e:
                 raise e

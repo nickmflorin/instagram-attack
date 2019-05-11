@@ -5,9 +5,9 @@ import signal
 import sys
 import tortoise
 
-from plumbum import cli, colors
+from plumbum import cli
 
-from lib import validate_log_level, cancel_remaining_tasks, log_handling
+from instattack.lib import validate_log_level, cancel_remaining_tasks
 
 from instattack.db import database_init
 from instattack.handlers.control import Loggable
@@ -115,12 +115,11 @@ class BaseApplication(cli.Application, Loggable):
         loop.run_until_complete(tortoise.Tortoise.close_connections())
 
         loop.stop()
-        self.log.notice('[!] Done')
+        self.log.info('[!] Done')
 
 
 class Instattack(BaseApplication):
 
-    @log_handling('self')
     def main(self, *args):
         self.validate(*args)
 

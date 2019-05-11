@@ -6,13 +6,19 @@ setup(
     name="instattack",
     version="0.0.1",
     description="Brute Force Attacking Instagram",
-    author="Anonymous",
-    author_email="anonymous@gmail.com",
+    author="Nick Florin",
+    author_email="nickmflorin@gmail.com",
     url="https://github.com/nickmflorin/instagram-attack",
     packages=find_packages(),
-    # Have to add a lot here
     install_requires=[
+        'aiosqlite',
+        'aiofiles',
+        'asyncpg',
+        'aiohttp',
+        'asyncio',
+        'proxybroker',
         'plumbum',
+        'tortoise-orm',
     ],
     include_package_data=True,
     entry_points={

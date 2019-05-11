@@ -1,3 +1,4 @@
+import aiohttp
 import inspect
 
 
@@ -10,6 +11,28 @@ def get_exception_message(exc):
     if message == "" or message is None:
         return exc.__class__.__name__
     return message
+
+
+def get_exception_status_code(exc):
+
+    if isinstance(exc, aiohttp.ClientError):
+        if hasattr(exc, 'status'):
+            return exc.status
+        elif hasattr(exc, 'status_code'):
+            return exc.status_code
+        else:
+            return None
+    else:
+        return None
+
+
+def get_exception_request_method(exc):
+
+    if isinstance(exc, aiohttp.ClientError):
+        if hasattr(exc, 'request_info'):
+            if exc.request_info.method:
+                return exc.request_info.method
+    return None
 
 
 def is_async_caller():

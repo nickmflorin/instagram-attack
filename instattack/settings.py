@@ -33,6 +33,10 @@ DB_NAME = APP_NAME
 
 USER_DIR = "users"
 
+PASSWORDS = "passwords"
+ALTERATIONS = "alterations"
+NUMERICS = "numerics"
+
 # Instagram Requests
 HEADER = {
     'Referer': 'https://www.instagram.com/',

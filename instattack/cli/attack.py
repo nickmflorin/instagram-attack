@@ -1,8 +1,6 @@
 import asyncio
 from plumbum import cli
 
-from lib import log_handling
-
 from instattack.exceptions import AppException
 from instattack.models import User
 
@@ -31,7 +29,6 @@ class InstattackAttack(Instattack, RequestArgs, ProxyArgs):
         group=__group__,
     )
 
-    @log_handling('self')
     def main(self, username):
         self.user = User(username)
         self.user.setup()
@@ -42,7 +39,7 @@ class InstattackAttack(Instattack, RequestArgs, ProxyArgs):
             if not token:
                 raise AppException("Token should not be null.")
 
-            self.log.notice('Received Token', extra={'token': token})
+            self.log.info('Received Token', extra={'token': token})
             return
             loop.run_until_complete(self.attack(loop, token))
 
@@ -147,7 +144,7 @@ class InstattackAttack(Instattack, RequestArgs, ProxyArgs):
             # Post Proxy Server Stopped Automatically
             result = results[0]
             if result:
-                self.log.notice(f'Authenticated User!', extra={
+                self.log.info(f'Authenticated User!', extra={
                     'password': result.context.password
                 })
 

@@ -5,6 +5,7 @@ from .threading import *  # noqa
 from .err_handling import *  # noqa
 from .progress import *  # noqa
 from .http import *  # noqa
+from .paths import *  # noqa
 
 
 def is_numeric(value):

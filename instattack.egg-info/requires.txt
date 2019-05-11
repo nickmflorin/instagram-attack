@@ -1,0 +1,9 @@
+aiosqlite
+aiofiles
+aioitertools
+asyncpg
+aiohttp
+asyncio
+proxybroker
+plumbum
+tortoise-orm

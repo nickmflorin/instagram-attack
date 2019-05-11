@@ -1,4 +1,4 @@
-from lib import AppLogger
+from instattack.lib import AppLogger
 
 from .base import mutation_gen
 
@@ -7,6 +7,20 @@ from .case_gen import case_gen
 
 
 log = AppLogger(__file__)
+
+
+"""
+TODO
+----
+
+Password Pairings
+
+(mer, eileen)
+(mer, gins) -> Should do each one individually and combos of the two
+
+All birthday combos with year
+-> 01, 02, 03, 04, 05, 06, ... for month, combined with all digits and years
+"""
 
 
 class base_combination_generator(mutation_gen):
@@ -136,8 +150,8 @@ class password_gen(object):
                 async for altered in self.safe_yield(alteration_gen(password), user_alteration):
                     yield self.yield_with(altered)
 
-        log.notice(f'Generated {len(self.generated)} Passwords')
-        log.notice(f'There Were {len(self.duplicates)} Generated Duplicates')
+        log.info(f'Generated {len(self.generated)} Passwords')
+        log.info(f'There Were {len(self.duplicates)} Generated Duplicates')
 
     def safe_to_yield(self, val):
         if self.limit and not self.count < self.limit:

@@ -1,6 +1,6 @@
 import asyncio
 
-from lib import AppLogger, validate_method
+from instattack.lib import AppLogger, validate_method
 
 from instattack.models import Proxy
 
@@ -68,8 +68,8 @@ async def update_or_create_proxies(method, proxies, overwrite=False):
     results = await asyncio.gather(*tasks)
 
     num_created = len([res for res in results if res[1]])
-    log.notice(f'Created {method} {num_created} Proxies')
+    log.info(f'Created {method} {num_created} Proxies')
 
     updated = [res for res in results if res[0]]
     num_updated = len(updated)
-    log.notice(f'Updated {method} {num_updated} Proxies')
+    log.info(f'Updated {method} {num_updated} Proxies')

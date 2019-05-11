@@ -1,19 +1,15 @@
 from __future__ import absolute_import
 
-from aioitertools import chain
-
 from tortoise.models import Model
 from tortoise import fields
 
-from lib import AppLogger, stream_raw_data
-
+from instattack import settings
+from instattack.lib import AppLogger, stream_raw_data
 from instattack.exceptions import UserDirDoesNotExist, UserFileDoesNotExist
 
 from .passwords import password_gen
 from .utils import get_data_dir
 
-
-from async_generator import async_generator, yield_, yield_from_
 
 log = AppLogger(__file__)
 
@@ -45,13 +41,10 @@ class User(Model):
     # have it in the attempts, but just in case for now.
     password = fields.CharField(max_length=100, null=True)
 
-    PASSWORDS = "passwords"
-    ALTERATIONS = "alterations"
-    NUMBERS = "common_numbers"
     FILES = [
-        PASSWORDS,
-        ALTERATIONS,
-        NUMBERS,
+        settings.PASSWORDS,
+        settings.ALTERATIONS,
+        settings.NUMERICS,
     ]
 
     class Meta:
@@ -143,15 +136,15 @@ class User(Model):
         return stream_raw_data(filepath, limit=limit)
 
     async def get_passwords(self, limit=None):
-        async for line in self.streamed_data(self.PASSWORDS, limit=limit):
+        async for line in self.streamed_data(settings.PASSWORDS, limit=limit):
             yield line
 
     async def get_alterations(self, limit=None):
-        async for line in self.streamed_data(self.ALTERATIONS, limit=limit):
+        async for line in self.streamed_data(settings.ALTERATIONS, limit=limit):
             yield line
 
     async def get_numerics(self, limit=None):
-        async for line in self.streamed_data(self.NUMBERS, limit=limit):
+        async for line in self.streamed_data(settings.NUMERICS, limit=limit):
             yield line
 
     async def get_attempts(self, limit=None):

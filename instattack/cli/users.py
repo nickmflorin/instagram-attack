@@ -1,8 +1,5 @@
 from plumbum import cli
 import tortoise
-import sys
-
-from lib import log_handling
 
 from instattack.models import User
 
@@ -23,7 +20,6 @@ class UsersApplication(BaseApplication):
 @UsersApplication.subcommand('clean')
 class UsersCleanApplication(UsersApplication):
 
-    @log_handling('self')
     def main(self):
         with self.loop_session() as loop:
             loop.run_until_complete(self.clean())
@@ -31,7 +27,7 @@ class UsersCleanApplication(UsersApplication):
     async def clean(self):
         async for user in User.all():
             user.setup()
-            self.log.notice(f'Cleaned Directory for User {user.username}.')
+            self.log.info(f'Cleaned Directory for User {user.username}.')
 
 
 @UsersApplication.subcommand('show')
@@ -45,11 +41,10 @@ class UsersShowApplication(UsersApplication):
         return {
             'passwords': self.passwords,
             'alterations': self.alterations,
-            'numbers': self.numbers,
+            'numerics': self.numerics,
             'attempts': self.attempts,
         }
 
-    @log_handling('self')
     def main(self, item, username):
         with self.loop_session() as loop:
             loop.run_until_complete(self.operation(item, username))
@@ -68,26 +63,27 @@ class UsersShowApplication(UsersApplication):
         await method(user)
 
     async def passwords(self, user):
+        self.log.before_lines()
         async for item in user.get_passwords(limit=self.limit):
-            sys.stdout.write(item)
+            self.log.line(item)
 
     async def alterations(self, user):
+        self.log.before_lines()
         async for item in user.get_alterations(limit=self.limit):
-            sys.stdout.write(item)
+            self.log.line(item)
 
-    async def numbers(self, user):
+    async def numerics(self, user):
+        self.log.before_lines()
         async for item in user.get_numerics(limit=self.limit):
-            sys.stdout.write(item)
+            self.log.line(item)
 
     async def attempts(self, user):
         if self.new:
             generated = []
+            self.log.before_lines()
             async for item in user.generate_attempts(limit=self.limit):
-                # self.log.bare(item)
+                self.log.line(item)
                 generated.append(item)
-
-            # Only until we can handle logging the iterable form with indices.
-            self.log.line_by_line(generated)
 
             assert len(generated) == len(set(generated))
             self.log.simple(f"Generated {len(generated)} Attempts!")
@@ -102,7 +98,6 @@ class UsersShowApplication(UsersApplication):
 
 class UserOperation(UsersApplication):
 
-    @log_handling('self')
     def main(self, *args):
         if len(args) != 1:
             self.log.error('Must provide single username argument.')
@@ -125,7 +120,7 @@ class DeleteUser(UserOperation):
             user.teardown()
             self.log.info('Deleting user from database...')
             await user.delete()
-            self.log.notice('Success.')
+            self.log.info('Success.')
 
 
 @UsersApplication.subcommand('add')
@@ -135,6 +130,6 @@ class AddUser(UserOperation):
         user = await self.get_user(username)
         if not user:
             user = await User.create(username=username)
-            self.log.notice(f'Successfully created user {user.username}.')
+            self.log.info(f'Successfully created user {user.username}.')
         else:
             self.log.error('User already exists.')

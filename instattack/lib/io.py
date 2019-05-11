@@ -8,10 +8,6 @@ from .logger import AppLogger
 log = AppLogger(__file__)
 
 
-def dir_str(path):
-    return "%s/%s" % (path.dirname, path.name)
-
-
 async def stream_raw_data(filepath, limit=None):
     """
     Code Snippet

@@ -93,7 +93,7 @@ class PasswordHandler(RequestHandler):
             return result
 
     async def prepopulate(self, loop, password_limit=None):
-        self.log.notice('Prepopulating Passwords')
+        self.log.info('Prepopulating Passwords')
         for password in self.user.get_new_attempts(limit=password_limit):
             await self.passwords.put(password)
 

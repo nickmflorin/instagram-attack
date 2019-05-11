@@ -35,8 +35,8 @@ class ResultsHandler(Handler):
 
                 # TODO: Cleanup how we are doing the percent complete operation,
                 # maybe try to use progressbar package.
-                self.log.notice("{0:.2%}".format(float(index) / self.user.num_passwords))
-                self.log.notice(result)
+                self.log.info("{0:.2%}".format(float(index) / self.user.num_passwords))
+                self.log.info(result)
 
                 if result.authorized:
                     self.log.debug('Setting Stop Event')
@@ -56,7 +56,7 @@ class ResultsHandler(Handler):
 
     async def dump(self, loop):
         attempts_list = []
-        self.log.notice('Dumping Password Attempts')
+        self.log.info('Dumping Password Attempts')
         while not self.attempts.empty():
             attempts_list.append(await self.attempts.get())
         self.user.update_password_attempts(attempts_list)

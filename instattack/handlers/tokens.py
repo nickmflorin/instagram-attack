@@ -3,7 +3,7 @@ from __future__ import absolute_import
 import asyncio
 import aiohttp
 
-from lib import get_token_from_response
+from instattack.lib import get_token_from_response
 
 from instattack import settings
 from instattack.exceptions import TokenNotFound, TokenException, TokenNotInResponse

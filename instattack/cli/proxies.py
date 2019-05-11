@@ -1,7 +1,7 @@
 import asyncio
 from plumbum import cli
 
-from lib import CustomProgressbar, log_handling
+from instattack.lib import CustomProgressbar
 
 from instattack.exceptions import ArgumentError, PoolNoProxyError
 
@@ -37,7 +37,7 @@ class ProxyClean(ProxyApplication):
     Will be used to remove duplicate proxies that are saved.  Potentially also
     be used to update metrics if we get that far in this project.
     """
-    @log_handling('self')
+
     def main(self, arg):
         with self.loop_session() as loop:
             if arg == 'errors':
@@ -60,7 +60,6 @@ class ProxyCollect(ProxyApplication):
     # Only applicable if --show is False (i.e. we are saving).
     clear = cli.Flag("--clear")
 
-    @log_handling('self')
     def main(self):
         with self.loop_session() as loop:
 
