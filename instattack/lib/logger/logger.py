@@ -3,96 +3,104 @@ import logging
 import contextlib
 import progressbar
 from plumbum import colors
+from plumbum.path import LocalPath
 import traceback
+import os
 import sys
 
-from .utils import record_context
-from .formats import (
-    LoggingLevels, LOG_FORMAT_STRING, SIMPLE_FORMAT_STRING, BARE_FORMAT_STRING)
+from instattack.lib.paths import relative_to_root
+
+from .formats import LoggingLevels
+from .handlers import BARE_HANDLER, SIMPLE_HANDLER, BASE_HANDLER, ExternalHandler
 
 
-__all__ = ('AppLogger', 'log_environment', )
+__all__ = (
+    'AppLogger',
+    'progressbar_wrap',
+    'disable_external_loggers',
+    'apply_external_loggers',
+)
 
 
-class TypeFilter(logging.Filter):
-
-    def __init__(self, require=None, disallow=None, *args, **kwargs):
-        super(TypeFilter, self).__init__(*args, **kwargs)
-        self.require = require
-        self.disallow = disallow
-
-    def filter(self, record):
-        if self.require:
-            if not all([x in record.__dict__ for x in self.require]):
-                return False
-
-        if self.disallow:
-            if any([x in record.__dict__ for x in self.disallow]):
-                return False
-
-        return True
+def add_base_handlers(logger):
+    for handler in [BARE_HANDLER, SIMPLE_HANDLER, BASE_HANDLER]:
+        logger.addHandler(handler)
 
 
-class CustomFormatter(logging.Formatter):
-
-    def __init__(self, format_string=LOG_FORMAT_STRING, **kwargs):
-        super(CustomFormatter, self).__init__(**kwargs)
-        self.format_string = format_string
-
-    def format(self, record):
-        context = record_context(record)
-        format_string = self.format_string(record)
-        return format_string.format(context)
+def disable_external_loggers(*args):
+    for module in args:
+        external_logger = logging.getLogger(module)
+        external_logger.setLevel(logging.CRITICAL)
 
 
-class CustomerHandler(logging.StreamHandler):
+def apply_external_loggers(*args):
+    for module in args:
+        external_logger = logging.getLogger(module)
+        for handler in external_logger.handlers:
+            external_logger.removeHandler(handler)
 
-    def __init__(self, filter=None, format_string=LOG_FORMAT_STRING):
-        super(CustomerHandler, self).__init__()
+        external_logger.addHandler(ExternalHandler())
+        external_logger.propagate = False
 
-        formatter = CustomFormatter(format_string=format_string)
-        self.setFormatter(formatter)
 
-        if filter:
-            self.addFilter(filter)
+@contextlib.contextmanager
+def progressbar_wrap():
+
+    def _init_progressbar():
+        progressbar.streams.wrap_stderr()
+        progressbar.streams.wrap_stdout()
+
+    def _deinit_progressbar():
+        progressbar.streams.unwrap_stdout()
+        progressbar.streams.unwrap_stderr()
+
+    try:
+        _init_progressbar()
+        yield
+    finally:
+        _deinit_progressbar()
 
 
 class AppLogger(logging.Logger):
 
-    HANDLERS = [
-        CustomerHandler(
-            format_string=BARE_FORMAT_STRING,
-            filter=TypeFilter(require=['bare']),
-        ),
-        CustomerHandler(
-            format_string=SIMPLE_FORMAT_STRING,
-            filter=TypeFilter(require=['simple']),
-        ),
-        CustomerHandler(
-            format_string=LOG_FORMAT_STRING,
-            filter=TypeFilter(disallow=['bare', 'simple'])
-        )
-    ]
-
     def __init__(self, *args, **kwargs):
-        super(AppLogger, self).__init__(*args, **kwargs)
-        self.line_index = 0
-        self.add_handlers()
+        name = args[0]
+        if LocalPath(name).exists():
+            name = relative_to_root(name)
 
-    def add_handlers(self):
-        for handler in self.HANDLERS:
-            self.addHandler(handler)
+        super(AppLogger, self).__init__(name, *args[1:], **kwargs)
+        self.line_index = 0
+        add_base_handlers(self)
+
+        # Environment variable might not be set for usages of AppLogger
+        # in __main__ module right away.
+        if os.environ.get('level'):
+            self.setLevel(os.environ['level'])
+
+    def updateLevel(self):
+        # Environment variable might not be set for usages of AppLogger
+        # in __main__ module right away.
+        if not os.environ.get('level'):
+            raise RuntimeError('Level is not in the environment variables.')
+        self.setLevel(os.environ['level'])
 
     def default(self, record, attr, default=None):
         setattr(record, attr, getattr(record, attr, default))
 
     def makeRecord(self, *args, **kwargs):
         record = super(AppLogger, self).makeRecord(*args, **kwargs)
-        setattr(record, 'level', LoggingLevels[record.levelname])
 
-        self.default(record, 'line_index', default=None)
+        self.default(record, 'level_format')
+        self.default(record, 'line_index')
+        self.default(record, 'show_level', default=True)
         self.default(record, 'highlight', default=False)
-        self.default(record, 'color', default=None)
+        self.default(record, 'color')
+
+        if getattr(record, 'level', None) is None:
+            setattr(record, 'level', LoggingLevels[record.levelname])
+
+        if not record.show_level:
+            record.levelname = None
 
         self.default(record, 'is_exception', default=False)
         if isinstance(record.msg, Exception):
@@ -103,6 +111,16 @@ class AppLogger(logging.Logger):
                 setattr(record, 'color', colors.fg(record.color))
 
         return record
+
+    def start(self, message, extra=None):
+        extra = extra or {}
+        extra.update(level=LoggingLevels.START, show_level=False)
+        self.info(message, extra=extra)
+
+    def complete(self, message, extra=None):
+        extra = extra or {}
+        extra.update(level=LoggingLevels.COMPLETE, show_level=False)
+        self.info(message, extra=extra)
 
     def simple(self, message, color=None, extra=None):
         default = {'color': color, 'simple': True}
@@ -152,21 +170,3 @@ class AppLogger(logging.Logger):
                 sys.stderr.write("%s\n" % line)
         else:
             self.error("\n".join(tb_lines), extra={'no_indent': True})
-
-
-@contextlib.contextmanager
-def log_environment():
-
-    def _init_progressbar():
-        progressbar.streams.wrap_stderr()
-        progressbar.streams.wrap_stdout()
-
-    def _deinit_progressbar():
-        progressbar.streams.unwrap_stdout()
-        progressbar.streams.unwrap_stderr()
-
-    try:
-        _init_progressbar()
-        yield
-    finally:
-        _deinit_progressbar()

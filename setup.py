@@ -13,7 +13,6 @@ setup(
     install_requires=[
         'aiosqlite',
         'aiofiles',
-        'asyncpg',
         'aiohttp',
         'asyncio',
         'proxybroker',

@@ -1,3 +1,5 @@
+import asyncio
+
 from instattack.lib import AppLogger
 
 from .base import mutation_gen
@@ -14,12 +16,19 @@ TODO
 ----
 
 Password Pairings
+-----------------
 
 (mer, eileen)
 (mer, gins) -> Should do each one individually and combos of the two
 
 All birthday combos with year
 -> 01, 02, 03, 04, 05, 06, ... for month, combined with all digits and years
+
+Limit
+-----
+Cannot figure out why the hard limit and shutting down async gens is not enough
+to ensure that the limit is not consistent with how many passwords are generated.
+There always seems to be an extra couple that are generated.
 """
 
 
@@ -74,12 +83,7 @@ class alteration_gen(mutation_gen):
 class custom_gen(mutation_gen):
     """
     Custom alterations that are not necessarily defined by values in the
-    alterations or common numbers text files.
-
-    TODO
-    ----
-    We might want to apply some of these generators in tandem with one another.
-    We can probably do this by using the itertools.combinations() operator.
+    alterations or common numbers text files.d
     """
     generators = [
         case_gen,
@@ -87,6 +91,9 @@ class custom_gen(mutation_gen):
     ]
 
     async def __call__(self):
+        """
+        Applies generators alone and in tandem with one another.
+        """
         combos = self.all_combinations(self.generators)
         for combo in combos:
             for gen in combo:
@@ -114,15 +121,12 @@ class password_gen(object):
         custom_gen,
     ]
 
-    def __init__(self, user, limit=None):
+    def __init__(self, loop, user, limit=None):
         self.user = user
+        self.loop = loop
         self.count = 0
         self.duplicates = []
         self.limit = limit
-
-    def yield_with(self, value):
-        self.generated.append(value)
-        return value
 
     async def __call__(self):
         # Not sure if it makes sense to apply certain generators and not others.
@@ -134,24 +138,41 @@ class password_gen(object):
         self.generated = []
         self.duplicates = []
 
-        async for password in self.user.get_passwords():
-            async for alteration in self.safe_yield(custom_gen(password)):
-                yield self.yield_with(alteration)
+        async for password in self.safe_yield(self.user.get_passwords):
+            yield self.yield_with(password)
 
+            # Cover alterations and additions to base password
+            async for alteration in self.user.get_alterations():
+                async for altered in self.safe_yield(
+                        alteration_gen(password), alteration):
+                    yield self.yield_with(altered)
+
+            async for num_alteration in self.user.get_numerics():
+                async for altered in self.safe_yield(
+                        numeric_gen(password), num_alteration):
+                    yield self.yield_with(altered)
+
+            async for custom_alteration in self.safe_yield(custom_gen(password)):
+                yield self.yield_with(custom_alteration)
+
+                # Cover alterations and additions to custom altered passwords
                 async for alteration in self.user.get_alterations():
-                    async for altered in self.safe_yield(alteration_gen(alteration), alteration):
+                    async for altered in self.safe_yield(
+                            alteration_gen(custom_alteration), alteration):
                         yield self.yield_with(altered)
 
                 async for num_alteration in self.user.get_numerics():
-                    async for altered in self.safe_yield(numeric_gen(alteration), num_alteration):
+                    async for altered in self.safe_yield(
+                            numeric_gen(custom_alteration), num_alteration):
                         yield self.yield_with(altered)
 
-            async for user_alteration in self.user.get_alterations():
-                async for altered in self.safe_yield(alteration_gen(password), user_alteration):
-                    yield self.yield_with(altered)
-
         log.info(f'Generated {len(self.generated)} Passwords')
-        log.info(f'There Were {len(self.duplicates)} Generated Duplicates')
+        if len(self.duplicates):
+            log.info(f'There Were {len(self.duplicates)} Generated Duplicates')
+
+    def yield_with(self, value):
+        self.generated.append(value)
+        return value
 
     def safe_to_yield(self, val):
         if self.limit and not self.count < self.limit:
@@ -170,50 +191,9 @@ class password_gen(object):
             if self.safe_to_yield(value):
                 yield value
                 self.count += 1
-
-        # while self.safe_to_yield:
-        #     try:
-        #         val = await generator.__anext__()
-        #         if val not in self.attempts:
-        #             yield val
-        #             self.count += 1
-        #         else:
-        #             log.warning('Found duplicate generated password %s.' % val)
-        #     except StopAsyncIteration:
-        #         break
-
-    async def apply_alterations(self, word):
-        async for alteration in self.alterations:
-            gen = alteration_gen.gen(word, alteration)
-            yield self.safe_yield(gen)
-
-    async def apply_numerics(self, word):
-        async for numeric in self.numerics:
-            gen = numeric_gen.gen(word, numeric)
-            yield self.safe_yield(gen)
-
-    async def apply_custom(self, word):
-        yield self.safe_yield(custom_gen.gen(word))
-
-    async def gen(self, attempts=None, limit=None):
-        attempts = attempts or []
-        self.count = 0
-
-        # Not sure if it makes sense to apply certain generators and not others.
-        # combos = cls.all_combinations(cls.generators)
-        # Definitely have to look over this logic and make sure we are not doing
-        # anything completely unnecessary.
-        async for password in self.raw:
-            yield self.apply_custom(password)
-            yield self.apply_alterations(password)
-            yield self.apply_numerics(password)
-
-            async for altered in self.apply_alterations(password):
-                yield self.apply_numerics(altered)
-
-            async for altered in self.apply_numerics(password):
-                yield self.apply_custom(altered)
-
-            async for altered in self.apply_alterations(password):
-                async for altered2 in self.apply_numerics(password):
-                    yield self.apply_custom(altered2)
+            else:
+                # Cannot figure out why it keeps creating slightly more than the
+                # --limit desired passwords, but this didn't help.
+                if self.limit and not self.count < self.limit:
+                    task = asyncio.create_task(self.loop.shutdown_asyncgens())
+                    await task

@@ -1,9 +1,7 @@
 from __future__ import absolute_import
 
-import contextlib
 from weakref import WeakKeyDictionary
 
-from instattack.lib import is_async_caller
 from instattack.lib import AppLogger
 
 
@@ -84,63 +82,3 @@ class Control(Loggable):
 
         self.user = user
         self.queue = queue
-
-    def starting(self, loop):
-        is_asynchronous = is_async_caller()
-
-        @contextlib.asynccontextmanager
-        async def _start():
-            try:
-                self.log.info(f'Starting {self.name}')
-                yield
-            except Exception as e:
-                raise e
-            else:
-                self.log.debug(f'{self.name} Was Successfully Started')
-                return
-
-        @contextlib.contextmanager
-        def _sync_start():
-            try:
-                self.log.info(f'Starting {self.name}')
-                yield
-            except Exception as e:
-                raise
-            else:
-                self.log.debug(f'{self.name} Was Successfully Started')
-                return
-
-        if is_asynchronous:
-            return _start()
-        return _sync_start()
-
-    def stopping(self, loop):
-        # func = get_caller(correction=2)
-        # is_asynchronous = is_async(func)
-        is_asynchronous = is_async_caller()
-
-        @contextlib.asynccontextmanager
-        async def _stop():
-            try:
-                self.log.info(f'Stopping {self.name}')
-                yield
-            except Exception as e:
-                raise e
-            else:
-                self.log.debug(f'{self.name} Was Successfully Stopped')
-                return
-
-        @contextlib.contextmanager
-        def _sync_stop():
-            try:
-                self.log.info(f'Stopping {self.name}')
-                yield
-            except Exception as e:
-                raise e
-            else:
-                self.log.debug(f'{self.name} Was Successfully Stopped')
-                return
-
-        if is_asynchronous:
-            return _stop()
-        return _sync_stop()

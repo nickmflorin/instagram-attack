@@ -2,7 +2,9 @@ import asyncio
 
 from instattack.lib import coro_exc_wrapper
 from instattack.exceptions import ProxyException
+
 from instattack.handlers.base import Handler
+from instattack.handlers.utils import starting, stopping
 
 from .broker import CustomBroker
 from .pool import CustomProxyPool
@@ -62,6 +64,7 @@ class ProxyHandler(Handler):
             **kwargs,
         )
 
+    @starting
     async def run(self, loop, **kwargs):
         """
         NOTE:
@@ -75,12 +78,12 @@ class ProxyHandler(Handler):
         Test the operation without prepopulation, since it sometimes
         slows down too much when we are waiting on proxies from the finder.
         """
-        async with self.starting(loop):
-            await asyncio.gather(
-                self._broker.find(loop),
-                self.pool.run(loop, **kwargs)
-            )
+        await asyncio.gather(
+            self._broker.find(loop),
+            self.pool.run(loop, **kwargs)
+        )
 
+    @stopping
     async def stop(self, loop):
         """
         The pool will stop on it's own, once it realizes that there are no
@@ -94,5 +97,5 @@ class ProxyHandler(Handler):
             raise ProxyException('Cannot get proxy from stopped handler.')
         return await self.pool.get()
 
-    async def save(self, overwrite=False):
-        return await self.pool.save(overwrite=overwrite)
+    async def save(self, loop):
+        return await self.pool.save(loop)

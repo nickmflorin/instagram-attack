@@ -8,20 +8,23 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Any
 
-from tortoise.models import Model
+import tortoise
 from tortoise import fields
 
-from instattack.lib import validate_method
+from tortoise.models import Model
+
 from instattack import settings
+from instattack.lib import validate_method
+from instattack.handlers.control import Loggable
 
 
 __all__ = ('Proxy', 'ProxyError', )
 
 
-class ModelMixin(object):
+class ModelMixin(Loggable):
 
     @classmethod
-    def count(cls):
+    def count_all(cls):
         """
         Do not ask me why the count() method returns a CountQuery that does
         not have an easily accessible integer value.
@@ -34,7 +37,7 @@ class ProxyError(Model, ModelMixin):
     id = fields.IntField(pk=True)
     proxy = fields.ForeignKeyField('models.Proxy', related_name='errors')
     name = fields.CharField(max_length=30)
-    num = fields.IntField(default=0)
+    count = fields.IntField(default=0)
 
     class Meta:
         unique_together = ('name', 'proxy')
@@ -121,8 +124,8 @@ class Proxy(Model, ModelMixin):
             num_requests=0,  # Our reference of num_requests differs from ProxyBroker
             schemes=list(proxy.schemes),
         )
-        if save:
-            await _proxy.save()
+        # if save:
+        #     await _proxy.save()
         return _proxy
 
     async def find_error(self, exc):
@@ -139,14 +142,35 @@ class Proxy(Model, ModelMixin):
     async def add_error(self, exc):
         err_name = exc.__class__.__name__
 
-        err = await self.find_error(exc)
-        if not err:
-            err = ProxyError(proxy=self, name=err_name, num=1)
+        # async with tortoise.transactions.in_transaction():
+        try:
+            err = await ProxyError.get(proxy=self, name=err_name)
+        except tortoise.exceptions.DoesNotExist:
+            self.log.info(f'Creating New Error {err_name}')
+            err = await ProxyError.create(proxy=self, name=err_name, count=1)
         else:
-            err.num = err.num + 1
+            self.log.info(f'Updating Error Count {err_name}')
+            err.count += 1
+            await err.save()
+
+            # err = await self.find_error(exc)
+            # if not err:
+            #     err = ProxyError(proxy=self, name=err_name, count=1)
+            #     try:
+            #         await err.save()
+            #     except tortoise.exceptions.IntegrityError:
+            #         errors = await self.fetch_related('errors')
+            #         import ipdb; ipdb.set_trace()
+            #         raise RuntimeError('Creating error save problem.')
+            # else:
+            #     err.count = err.count + 1
+            #     try:
+            #         await err.save()
+            #     except tortoise.exceptions.IntegrityError:
+            #         raise RuntimeError('Updating error count save problem.')
 
         # Make sure we want to save the errors now.
-        await err.save()
+        # await err.save()
         self.update_requests()
 
     def update_requests(self):
@@ -160,6 +184,9 @@ class Proxy(Model, ModelMixin):
         """
         Determines if the proxy meets the provided standards.
         """
+
+        # We might want to lower restrictions on num requests, since we can
+        # just put in the back of the pool.
         if self.num_requests >= num_requests:
             return (False, 'Number of Requests Exceeds Limit')
 
@@ -179,13 +206,13 @@ class Proxy(Model, ModelMixin):
         if self.last_used:
             delta = datetime.now() - self.last_used
             return delta.total_seconds()
-        return None
+        return 0.0
 
     @property
     def priority(self):
         # This is from ProxyBroker model
         # We are going to want to update this for our use case.
-        return (self.error_rate, self.avg_resp_time)
+        return (self.time_since_used, self.avg_resp_time, self.error_rate)
 
     @property
     def address(self):

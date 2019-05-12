@@ -1,7 +1,5 @@
 aiosqlite
 aiofiles
-aioitertools
-asyncpg
 aiohttp
 asyncio
 proxybroker

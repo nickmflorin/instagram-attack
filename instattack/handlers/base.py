@@ -32,12 +32,6 @@ class RequestHandler(Handler):
         self._connection_limit_per_host = connection_limit_per_host
         self._connection_keepalive_timeout = connection_keepalive_timeout
 
-    def _notify_request(self, context, retry=1):
-        message = f'Sending {self.__method__} Request'
-        if retry != 1:
-            message = f'Sending {self.__method__} Request, Retry {retry}'
-        self.log.debug(message, extra={'context': context})
-
     @property
     def user_agent(self):
         if not self._user_agent:

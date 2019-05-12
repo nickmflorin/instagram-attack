@@ -2,12 +2,46 @@ import asyncio
 
 from itertools import islice
 
+from instattack.lib import AppLogger
+
+
+log = AppLogger(__name__)
+
 
 async def coro_exc_wrapper(coro, loop):
     try:
         await coro
     except Exception as e:
         loop.call_exception_handler({'message': str(e), 'exception': e})
+
+
+async def first_successful_completion(coro, args, batch, limit):
+    """
+    Runs single coroutine in batches until it returns a successful response or
+    the number of attempts of the coroutine reaches the max limit.
+
+    The batch number is maintained as tasks are finished and do not return
+    the desired non-null result.
+    """
+    futures = [
+        asyncio.create_task(coro(*args))
+        for i in range(batch)
+    ]
+
+    attempts = batch
+    while len(futures) > 0:
+        await asyncio.sleep(0)  # Not sure why this is necessary but it is.
+        for f in futures:
+            if f.done():
+                if f.result():
+                    asyncio.create_task(cancel_remaining_tasks(futures=futures))
+                    return f.result()
+                else:
+                    if f.exception():
+                        log.error(f.exception())
+                    futures.remove(f)
+                    if attempts < limit:
+                        futures.append(asyncio.create_task(coro(*args)))
 
 
 # Not currently being used but we want to hold onto.
@@ -30,8 +64,7 @@ def limited_as_completed(coros, limit):
                     futures.remove(f)
                     try:
                         newf = next(coros)
-                        futures.append(
-                            asyncio.ensure_future(newf))
+                        futures.append(asyncio.ensure_future(newf))
                     except StopIteration as e:
                         pass
                     return f.result()

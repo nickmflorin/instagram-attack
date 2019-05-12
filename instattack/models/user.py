@@ -1,7 +1,11 @@
 from __future__ import absolute_import
 
-from tortoise.models import Model
+import asyncio
+from datetime import datetime
+
+from tortoise.exceptions import DoesNotExist
 from tortoise import fields
+from tortoise.models import Model
 
 from instattack import settings
 from instattack.lib import AppLogger, stream_raw_data
@@ -155,12 +159,39 @@ class User(Model):
             return attempts[:limit]
         return attempts
 
-    async def generate_attempts(self, limit=None):
+    async def write_attempts(self, queue):
+
+        async def write_attempt(password):
+            try:
+                attempt = await UserAttempt.get(
+                    password=password,
+                    user=self,
+                )
+            except DoesNotExist:
+                await UserAttempt.create(
+                    password=password,
+                    user=self,
+                    last_attempt=datetime.now(),
+                    success=False,  # HAVE TO FIX THIS NO WAY OF KNOWING SUCCESS
+                )
+            else:
+                attempt.last_attempt = datetime.now()
+                attempt.success = False   # HAVE TO FIX THIS NO WAY OF KNOWING SUCCESS
+                await attempt.save()
+
+        tasks = []
+        while not queue.empty():
+            password = queue.get_nowait()
+            tasks.append(asyncio.create_task(write_attempt(password)))
+
+        return asyncio.gather(*tasks)
+
+    async def generate_attempts(self, loop, limit=None):
         """
         For now, just returning current passwords for testing, but we will
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        generator = password_gen(self, limit=limit)
+        generator = password_gen(loop, self, limit=limit)
         async for password in generator():
             yield password

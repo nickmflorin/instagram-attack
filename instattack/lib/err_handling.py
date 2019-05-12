@@ -35,29 +35,53 @@ def get_exception_request_method(exc):
     return None
 
 
-def is_async_caller():
+def is_async_func(f):
+    if any([inspect.iscoroutinefunction(f),
+            inspect.isgeneratorfunction(f),
+            inspect.iscoroutine(f),
+            inspect.isawaitable(f),
+            inspect.isasyncgenfunction(f),
+            inspect.isasyncgen(f)]):
+        return True
+    else:
+        return False
+
+
+def is_async_caller(log):
 
     # Get the calling frame
-    caller = inspect.currentframe().f_back.f_back
+    caller = inspect.currentframe().f_back.f_back.f_back
 
     # Pull the function name from FrameInfo
     func_name = inspect.getframeinfo(caller)[2]
+    log.critical('Checking Async : %s' % func_name)
 
     # Get the function object
     f = caller.f_locals.get(
         func_name,
         caller.f_globals.get(func_name)
     )
+    # If the functino does not exist, it might be a method.
+    if not f:
+        if 'self' in caller.f_locals:
+            f = getattr(caller.f_locals['self'], func_name)
+            log.critical('Is method')
+    else:
+        log.critical('is not method')
 
     # If there's any indication that the function object is a
     # coroutine, return True. inspect.iscoroutinefunction() should
     # be all we need, the rest are here to illustrate.
     if any([inspect.iscoroutinefunction(f),
             inspect.isgeneratorfunction(f),
-            inspect.iscoroutine(f), inspect.isawaitable(f),
-            inspect.isasyncgenfunction(f), inspect.isasyncgen(f)]):
+            inspect.iscoroutine(f),
+            inspect.isawaitable(f),
+            inspect.isasyncgenfunction(f),
+            inspect.isasyncgen(f)]):
+        log.critical('is async')
         return True
     else:
+        log.critical('is not async')
         return False
 
 

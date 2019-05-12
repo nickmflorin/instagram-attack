@@ -47,9 +47,9 @@ class UsersShowApplication(UsersApplication):
 
     def main(self, item, username):
         with self.loop_session() as loop:
-            loop.run_until_complete(self.operation(item, username))
+            loop.run_until_complete(self.operation(loop, item, username))
 
-    async def operation(self, item, username):
+    async def operation(self, loop, item, username):
         method = self.methods.get(item)
         if not method:
             self.log.error(f'Invalid argument {item}.')
@@ -60,28 +60,28 @@ class UsersShowApplication(UsersApplication):
             self.log.error('User does not exist.')
             return
 
-        await method(user)
+        await method(loop, user)
 
-    async def passwords(self, user):
+    async def passwords(self, loop, user):
         self.log.before_lines()
         async for item in user.get_passwords(limit=self.limit):
             self.log.line(item)
 
-    async def alterations(self, user):
+    async def alterations(self, loop, user):
         self.log.before_lines()
         async for item in user.get_alterations(limit=self.limit):
             self.log.line(item)
 
-    async def numerics(self, user):
+    async def numerics(self, loop, user):
         self.log.before_lines()
         async for item in user.get_numerics(limit=self.limit):
             self.log.line(item)
 
-    async def attempts(self, user):
+    async def attempts(self, loop, user):
         if self.new:
             generated = []
             self.log.before_lines()
-            async for item in user.generate_attempts(limit=self.limit):
+            async for item in user.generate_attempts(loop, limit=self.limit):
                 self.log.line(item)
                 generated.append(item)
 

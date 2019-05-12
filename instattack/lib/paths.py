@@ -1,15 +1,6 @@
-import logging
 from plumbum.path import LocalPath
 
 from instattack import settings
-from instattack.exceptions import EnvFileMissing
-
-
-log = logging.getLogger(__name__)
-
-
-# Environment file is not currently used but we may want to implement this
-# functionality.
 
 
 def dir_str(path):
@@ -21,14 +12,23 @@ def get_root():
     return [p for p in parents if p.name == settings.APP_NAME][0].parent
 
 
-def get_env_file(strict=False):
+def relative_to_root(path):
+    """
+    Returns a string representation of the path localized to the repository
+    for easier and less hairy filepaths while logging.
+    """
+    if not isinstance(path, LocalPath):
+        path = LocalPath(path)
+    app_index = path.parts.index(settings.APP_NAME)
+    return dir_str(LocalPath(*path.parts[app_index - 1:]))
+
+
+def get_env_file():
 
     root = get_root()
     filepath = root / '.env'
 
     if not filepath.exists() or not filepath.is_file():
-        if strict:
-            raise EnvFileMissing(filepath)
         filepath.touch()
     return filepath
 
@@ -58,8 +58,6 @@ def read_env_file():
     for i, line in enumerate(lines):
 
         if '=' not in line or len(line.split('=')) != 2:
-            log.warning(f'Invalid line in {file.name} at index {i}.')
-            log.warning(line)
             continue
         else:
             parts = line.split('=')

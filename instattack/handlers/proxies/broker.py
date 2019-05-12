@@ -1,6 +1,7 @@
 from proxybroker import Broker
 
 from instattack.handlers.control import Control
+from instattack.handlers.utils import starting, stopping
 
 
 class CustomBroker(Broker, Control):
@@ -36,20 +37,20 @@ class CustomBroker(Broker, Control):
         self.engage(**kwargs)
         super(CustomBroker, self).__init__(proxies, **self.broker_args)
 
+    @starting
     async def find(self, loop):
         self.log.debug('Waiting on Start Event...')
         await self.start_event.wait()
-        async with self.starting(loop):
-            await super(CustomBroker, self).find(**self.find_args)
+        await super(CustomBroker, self).find(**self.find_args)
 
+    @stopping
     def stop(self, loop, *args, **kwargs):
         """
         This has to by a synchronous method because ProxyBroker attaches signals
         to the overridden stop method.
         """
-        with self.stopping(loop):
-            self._proxies.put_nowait(None)
-            super(CustomBroker, self).stop(*args, **kwargs)
+        self._proxies.put_nowait(None)
+        super(CustomBroker, self).stop(*args, **kwargs)
 
     def increment_limit(self):
         """

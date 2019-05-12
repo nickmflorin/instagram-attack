@@ -200,3 +200,25 @@ class ProxyArgs(ProxyPoolArgs, ProxyFinderArgs, ProxyBrokerArgs):
         config.update(self.proxy_broker_config(method=method))
         config.update(self.proxy_finder_config(method=method))
         return config
+
+
+class TokenArgs(ConfigArgs):
+
+    __group__ = 'Instagram Tokens'
+
+    _token_max_fetch_time = cli.SwitchAttr(
+        "--token_max_fetch_time", float,
+        default=10.0,
+        group=__group__,
+    )
+
+
+class PasswordArgs(ConfigArgs):
+
+    __group__ = 'Instagram Passwords'
+
+    _pwlimit = cli.SwitchAttr(
+        "--pwlimit", int,
+        default=None,
+        group=__group__,
+    )

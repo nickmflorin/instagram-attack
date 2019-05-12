@@ -27,6 +27,7 @@ class ProxyApplication(BaseApplication, ProxyArgs):
 class ProxyTest(ProxyApplication):
     """
     Will be used to test proxies against simple request URLs.
+    Not sure if we will maintain this.
     """
     pass
 
@@ -39,11 +40,12 @@ class ProxyClean(ProxyApplication):
     """
 
     def main(self, arg):
-        with self.loop_session() as loop:
-            if arg == 'errors':
-                loop.run_until_complete(self.clean_errors())
-            else:
-                raise ArgumentError(f'Invalid argument {arg}.')
+        loop = asyncio.get_event_loop()
+
+        if arg == 'errors':
+            loop.run_until_complete(self.clean_errors())
+        else:
+            raise ArgumentError(f'Invalid argument {arg}.')
 
     async def clean_errors(self):
         progress = CustomProgressbar(ProxyError.count(), label='Cleaning Errors')
@@ -56,30 +58,34 @@ class ProxyClean(ProxyApplication):
 
 @ProxyApplication.subcommand('collect')
 class ProxyCollect(ProxyApplication):
-
-    # Only applicable if --show is False (i.e. we are saving).
-    clear = cli.Flag("--clear")
+    """
+    TODO:
+    ----
+    Incorporate an --ensure_new flag, which would use preexisting proxies saved
+    make sure that we are only creating new proxies and now updating any.
+    """
 
     def main(self):
-        with self.loop_session() as loop:
+        loop = asyncio.get_event_loop()
 
-            # Not really needed for this case but is needed for other cases that
-            # depend on the handler pool.
-            start_event = asyncio.Event()
-            lock = asyncio.Lock()
+        # Not really needed for this case but is needed for other cases that
+        # depend on the handler pool.
+        start_event = asyncio.Event()
+        lock = asyncio.Lock()
 
-            handler = ProxyHandler(
-                method=self._method,
-                lock=lock,
-                start_event=start_event,
-                **self.proxy_config(method=self._method),
-            )
-            loop.run_until_complete(self.collect(loop, handler))
+        handler = ProxyHandler(
+            method=self._method,
+            lock=lock,
+            start_event=start_event,
+            **self.proxy_config(method=self._method),
+        )
+        loop.run_until_complete(self.collect(loop, handler))
 
     async def collect(self, loop, handler):
         try:
-            await handler.run(loop, prepopulate=False, save=True)
+            await handler.run(loop, prepopulate=False)
         except PoolNoProxyError as e:
             self.log.error(e)
         finally:
             await handler.stop(loop)
+            await handler.save(loop)

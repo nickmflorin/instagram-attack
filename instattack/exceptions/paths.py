@@ -22,12 +22,6 @@ class PathException(AppException):
             self.filename = self.pathname.name
 
 
-class EnvFileMissing(PathException):
-
-    def __str__(self):
-        return f"The .env file does not exist at {dir_str(self.filepath)}."
-
-
 class DirDoesNotExist(PathException):
 
     def __str__(self):

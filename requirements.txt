@@ -7,7 +7,6 @@ aiosqlite==0.10.0
 appnope==0.1.0
 async-timeout==3.0.1
 asyncio==3.4.3
-asyncpg==0.18.3
 attrs==19.1.0
 backcall==0.1.0
 cffi==1.12.3

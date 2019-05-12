@@ -29,11 +29,11 @@ instattack/handlers/control.py
 instattack/handlers/passwords.py
 instattack/handlers/results.py
 instattack/handlers/tokens.py
+instattack/handlers/utils.py
 instattack/handlers/proxies/__init__.py
 instattack/handlers/proxies/broker.py
 instattack/handlers/proxies/handler.py
 instattack/handlers/proxies/pool.py
-instattack/handlers/proxies/utils.py
 instattack/lib/__init__.py
 instattack/lib/err_handling.py
 instattack/lib/http.py
@@ -44,7 +44,6 @@ instattack/lib/threading.py
 instattack/lib/validation.py
 instattack/lib/logger/__init__.py
 instattack/lib/logger/formats.py
-instattack/lib/logger/formatter.py
 instattack/lib/logger/items.py
 instattack/lib/logger/logger.py
 instattack/lib/logger/utils.py
