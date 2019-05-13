@@ -1,21 +1,19 @@
 import asyncio
 import heapq
 import itertools
-from urllib.parse import urlparse
 
 from proxybroker import ProxyPool
 
-from instattack import settings
+from instattack.lib import starting
 from instattack.models import Proxy
 from instattack.models.utils import stream_proxies, update_or_create_proxies
 
-from instattack.exceptions import ProxyPoolException, PoolNoProxyError
+from instattack.exceptions import PoolNoProxyError
 
-from instattack.handlers.control import Control
-from instattack.handlers.utils import starting
+from instattack.handlers.base import MethodHandlerMixin
 
 
-class CustomProxyPool(ProxyPool, Control):
+class CustomProxyPool(ProxyPool, MethodHandlerMixin):
     """
     Imports and gives proxies from queue on demand.
 
@@ -64,14 +62,9 @@ class CustomProxyPool(ProxyPool, Control):
         # Mapping of proxies to entries in the heapq
         self.proxy_finder = {}
 
-    @property
-    def scheme(self):
-        scheme = urlparse(settings.URLS[self.__method__]).scheme
-        return scheme.upper()
-
     # TODO: Create some type of limit so we do not overdue it and make the queue
     # take a long time to resolve.
-    async def prepopulate(self, loop):
+    async def prepopulate(self, loop, limit=None):
         """
         When initially starting, it sometimes takes awhile for the proxies with
         valid credentials to populate and kickstart the password consumer.
@@ -79,69 +72,53 @@ class CustomProxyPool(ProxyPool, Control):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        self.log.info('Prepopulating Proxy Pool')
+        self.log.start('Prepopulating Proxy Pool')
 
         num_prepopulated = []
-        async for proxy in stream_proxies(method=self.__method__):
-            num_prepopulated.append(proxy)
+        async for proxy in stream_proxies(method=self.__method__, limit=limit):
 
-            # TEMPORARY LIMIT
-            if len(num_prepopulated) < 25:
-                await self.put(proxy)
-            else:
-                break
+            # This should almost be guaranteed by the __method__ filter, but
+            # not certain.
+            if self.scheme not in proxy.schemes:
+                self.log.warning('Could not propopulate proxy, invalid scheme.')
+
+            num_prepopulated.append(proxy)
+            await self.put(proxy)
 
         if len(num_prepopulated) != 0:
-            self.log.info(f"Prepopulated {len(num_prepopulated)} Proxies")
+            self.log.complete(f"Prepopulated {len(num_prepopulated)} Proxies")
         else:
-            self.log.error('No Proxies to Prepopulate')
+            self.log.warning('No Proxies to Prepopulate')
 
     # TODO: We should only run the proxybroker version if there are not enough
     # proxies that are from prepopulation, because it can slow things down.  For
     # GET requests, we should maybe limit the pool size to something like 20.
     @starting
-    async def run(self, loop, prepopulate=True):
+    async def run(self, loop, prepopulate=True, prepopulate_limit=None):
         """
         Retrieves proxies from the queue that is populated from the Broker and
         then puts these proxies in the prioritized heapq pool.
 
-        We do not want to allow the save method to be called during run because
-        we need to wait for the handler to shut down before we save any proxies
-        in the pool.
-
-        Pt. 1
-        -----
         Prepopulates proxies if the flag is set to put proxies that we previously
         saved into the pool.
 
         Pt. 2
         -----
-        Run until the broker stops sending proxies, in which case we will
-        stop processing them, but the pool proxies can still be accessed.
-
-        If the broker returns a proxy will a value of None, that means there are
-        no more to find (we reached the limit) and we want to stop the pool
-        from continuing to process them.
-
-        Note that this does NOT mean the value of _pool will be reset to [], we
-        still need those.
-
-        TODO:
-        ----
-        Are there ever cases where we might want to save proxies on the fly?
-        Then use the PK instead of the unique_id field?
+        Run until the broker returns a proxy with a value of None, which means that
+        there are no more proxies to find (we reached the limit defined by
+        proxy_limit).  We want the pool to stop processing the proxies, but keep
+        the proxies in the _pool so they can still be retrieved.
         """
         if prepopulate:
             if self._prepopulated:
-                raise ProxyPoolException("Pool was already prepopulated.")
-            await self.prepopulate(loop)
+                raise RuntimeError("Pool was already prepopulated.")
+            await self.prepopulate(loop, limit=prepopulate_limit)
 
+        # Right now, we are only using proxies that are in the pool to get it
+        # working without proxybroker.  We will eventuallly build proxybroker
+        # back in.
         self.start_event.set()
         return
-
-        def proxy_in_pool(fut):
-            if fut.exception():
-                self.log.error(fut.exception())
 
         tasks = []
         while True:
@@ -157,10 +134,8 @@ class CustomProxyPool(ProxyPool, Control):
                     })
                 else:
                     task = asyncio.create_task(self.put(proxy))
-                    task.add_done_callback(proxy_in_pool)
                     tasks.append(task)
             else:
-                # Pt. 3
                 break
 
         await asyncio.gather(*tasks)
@@ -223,36 +198,6 @@ class CustomProxyPool(ProxyPool, Control):
         """
         Add a new proxy or udpate the priority of an existing proxy in the pool.
 
-        Pt. (1)
-        -------
-        Makes sure that proxy is still valid according to what we require for
-        metrics.  This can change after a proxy that was initially valid is used.
-        ** TOO MANY REQUESTS **
-
-        TODO:  We should maybe start storing a `valid` attribute on the proxy
-               and filter by that value when we are retrieving?
-
-        Pt. (2)
-        -------
-        Updating Proxy
-
-        This means whenever a proxy is used and put back in the queue, it's
-        priority or other attributes will have changed, so it will be replaced.
-
-        If we are updating the priority of a proxy in the queue, we cannot remove
-        it completely because it would break the heapq invariants.  Instead,
-        we mark it as removed and add the other proxy.
-
-        Pt. (2a):
-        ---------
-        Updating Proxy
-
-        Only want to update if the proxies are different.  Comparison excludes
-        the value of the `saved` field.  We might want to restrict the fields
-        we are looking at when calling `manage proxies collect`, since we don't
-        need to update for slight variations to those metrics (they would be
-        updated anyways when running live).
-
         TODO:
         ----
         Should we maybe start saving proxies regardless of whether or not
@@ -262,12 +207,12 @@ class CustomProxyPool(ProxyPool, Control):
         proxies when they are created, of we can use another value to indicate
         the uniqueness of the proxy.
         """
-
-        # This will reset num_requesets to 0 which is what we want.
         if not isinstance(proxy, Proxy):
             raise RuntimeError('Invalid proxy passed in.')
 
-        # Pt. (1)
+        # Makes sure that proxy is still valid according to what we require for
+        # metrics.  This can change after a proxy that was initially valid is used.
+        # ** TOO MANY REQUESTS **
         valid, reason = proxy.evaluate(
             num_requests=self._min_req_proxy,
             error_rate=self._max_error_rate,
@@ -286,14 +231,19 @@ class CustomProxyPool(ProxyPool, Control):
                 })
             return
 
-        # Pt. (2): Updating Proxy
+        # Updating Proxy
         if proxy.unique_id in self.proxy_finder:
 
-            # Pt. (2a)
+            # This means whenever a proxy is used and put back in the queue, it's
+            # priority or other attributes will have changed, so it will be replaced.
+
+            # If we are updating the priority of a proxy in the queue, we cannot remove
+            # it completely because it would break the heapq invariants.  Instead,
+            # we mark it as removed and add the other proxy.
             current_entry = self.proxy_finder[proxy.unique_id]
             current = current_entry[-1]
 
-            # Maybe we have to increment broker limit if the proxies are not different?
+            # Only want to update if the proxies are different.
             differences = current.compare(proxy, return_difference=True)
             if differences:
                 # Make sure we maintain the proxy_limit value.
@@ -327,11 +277,8 @@ class CustomProxyPool(ProxyPool, Control):
 
     async def _remove_proxy(self, proxy, invalid=False, reason=None):
         """
-        Mark an existing proxy as REMOVED.
-        Raise KeyError if not found.
+        Mark an existing proxy as REMOVED. Raise KeyError if not found.
 
-        Pt. (1) Marking as REMOVED
-        --------------------------
         Marking as REMOVED is necessary because in order to update a proxy
         priority in the queue, this is because we cannot simply update or remove
         the entry from heqpq - it will upset the invariant.
@@ -339,8 +286,6 @@ class CustomProxyPool(ProxyPool, Control):
         Solution is to mark the existing entry as removed and add a new entry
         with the revised priority:
         """
-
-        # Pt. (1) Marking as REMOVED
         entry = self.proxy_finder.pop(proxy.unique_id)
         entry[-1] = self.REMOVED
 

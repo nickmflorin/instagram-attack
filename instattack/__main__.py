@@ -5,18 +5,16 @@ from plumbum import local  # noqa
 import signal
 
 from .db import database_init
+from .settings import dir_str
 from .lib import (
     AppLogger, apply_external_loggers, disable_external_loggers,
     progressbar_wrap, cancel_remaining_tasks, validate_log_level,
-    get_env_file, dir_str, write_env_file)
+    get_env_file, write_env_file)
 
 from .cli.base import Instattack
 from .cli.proxies import *  # noqa
 from .cli.attack import *  # noqa
 from .cli.users import *  # noqa
-
-
-log = AppLogger(__name__)
 
 
 """
@@ -36,20 +34,16 @@ def handle_exception(loop, context):
     Not sure if we will keep it or not, since it might add some extra
     customization availabilities, but it works right now.
     """
+    log = AppLogger(f"{__name__}:handle_exception")
+
     extra = {}
     if 'message' in context:
         extra['other'] = context['message']
 
-    log.critical('Found error in exception handler.')
     exc = context['exception']
     log.traceback(exc)
 
-    try:
-        log.info('Shutting Down in Exception Handler')
-        loop.run_until_complete(shutdown(loop))
-    except RuntimeError:
-        log.error('Loop was already shutdown... this should not be happening.')
-        pass
+    loop.run_until_complete(shutdown(loop))
 
 
 def setup_loop(loop):
@@ -72,13 +66,13 @@ def setup_logger():
 
 def setup_environment(args):
     write_env_file({'level': args.level})
-
     filepath = get_env_file()
-    log.info('Loading .env file.')
     load_dotenv(dotenv_path=dir_str(filepath))
 
 
 def start(loop, args):
+
+    log = AppLogger(f"{__name__}:start")
 
     setup_environment(args)
     log.updateLevel()
@@ -88,40 +82,29 @@ def start(loop, args):
 
     setup_loop(loop)
 
-    log.critical("""
-        Big problem right now is managing pool size even with prepoplulated proxies,
-        we should only start pulling proxies in when the pool size is less than
-        some threshold, that is less for the token requests, and then only start
-        the broker if there are no prepopulated proxies left
+    log.note("""
+    Big problem right now is managing pool size even with prepoplulated proxies,
+    we should only start pulling proxies in when the pool size is less than
+    some threshold, that is less for the token requests, and then only start
+    the broker if there are no prepopulated proxies left
 
-        We should also look into saving proxy errors as a JSON dict instead of
-        FOREIGN KEY, that way, we don't have to constantly be writing to the
-        database and can just save the proxy afterwards.
-        """)
+    We should also look into saving proxy errors as a JSON dict instead of
+    FOREIGN KEY, that way, we don't have to constantly be writing to the
+    database and can just save the proxy afterwards.
+    """)
 
     # Log environment is now only for progress bar, we can probably deprecate
     # that.
     with progressbar_wrap():
         try:
             Instattack.run()
-        # We might not need this here because of the exception handler.
-        except Exception as e:
-            log.critical('Found error in exception block.')
-            log.traceback(e)
         finally:
-            # We have to do this just in case errors are caught by both the
-            # handler and the catch block, until we figure out how to handle that,
-            # since we cannot shut down the loop twice.
-            # >>> RuntimeError: This event loop is already running
-            log.info('Shutting Down in Finally Block')
-            try:
-                shutdown(loop)
-            except RuntimeError:
-                log.error('Loop was already shutdown... this should not be happening.')
-                loop.run_until_complete(tortoise.Tortoise.close_connections())
+            shutdown(loop)
 
 
 def shutdown(loop, signal=None):
+    log = AppLogger(f"{__name__}:shutdown")
+
     if signal:
         log.warning(f'Received exit signal {signal.name}...')
 

@@ -1,10 +1,10 @@
 from proxybroker import Broker
 
-from instattack.handlers.control import Control
-from instattack.handlers.utils import starting, stopping
+from instattack.lib import starting, stopping
+from instattack.handlers.base import MethodHandlerMixin
 
 
-class CustomBroker(Broker, Control):
+class CustomBroker(Broker, MethodHandlerMixin):
 
     __name__ = 'Proxy Broker'
 

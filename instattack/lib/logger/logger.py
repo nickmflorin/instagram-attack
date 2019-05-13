@@ -1,14 +1,14 @@
 import logging
 
 import contextlib
+import inspect
 import progressbar
 from plumbum import colors
-from plumbum.path import LocalPath
 import traceback
 import os
 import sys
 
-from instattack.lib.paths import relative_to_root
+from instattack.lib.err_handling import traceback_to
 
 from .formats import LoggingLevels
 from .handlers import BARE_HANDLER, SIMPLE_HANDLER, BASE_HANDLER, ExternalHandler
@@ -64,11 +64,7 @@ def progressbar_wrap():
 class AppLogger(logging.Logger):
 
     def __init__(self, *args, **kwargs):
-        name = args[0]
-        if LocalPath(name).exists():
-            name = relative_to_root(name)
-
-        super(AppLogger, self).__init__(name, *args[1:], **kwargs)
+        super(AppLogger, self).__init__(*args, **kwargs)
         self.line_index = 0
         add_base_handlers(self)
 
@@ -110,28 +106,56 @@ class AppLogger(logging.Logger):
             if isinstance(record.color, str):
                 setattr(record, 'color', colors.fg(record.color))
 
+        if getattr(record, 'frame_correction', None):
+            for key, val in record.frame_correction.items():
+                setattr(record, key, val)
         return record
+
+    def note(self, message, extra=None):
+        extra = extra or {}
+        extra.update(level=LoggingLevels.NOTE, show_level=False)
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        extra.update(frame_correction=tb_context)
+
+        self.info(message, extra=extra)
 
     def start(self, message, extra=None):
         extra = extra or {}
         extra.update(level=LoggingLevels.START, show_level=False)
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        extra.update(frame_correction=tb_context)
+
         self.info(message, extra=extra)
 
     def complete(self, message, extra=None):
         extra = extra or {}
         extra.update(level=LoggingLevels.COMPLETE, show_level=False)
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        extra.update(frame_correction=tb_context)
+
         self.info(message, extra=extra)
 
     def simple(self, message, color=None, extra=None):
         default = {'color': color, 'simple': True}
         extra = extra or {}
         default.update(**extra)
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        default.update(frame_correction=tb_context)
+
         self.info(message, extra=default)
 
     def bare(self, message, color='darkgray', extra=None):
         default = {'color': color, 'bare': True}
         extra = extra or {}
         default.update(**extra)
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        default.update(frame_correction=tb_context)
+
         self.info(message, extra=default)
 
     def before_lines(self):

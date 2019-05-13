@@ -1,33 +1,8 @@
-from plumbum.path import LocalPath
-
 from instattack import settings
 
 
-def dir_str(path):
-    return "%s/%s" % (path.dirname, path.name)
-
-
-def get_root():
-    parents = LocalPath(__file__).parents
-    return [p for p in parents if p.name == settings.APP_NAME][0].parent
-
-
-def relative_to_root(path):
-    """
-    Returns a string representation of the path localized to the repository
-    for easier and less hairy filepaths while logging.
-    """
-    if not isinstance(path, LocalPath):
-        path = LocalPath(path)
-    app_index = path.parts.index(settings.APP_NAME)
-    return dir_str(LocalPath(*path.parts[app_index - 1:]))
-
-
 def get_env_file():
-
-    root = get_root()
-    filepath = root / '.env'
-
+    filepath = settings.ROOT_DIR / '.env'
     if not filepath.exists() or not filepath.is_file():
         filepath.touch()
     return filepath

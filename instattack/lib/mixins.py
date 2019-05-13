@@ -5,12 +5,6 @@ from weakref import WeakKeyDictionary
 from instattack.lib import AppLogger
 
 
-__all__ = ('Control', 'Loggable', )
-
-
-log = AppLogger(__file__)
-
-
 class DynamicProperty(object):
     """
     Base class for properties that provide basic configuration and control
@@ -56,29 +50,7 @@ class DynamicLogger(DynamicProperty):
         return AppLogger(instance.name)
 
 
-class Loggable(object):
+class LoggableMixin(object):
 
     name = Identifier()
     log = DynamicLogger()
-
-
-class Control(Loggable):
-
-    name = Identifier()
-
-    def engage(self, method=None, lock=None, start_event=None, stop_event=None,
-            user=None, queue=None):
-
-        self.__method__ = method
-        self._stopped = False
-        self._started = False
-
-        self.lock = lock
-
-        # TODO: Figure out how to incorporate the start_event into the behavior
-        # of the stopped property.
-        self.stop_event = stop_event
-        self.start_event = start_event
-
-        self.user = user
-        self.queue = queue

@@ -1,16 +1,15 @@
 import asyncio
 
-from instattack.lib import coro_exc_wrapper
+from instattack.lib import starting, stopping
 from instattack.exceptions import ProxyException
 
-from instattack.handlers.base import Handler
-from instattack.handlers.utils import starting, stopping
+from instattack.handlers.base import MethodHandler
 
 from .broker import CustomBroker
 from .pool import CustomProxyPool
 
 
-class ProxyHandler(Handler):
+class ProxyHandler(MethodHandler):
 
     __name__ = 'Proxy Handler'
 

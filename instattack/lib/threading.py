@@ -1,7 +1,5 @@
 import asyncio
 
-from itertools import islice
-
 from instattack.lib import AppLogger
 
 
@@ -15,7 +13,7 @@ async def coro_exc_wrapper(coro, loop):
         loop.call_exception_handler({'message': str(e), 'exception': e})
 
 
-async def first_successful_completion(coro, args, batch, limit):
+async def limit_on_success(coros, batch_size, max_tries=None):
     """
     Runs single coroutine in batches until it returns a successful response or
     the number of attempts of the coroutine reaches the max limit.
@@ -23,38 +21,49 @@ async def first_successful_completion(coro, args, batch, limit):
     The batch number is maintained as tasks are finished and do not return
     the desired non-null result.
     """
-    futures = [
-        asyncio.create_task(coro(*args))
-        for i in range(batch)
-    ]
+    futures = []
+    for i in range(batch_size):
+        c = await coros.__anext__()
+        futures.append(asyncio.create_task(c))
 
-    attempts = batch
+    attempts = batch_size
     while len(futures) > 0:
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
         for f in futures:
             if f.done():
+
+                # If the future returned a result, schedule the remaining tasks
+                # to be cancelled and return the result.
                 if f.result():
                     asyncio.create_task(cancel_remaining_tasks(futures=futures))
                     return f.result()
                 else:
                     if f.exception():
                         log.error(f.exception())
+
                     futures.remove(f)
-                    if attempts < limit:
-                        futures.append(asyncio.create_task(coro(*args)))
+
+                    if not max_tries or attempts < max_tries:
+                        try:
+                            newc = await coros.__anext__()
+                            futures.append(asyncio.create_task(newc))
+                        except StopIteration as e:
+                            pass
 
 
-# Not currently being used but we want to hold onto.
-def limited_as_completed(coros, limit):
+async def limit_as_completed(coros, batch_size, stop_event=None):
     """
-    Equivalent of asyncio.as_completed(tasks) except that it limits the number
-    of concurrent tasks at any given time, and when that number falls below
-    the limit it adds tasks back into the pool.
+    Takes a generator yielding coroutines and runs the coroutines concurrently,
+    similarly to asyncio.as_completed(tasks), except that it limits the number
+    of concurrent tasks at any given time, specified by `batch_size`.
+
+    When coroutines complete, and the pool of concurrent tasks drops below the
+    batch_size, coroutines will be added to the batch until there are none left.and
     """
-    futures = [
-        asyncio.ensure_future(c)
-        for c in islice(coros, 0, limit)
-    ]
+    futures = []
+    for i in range(batch_size):
+        c = await coros.__anext__()
+        futures.append(asyncio.create_task(c))
 
     async def first_to_finish():
         while True:
@@ -63,13 +72,17 @@ def limited_as_completed(coros, limit):
                 if f.done():
                     futures.remove(f)
                     try:
-                        newf = next(coros)
-                        futures.append(asyncio.ensure_future(newf))
+                        newc = await coros.__anext__()
+                        futures.append(asyncio.create_task(newc))
                     except StopIteration as e:
                         pass
                     return f.result()
+
     while len(futures) > 0:
-        yield first_to_finish()
+        if not stop_event.is_set():
+            yield first_to_finish()
+        else:
+            asyncio.create_task(cancel_remaining_tasks(futures=futures))
 
 
 async def cancel_remaining_tasks(futures=None):

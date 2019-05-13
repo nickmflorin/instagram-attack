@@ -2,11 +2,10 @@ from platform import python_version
 from plumbum import cli
 import sys
 
-from instattack.lib import validate_log_level
-from instattack.handlers.control import Loggable
+from instattack.lib import LoggableMixin, validate_log_level
 
 
-class BaseApplication(cli.Application, Loggable):
+class BaseApplication(cli.Application, LoggableMixin):
     """
     Used so that we can easily extend Instattack without having to worry about
     overriding the main method.

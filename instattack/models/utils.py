@@ -3,7 +3,6 @@ from plumbum import local
 from tortoise.transactions import in_transaction
 
 from instattack import settings
-from instattack.db import database_init
 
 from instattack.lib import AppLogger, validate_method
 from .proxies import Proxy
@@ -52,7 +51,10 @@ def get_data_dir():
 async def stream_proxies(method, limit=None):
 
     method = validate_method(method)
-    async for proxy in Proxy.filter(method=method).all():
+    qs = Proxy.filter(method=method).all()
+    if limit:
+        qs = qs.limit(limit)
+    async for proxy in qs:
         yield proxy
 
 

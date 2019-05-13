@@ -10,18 +10,16 @@ from typing import List, Any
 
 import tortoise
 from tortoise import fields
-
 from tortoise.models import Model
 
 from instattack import settings
-from instattack.lib import validate_method
-from instattack.handlers.control import Loggable
+from instattack.lib import LoggableMixin, validate_method
 
 
 __all__ = ('Proxy', 'ProxyError', )
 
 
-class ModelMixin(Loggable):
+class ModelMixin(LoggableMixin):
 
     @classmethod
     def count_all(cls):
@@ -105,13 +103,17 @@ class Proxy(Model, ModelMixin):
         await super(Proxy, self).save(*args, **kwargs)
 
     @classmethod
-    async def from_proxybroker(cls, proxy, method, save=False):
+    async def from_proxybroker(cls, proxy, method):
         """
         We need to reimplement the handling of errors from the proxy broker
         so they can possibly translate more easiy.
+
+        TODO:
+        ----
+
+        Maybe find a way to translate proxy broker errors to our error system.
+        Come up with a better error classification scheme.
         """
-        # TODO: Maybe find a way to translate proxy broker errors to our error
-        # system.
         broker_errors = proxy.stat['errors']
 
         model_errors = []
@@ -124,8 +126,6 @@ class Proxy(Model, ModelMixin):
             num_requests=0,  # Our reference of num_requests differs from ProxyBroker
             schemes=list(proxy.schemes),
         )
-        # if save:
-        #     await _proxy.save()
         return _proxy
 
     async def find_error(self, exc):
@@ -140,40 +140,19 @@ class Proxy(Model, ModelMixin):
         return None
 
     async def add_error(self, exc):
+        # TODO: Come up with a better error classification scheme.
         err_name = exc.__class__.__name__
 
-        # async with tortoise.transactions.in_transaction():
         try:
             err = await ProxyError.get(proxy=self, name=err_name)
         except tortoise.exceptions.DoesNotExist:
-            self.log.info(f'Creating New Error {err_name}')
             err = await ProxyError.create(proxy=self, name=err_name, count=1)
         else:
-            self.log.info(f'Updating Error Count {err_name}')
+            self.log.debug(f'Updating Error Count {err_name} to {err.count + 1}')
             err.count += 1
             await err.save()
 
-            # err = await self.find_error(exc)
-            # if not err:
-            #     err = ProxyError(proxy=self, name=err_name, count=1)
-            #     try:
-            #         await err.save()
-            #     except tortoise.exceptions.IntegrityError:
-            #         errors = await self.fetch_related('errors')
-            #         import ipdb; ipdb.set_trace()
-            #         raise RuntimeError('Creating error save problem.')
-            # else:
-            #     err.count = err.count + 1
-            #     try:
-            #         await err.save()
-            #     except tortoise.exceptions.IntegrityError:
-            #         raise RuntimeError('Updating error count save problem.')
-
-        # Make sure we want to save the errors now.
-        # await err.save()
-        self.update_requests()
-
-    def update_requests(self):
+    def just_used(self):
         self.update_time()
         self.num_requests += 1
 
