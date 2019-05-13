@@ -27,6 +27,15 @@ class Format(object):
             text = self.wrapper % text
         return text
 
+    def without_text_decoration(self):
+        undecorated = [c for c in self.colors
+            if c not in [colors.underline, colors.bold]]
+        return Format(
+            *undecorated,
+            wrapper=self.wrapper,
+            format_with_wrapper=self.format_with_wrapper
+        )
+
 
 class FormattedEnum(Enum):
 
@@ -40,12 +49,31 @@ class FormattedEnum(Enum):
 class LoggingLevels(FormattedEnum):
 
     NOTE = Format(colors.fg('LightGray'))
-    START = Format(colors.fg('CadetBlueA'))
-    STOP = Format(colors.fg('Red3'))
-    COMPLETE = Format(colors.fg('Green'))
-    CRITICAL = Format(colors.fg('Yellow'), colors.bg('Black'), colors.bold,
-        wrapper="[!] %s", format_with_wrapper=True)
-    ERROR = Format(colors.fg('Red'), colors.underline)
+    START = Format(
+        colors.fg('CadetBlueA'),
+        wrapper="[+] %s",
+        format_with_wrapper=True
+    )
+    STOP = Format(
+        colors.fg('Red3'),
+        wrapper="[x] %s",
+        format_with_wrapper=True
+    )
+    COMPLETE = Format(
+        colors.fg('DarkOliveGreen3'),
+        wrapper="[-] %s",
+        format_with_wrapper=True
+    )
+    CRITICAL = Format(
+        colors.fg('Red1'), colors.bold,
+        wrapper="[!] %s",
+        format_with_wrapper=True
+    )
+    ERROR = Format(
+        colors.fg('Red'), colors.underline,
+        wrapper="[!] %s",
+        format_with_wrapper=True
+    )
     WARNING = Format(colors.fg('Gold3A'))
     NOTICE = Format(colors.fg('LightSkyBlue3A'))
     INFO = Format(colors.fg('DeepSkyBlue4B'))
@@ -53,7 +81,7 @@ class LoggingLevels(FormattedEnum):
 
     @property
     def message_formatter(self):
-        return Format(self.format.colors[0])
+        return self.format.without_text_decoration()
 
 
 class RecordAttributes(FormattedEnum):
@@ -66,7 +94,7 @@ class RecordAttributes(FormattedEnum):
     NAME = Format(colors.fg('DarkGray'))
     PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
     TOKEN = Format(colors.red)
-    STATUS_CODE = Format(colors.fg('Orange3'), wrapper="[%s]")
+    STATUS_CODE = Format(colors.fg('DarkGray'), wrapper="[%s]")
     METHOD = Format(colors.fg('DarkGray'), colors.bold)
     REASON = Format(colors.fg('DarkGray'))
     TASK = Format(colors.fg('LightBlue'), wrapper="(%s)")

@@ -1,7 +1,7 @@
 from plumbum import colors
 
 from .items import LogItem, LogItemLine, LogItemLines
-from .formats import Format, RecordAttributes
+from .formats import Format, RecordAttributes, LoggingLevels
 from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
     get_record_message, get_level_formatter, get_message_formatter,

@@ -108,6 +108,8 @@ class TokenHandler(GetRequestHandler):
                     # Start storing number of successful/unsuccessful requests.
                     # Note that proxy was a good candidate.
                     loop.call_soon(self.maintain_proxy, proxy)
+                    self.log.complete('Received Token',
+                        extra={'context': context, 'response': response})
                     return token
 
         # Start storing number of successful/unsuccessful requests.
