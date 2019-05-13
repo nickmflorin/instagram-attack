@@ -8,14 +8,11 @@ from tortoise import fields
 from tortoise.models import Model
 
 from instattack import settings
-from instattack.lib import AppLogger, stream_raw_data
+from instattack.logger import AppLogger
+from instattack.lib import stream_raw_data
 from instattack.exceptions import UserDirDoesNotExist, UserFileDoesNotExist
 
-from .passwords import password_gen
-from .utils import get_data_dir
-
-
-log = AppLogger(__file__)
+from instattack.core.passwords import password_gen
 
 
 class UserAttempt(Model):
@@ -38,6 +35,8 @@ class User(Model):
     save, there is a potential we will hit a bug if we try to read from the
     files and they were deleted.
     """
+    log = AppLogger('User')
+
     id = fields.IntField(pk=True)
     username = fields.CharField(max_length=30)
 
@@ -83,7 +82,7 @@ class User(Model):
             directory.delete()
 
     def directory(self):
-        return get_data_dir() / self.username
+        return settings.USER_DIR / self.username
 
     def create_directory(self):
         directory = self.directory()
@@ -124,7 +123,7 @@ class User(Model):
                 # TODO: In rare care where the path is a directory, we may want
                 # to delete it.
                 e = UserFileDoesNotExist(filepath, self)
-                log.warning(e)
+                self.log.warning(e)
                 self.create_file(filename)
 
     def streamed_data(self, filename, limit=None):
@@ -192,6 +191,10 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        generator = password_gen(loop, self, limit=limit)
+        count = 0
+        generator = password_gen(loop, self)
+
         async for password in generator():
-            yield password
+            if count < limit:
+                yield password
+                count += 1

@@ -1,64 +1,13 @@
 import logging
 
-import contextlib
 import inspect
-import progressbar
 from plumbum import colors
 import traceback
 import os
 import sys
 
-from instattack.lib.err_handling import traceback_to
-
 from .formats import LoggingLevels
-from .handlers import BARE_HANDLER, SIMPLE_HANDLER, BASE_HANDLER, ExternalHandler
-
-
-__all__ = (
-    'AppLogger',
-    'progressbar_wrap',
-    'disable_external_loggers',
-    'apply_external_loggers',
-)
-
-
-def add_base_handlers(logger):
-    for handler in [BARE_HANDLER, SIMPLE_HANDLER, BASE_HANDLER]:
-        logger.addHandler(handler)
-
-
-def disable_external_loggers(*args):
-    for module in args:
-        external_logger = logging.getLogger(module)
-        external_logger.setLevel(logging.CRITICAL)
-
-
-def apply_external_loggers(*args):
-    for module in args:
-        external_logger = logging.getLogger(module)
-        for handler in external_logger.handlers:
-            external_logger.removeHandler(handler)
-
-        external_logger.addHandler(ExternalHandler())
-        external_logger.propagate = False
-
-
-@contextlib.contextmanager
-def progressbar_wrap():
-
-    def _init_progressbar():
-        progressbar.streams.wrap_stderr()
-        progressbar.streams.wrap_stdout()
-
-    def _deinit_progressbar():
-        progressbar.streams.unwrap_stdout()
-        progressbar.streams.unwrap_stderr()
-
-    try:
-        _init_progressbar()
-        yield
-    finally:
-        _deinit_progressbar()
+from .setup import add_base_handlers
 
 
 class AppLogger(logging.Logger):
@@ -112,6 +61,8 @@ class AppLogger(logging.Logger):
         return record
 
     def note(self, message, extra=None):
+        from instattack.lib import traceback_to
+
         extra = extra or {}
         extra.update(level=LoggingLevels.NOTE, show_level=False)
 
@@ -121,6 +72,8 @@ class AppLogger(logging.Logger):
         self.info(message, extra=extra)
 
     def start(self, message, extra=None):
+        from instattack.lib import traceback_to
+
         extra = extra or {}
         extra.update(level=LoggingLevels.START, show_level=False)
 
@@ -129,7 +82,20 @@ class AppLogger(logging.Logger):
 
         self.info(message, extra=extra)
 
+    def stop(self, message, extra=None):
+        from instattack.lib import traceback_to
+
+        extra = extra or {}
+        extra.update(level=LoggingLevels.STOP, show_level=False)
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        extra.update(frame_correction=tb_context)
+
+        self.info(message, extra=extra)
+
     def complete(self, message, extra=None):
+        from instattack.lib import traceback_to
+
         extra = extra or {}
         extra.update(level=LoggingLevels.COMPLETE, show_level=False)
 
@@ -139,6 +105,8 @@ class AppLogger(logging.Logger):
         self.info(message, extra=extra)
 
     def simple(self, message, color=None, extra=None):
+        from instattack.lib import traceback_to
+
         default = {'color': color, 'simple': True}
         extra = extra or {}
         default.update(**extra)
@@ -149,6 +117,8 @@ class AppLogger(logging.Logger):
         self.info(message, extra=default)
 
     def bare(self, message, color='darkgray', extra=None):
+        from instattack.lib import traceback_to
+
         default = {'color': color, 'bare': True}
         extra = extra or {}
         default.update(**extra)
@@ -174,23 +144,27 @@ class AppLogger(logging.Logger):
             self.line(line, color=color, numbered=numbered)
 
     # We might now need this anymore?
-    def traceback(self, ex, ex_traceback=None, raw=False):
+    def traceback(self, ex, raw=False):
         """
         We are having problems with logbook and asyncio in terms of logging
         exceptions with their traceback.  For now, this is a workaround that
         works similiarly.
         """
-        if ex_traceback is None:
-            ex_traceback = ex.__traceback__
+        from instattack.lib import traceback_to
+        extra = {'no_indent': True}
 
+        ex_traceback = ex.__traceback__
         tb_lines = [
             line.rstrip('\n') for line in
             traceback.format_exception(ex.__class__, ex, ex_traceback)
         ]
+
+        tb_context = traceback_to(inspect.stack(), back=1)
+        extra.update(frame_correction=tb_context)
 
         # This can be used if we want to just output the raw error.
         if raw:
             for line in tb_lines:
                 sys.stderr.write("%s\n" % line)
         else:
-            self.error("\n".join(tb_lines), extra={'no_indent': True})
+            self.error("\n".join(tb_lines), extra=extra)

@@ -1,7 +1,9 @@
+aiodns
 aiosqlite
 aiofiles
 aiohttp
 asyncio
+maxminddb
 proxybroker
 plumbum
 tortoise-orm

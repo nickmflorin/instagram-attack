@@ -1,3 +1,4 @@
+from collections import Iterable
 from .formats import RecordAttributes
 
 __all__ = (
@@ -5,6 +6,50 @@ __all__ = (
     'LogItemLine',
     'LogItemLines',
 )
+
+
+def get_off_record_obj(record, param):
+    """
+    Priorities overridden values explicitly provided in extra, and will
+    check record.extra['context'] if the value is not in 'extra'.
+
+    If tier_key is provided and item found is object based, it will try
+    to use the tier_key to get a non-object based value.
+    """
+    if "." in param:
+        parts = param.split(".")
+        if len(parts) > 1:
+            if hasattr(record, parts[0]):
+                return get_off_record_obj(record, '.'.join(parts[1:]))
+            else:
+                return None
+        else:
+            if hasattr(record, parts[0]):
+                return getattr(record, parts[0])
+    else:
+        if hasattr(record, param):
+            return getattr(record, param)
+        return None
+
+
+def get_value(record, params=None, getter=None):
+
+    def sort_priority(param):
+        return param.count(".")
+
+    if params:
+        if isinstance(params, str):
+            params = [params]
+        params = sorted(params, key=sort_priority)
+
+        # Here, each param can be something like "context.index", or "index"
+        # Higher priority is given to less deeply nested versions.
+        for param in params:
+            value = get_off_record_obj(record, param)
+            if value:
+                return value
+    else:
+        return getter(record)
 
 
 class LogAbstractObject(object):
@@ -52,19 +97,20 @@ class LogAbstractObject(object):
                 return formatter(value)
         return value
 
-    def indentation(self, context, **kwargs):
+    def indentation(self, record, **kwargs):
         if not self._indent:
             return ""
         return " " * self._indent
 
-    def value(self, context, **kwargs):
-        value = context[self.id]
-        return self._format_value(
-            value,
-            formatter=self._formatter
-        )
+    def value(self, record, **kwargs):
+        value = get_value(record, params=self.params, getter=self.getter)
+        if value:
+            return self._format_value(
+                value,
+                formatter=self._formatter
+            )
 
-    def prefix(self, context, **kwargs):
+    def prefix(self, record, **kwargs):
         if not self._prefix:
             return ""
         return self._format_value(
@@ -72,12 +118,12 @@ class LogAbstractObject(object):
             formatter=self._prefix_formatter
         )
 
-    def suffix(self, context, **kwargs):
+    def suffix(self, record, **kwargs):
         if not self._suffix:
             return ""
         return self._format_value(self._suffix, formatter=self._suffix_formatter)
 
-    def label(self, context, **kwargs):
+    def label(self, record, **kwargs):
         if not self._label:
             return ""
         return self._format_value(
@@ -85,7 +131,7 @@ class LogAbstractObject(object):
             formatter=self._label_formatter
         )
 
-    def line_index(self, context, **kwargs):
+    def line_index(self, record, **kwargs):
         if not self._line_index:
             return ""
         return self._format_value(
@@ -96,32 +142,28 @@ class LogAbstractObject(object):
 
 class LogItem(LogAbstractObject):
 
-    def __init__(self, id, **kwargs):
-        self.id = id
+    def __init__(self, params=None, getter=None, **kwargs):
+        self.params = params
+        self.getter = getter
         super(LogItem, self).__init__(**kwargs)
 
-    def can_format(self, context):
-        if context.get(self.id) is not None:
-            return True
-        return False
-
-    def suffix(self, context, **kwargs):
+    def suffix(self, record, **kwargs):
         # Don't use a suffix if the item is the last in a LogItemLine group.
         group = kwargs.get('group')
         if group and isinstance(group, LogItemLine):
             index = kwargs['index']
-            if index == len(group.valid_items(context)) - 1:
+            if index == len(group.valid_children(record)) - 1:
                 return ""
-        return super(LogItem, self).suffix(context, **kwargs)
+        return super(LogItem, self).suffix(record, **kwargs)
 
-    def format(self, context, **kwargs):
+    def format(self, record, **kwargs):
         return "%s%s%s%s%s%s" % (
-            self.indentation(context, **kwargs),
-            self.line_index(context, **kwargs),
-            self.label(context, **kwargs),
-            self.prefix(context, **kwargs),
-            self.value(context, **kwargs),
-            self.suffix(context, **kwargs)
+            self.indentation(record, **kwargs),
+            self.line_index(record, **kwargs),
+            self.label(record, **kwargs),
+            self.prefix(record, **kwargs),
+            self.value(record, **kwargs),
+            self.suffix(record, **kwargs)
         )
 
 
@@ -147,34 +189,30 @@ class LogItemGroup(LogAbstractObject):
         else:
             return self.lines
 
-    def can_format(self, context):
-        if any(context.get(id) is not None for id in [item.id for item in self.children]):
-            return True
-        return False
-
-    def valid_items(self, context):
-        valid_items = []
+    def valid_children(self, record):
+        valid_children = []
         for index, item in enumerate(self.children):
-            if item.can_format(context):
-                valid_items.append(item)
-        return valid_items
+            if item.value(record) is not None:
+                valid_children.append(item)
+        return valid_children
 
-    def formatted_items(self, context):
+    def formatted_items(self, record):
         """
         Returns an array of the formatted version of each item in the group,
-        where items are excluded if they cannot be formatted (since the context
+        where items are excluded if they cannot be formatted (since the record
         is not provided).
         """
-        valid_items = self.valid_items(context)
-        return [item.format(context, group=self, index=i)
-            for i, item in enumerate(valid_items)]
+        valid_children = self.valid_children(record)
+        return [item.format(record, group=self, index=i)
+            for i, item in enumerate(valid_children)]
 
-    def value(self, context, **kwargs):
-        formatted_items = self.formatted_items(context)
-        value = self.spacer.join(formatted_items)
-        if self.newline:
-            return "\n" + value
-        return value
+    def value(self, record, **kwargs):
+        if len(self.valid_children(record)) != 0:
+            formatted_items = self.formatted_items(record)
+            value = self.spacer.join(formatted_items)
+            if self.newline:
+                return "\n" + value
+            return value
 
 
 class LogItemLine(LogItemGroup):
@@ -189,14 +227,14 @@ class LogItemLine(LogItemGroup):
         self.items = items
         super(LogItemLine, self).__init__(**kwargs)
 
-    def format(self, context, **kwargs):
+    def format(self, record, **kwargs):
         return "%s%s%s%s%s%s" % (
-            self.indentation(context, **kwargs),
-            self.line_index(context, **kwargs),
-            self.label(context, **kwargs),
-            self.prefix(context, **kwargs),
-            self.value(context, **kwargs),
-            self.suffix(context, **kwargs)
+            self.indentation(record, **kwargs),
+            self.line_index(record, **kwargs),
+            self.label(record, **kwargs),
+            self.prefix(record, **kwargs),
+            self.value(record, **kwargs),
+            self.suffix(record, **kwargs)
         )
 
 
@@ -212,8 +250,8 @@ class LogItemLines(LogItemGroup):
         self.lines = lines
         super(LogItemLines, self).__init__(**kwargs)
 
-    def format(self, context, **kwargs):
+    def format(self, record, **kwargs):
         return "%s%s" % (
-            self.indentation(context, **kwargs),
-            self.value(context, **kwargs),
+            self.indentation(record, **kwargs),
+            self.value(record, **kwargs),
         )

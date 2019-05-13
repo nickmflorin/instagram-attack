@@ -24,7 +24,7 @@ class stopping_context(ContextDecorator):
         self.name = name or getattr(instance, 'name', None) or instance.__class__.__name__
 
     def __enter__(self):
-        self.instance.log.start(f'Stopping {self.name}')
+        self.instance.log.stop(f'Stopping {self.name}')
         return self
 
     def __exit__(self, *exc):
@@ -54,7 +54,7 @@ def stopping(*args):
 
         def _wrapped(instance, *args, **kwargs):
             log_name = name or instance.name
-            instance.log.start(f'Stopping {log_name}')
+            instance.log.stop(f'Stopping {log_name}')
             return func(instance, *args, **kwargs)
 
         return _wrapped

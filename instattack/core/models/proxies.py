@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
-
+import asyncio
 from collections import Counter
 import json
 
@@ -13,7 +12,8 @@ from tortoise import fields
 from tortoise.models import Model
 
 from instattack import settings
-from instattack.lib import LoggableMixin, validate_method
+from instattack.lib import validate_method
+from instattack.core.mixins import LoggableMixin
 
 
 __all__ = ('Proxy', 'ProxyError', )
@@ -45,7 +45,6 @@ class Proxy(Model, ModelMixin):
     """
     TODO:
     ----
-
     Start storing successful requests vs. unsuccessful requests.
     """
 
@@ -150,7 +149,7 @@ class Proxy(Model, ModelMixin):
         else:
             self.log.debug(f'Updating Error Count {err_name} to {err.count + 1}')
             err.count += 1
-            await err.save()
+            asyncio.create_task(err.save())
 
     def just_used(self):
         self.update_time()
@@ -166,16 +165,16 @@ class Proxy(Model, ModelMixin):
 
         # We might want to lower restrictions on num requests, since we can
         # just put in the back of the pool.
-        if self.num_requests >= num_requests:
+        if num_requests and self.num_requests >= num_requests:
             return (False, 'Number of Requests Exceeds Limit')
 
-        elif self.error_rate > error_rate:
+        elif error_rate and self.error_rate > error_rate:
             return (False, 'Error Rate too Large')
 
-        elif self.avg_resp_time > resp_time:
+        elif resp_time and self.avg_resp_time > resp_time:
             return (False, 'Avg. Response Time too Large')
 
-        elif scheme not in self.schemes:
+        elif scheme and scheme not in self.schemes:
             return (False, f'Scheme {scheme} Not Supported')
 
         return (True, None)
@@ -191,13 +190,30 @@ class Proxy(Model, ModelMixin):
     def priority(self):
         # This is from ProxyBroker model
         # We are going to want to update this for our use case.
-        return (self.time_since_used, self.avg_resp_time, self.error_rate)
+        return (self.num_requests, self.time_since_used, self.avg_resp_time, self.error_rate)
 
     @property
     def address(self):
         return f'{self.host}:{self.port}'
 
-    def url(self, scheme='http'):
+    @property
+    def url(self):
+        """
+        AioHTTP only supports proxxies with HTTP schemes, so that is the proxy
+        type we must fetch from proxybroker and the scheme for the URL we must
+        use with our requests.
+        """
+        scheme = 'http'
+        return f"{scheme}://{self.address}/"
+
+    @property
+    def https_url(self):
+        """
+        AioHTTP only supports proxxies with HTTP schemes, so that is the proxy
+        type we must fetch from proxybroker and the scheme for the URL we must
+        use with our requests.
+        """
+        scheme = 'https'
         return f"{scheme}://{self.address}/"
 
 

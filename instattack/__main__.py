@@ -1,21 +1,19 @@
-#!/usr/bin/env python3 -B
+#!/usr/bin/env python3
 import argparse
+import asyncio
 from dotenv import load_dotenv
-from plumbum import local  # noqa
+import pathlib
 import signal
+import tortoise
 
 from .db import database_init
-from .settings import dir_str
-from .lib import (
-    AppLogger, apply_external_loggers, disable_external_loggers,
-    progressbar_wrap, cancel_remaining_tasks, validate_log_level,
-    get_env_file, write_env_file)
+from .settings import dir_str, USER_DIR
 
-from .cli.base import Instattack
-from .cli.proxies import *  # noqa
-from .cli.attack import *  # noqa
-from .cli.users import *  # noqa
-
+from .logger import (
+    AppLogger, apply_external_loggers, disable_external_loggers, progressbar_wrap)
+from .lib import validate_log_level, get_env_file, write_env_file
+from .core.utils import cancel_remaining_tasks
+from .cli import Instattack
 
 """
 May want to catch other signals too - these are not currently being
@@ -44,6 +42,17 @@ def handle_exception(loop, context):
     log.traceback(exc)
 
     loop.run_until_complete(shutdown(loop))
+
+
+def remove_pycache_files():
+    [p.unlink() for p in pathlib.Path('.').rglob('*.py[co]')]
+    [p.rmdir() for p in pathlib.Path('.').rglob('__pycache__')]
+
+
+def setup_directories():
+    remove_pycache_files()
+    if not USER_DIR.exists():
+        USER_DIR.mkdir()
 
 
 def setup_loop(loop):
@@ -77,8 +86,10 @@ def start(loop, args):
     setup_environment(args)
     log.updateLevel()
 
-    # Because we are having problems...
-    loop.run_until_complete(tortoise.Tortoise.close_connections())
+    setup_directories()
+
+    # Because we sometimes have problems with this...
+    # loop.run_until_complete(tortoise.Tortoise.close_connections())
 
     setup_loop(loop)
 

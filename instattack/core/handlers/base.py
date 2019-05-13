@@ -4,10 +4,13 @@ import random
 from urllib.parse import urlparse
 
 from instattack import settings
-from instattack.lib import LoggableMixin, get_token_from_response
+from instattack.lib import get_token_from_response
+
 from instattack.exceptions import (
     TokenNotInResponse, ResultNotInResponse, InstagramResultError)
-from instattack.models import InstagramResult
+
+from instattack.core.mixins import LoggableMixin
+from instattack.core.models import InstagramResult
 
 
 class HandlerMixin(LoggableMixin):
@@ -94,11 +97,11 @@ class RequestHandler(MethodHandler):
     def _connector(self):
         return aiohttp.TCPConnector(
             ssl=False,
-            force_close=self._connection_force_close,
-            limit=self._connection_limit,
-            limit_per_host=self._connection_limit_per_host,
-            keepalive_timeout=self._connection_keepalive_timeout,
-            enable_cleanup_closed=True,
+            # force_close=self._connection_force_close,
+            # limit=self._connection_limit,
+            # limit_per_host=self._connection_limit_per_host,
+            # keepalive_timeout=self._connection_keepalive_timeout,
+            # enable_cleanup_closed=True,
         )
 
     @property

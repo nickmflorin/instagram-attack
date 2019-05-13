@@ -2,11 +2,11 @@ import asyncio
 from plumbum import cli
 
 from instattack.lib import CustomProgressbar
-
 from instattack.exceptions import ArgumentError, PoolNoProxyError
 
-from instattack.models import Proxy, ProxyError
-from instattack.handlers import ProxyHandler
+from instattack.core.models import ProxyError
+from instattack.core.handlers import ProxyHandler
+from instattack.core.utils import remove_proxies
 
 from .args import ProxyArgs
 from .base import Instattack, BaseApplication
@@ -41,19 +41,26 @@ class ProxyClean(ProxyApplication):
 
     def main(self, arg):
         loop = asyncio.get_event_loop()
-
         if arg == 'errors':
             loop.run_until_complete(self.clean_errors())
         else:
             raise ArgumentError(f'Invalid argument {arg}.')
 
     async def clean_errors(self):
-        progress = CustomProgressbar(ProxyError.count(), label='Cleaning Errors')
+        progress = CustomProgressbar(ProxyError.count_all(), label='Cleaning Errors')
         progress.start()
         async for error in ProxyError.all():
             await error.delete()
             progress.update()
         progress.finish()
+
+
+@ProxyApplication.subcommand('remove')
+class ProxyRemove(ProxyApplication):
+
+    def main(self):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(remove_proxies(self._method))
 
 
 @ProxyApplication.subcommand('collect')
@@ -77,15 +84,20 @@ class ProxyCollect(ProxyApplication):
             method=self._method,
             lock=lock,
             start_event=start_event,
-            **self.proxy_config(method=self._method),
+            broker_config=self.broker_config(method=self._method),
+            pool_config=self.pool_config(
+                method=self._method,
+                prepopulate=False,
+                collect=True,
+                log_proxies=True,
+            ),
         )
         loop.run_until_complete(self.collect(loop, handler))
 
     async def collect(self, loop, handler):
         try:
-            await handler.run(loop, prepopulate=False)
+            await handler.run(loop)
         except PoolNoProxyError as e:
             self.log.error(e)
         finally:
-            await handler.stop(loop)
             await handler.save(loop)

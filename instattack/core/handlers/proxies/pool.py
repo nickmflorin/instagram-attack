@@ -5,12 +5,11 @@ import itertools
 from proxybroker import ProxyPool
 
 from instattack.lib import starting
-from instattack.models import Proxy
-from instattack.models.utils import stream_proxies, update_or_create_proxies
+from instattack.exceptions import PoolNoProxyError, ArgumentError
 
-from instattack.exceptions import PoolNoProxyError
-
-from instattack.handlers.base import MethodHandlerMixin
+from instattack.core.models import Proxy
+from instattack.core.utils import stream_proxies, update_or_create_proxies
+from instattack.core.handlers.base import MethodHandlerMixin
 
 
 class CustomProxyPool(ProxyPool, MethodHandlerMixin):
@@ -28,30 +27,28 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
     __name__ = "Proxy Pool"
     REMOVED = '<removed-proxy>'
 
-    def __init__(
-        self,
-        proxies,
-        broker,
-        timeout=None,
-        min_req_proxy=None,
-        max_error_rate=None,
-        max_resp_time=None,
-        **kwargs,
-    ):
+    def __init__(self, proxies, broker, config=None, **kwargs):
         self.engage(**kwargs)
 
-        self._pool = []
+        self.pool = []
 
-        self._broker = broker
-        self._broker_proxies = proxies  # Proxies from Broker
+        self.broker = broker
+        self.broker_proxies = proxies  # Proxies from Broker
 
-        # Useful to keep track of which proxies were imported from .txt file.
-        self._prepopulated = []
+        self.log_proxies = config['log_proxies']
 
-        self._max_error_rate = max_error_rate
-        self._max_resp_time = max_resp_time
-        self._min_req_proxy = min_req_proxy
-        self._timeout = timeout
+        self.max_error_rate = config['max_error_rate']
+        self.max_resp_time = config['max_resp_time']
+        self.min_req_proxy = config['min_req_proxy']
+        self.timeout = config['timeout']
+
+        self.collect = config['collect']
+        self.prepopulate = config['prepopulate']
+
+        self.limit = config['limit']
+        self.prepopulate_limit = config['prepopulate_limit']
+        if self.prepopulate_limit and self.prepopulate_limit >= self.limit:
+            raise ArgumentError('Prepopulate limit must be less than the pool limit.')
 
         # The entry count serves as a tie-breaker so that two tasks with the
         # same priority are returned in the order they were added.
@@ -62,39 +59,28 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
         # Mapping of proxies to entries in the heapq
         self.proxy_finder = {}
 
-    # TODO: Create some type of limit so we do not overdue it and make the queue
-    # take a long time to resolve.
-    async def prepopulate(self, loop, limit=None):
+    async def save(self, loop):
         """
-        When initially starting, it sometimes takes awhile for the proxies with
-        valid credentials to populate and kickstart the password consumer.
-
-        Prepopulating the proxies from the designated text file can help and
-        dramatically increase speeds.
+        TODO
+        ----
+        We might want to not include the prepopulated proxies in here.  When
+        collecting proxies, we don't prepopulate so that is not an issue, but
+        if we are attacking, the prepopulated proxies will be in the pool
+        (although this might be okay, since we will be updating their stats
+        in the database).
         """
-        self.log.start('Prepopulating Proxy Pool')
+        proxies = []
+        async with self.lock:
+            proxies = [proxy[2] for proxy in self.pool]
 
-        num_prepopulated = []
-        async for proxy in stream_proxies(method=self.__method__, limit=limit):
+        if len(proxies) == 0:
+            self.log.error('No Proxies to Save')
+            return
 
-            # This should almost be guaranteed by the __method__ filter, but
-            # not certain.
-            if self.scheme not in proxy.schemes:
-                self.log.warning('Could not propopulate proxy, invalid scheme.')
+        await update_or_create_proxies(self.__method__, proxies)
 
-            num_prepopulated.append(proxy)
-            await self.put(proxy)
-
-        if len(num_prepopulated) != 0:
-            self.log.complete(f"Prepopulated {len(num_prepopulated)} Proxies")
-        else:
-            self.log.warning('No Proxies to Prepopulate')
-
-    # TODO: We should only run the proxybroker version if there are not enough
-    # proxies that are from prepopulation, because it can slow things down.  For
-    # GET requests, we should maybe limit the pool size to something like 20.
     @starting
-    async def run(self, loop, prepopulate=True, prepopulate_limit=None):
+    async def run(self, loop):
         """
         Retrieves proxies from the queue that is populated from the Broker and
         then puts these proxies in the prioritized heapq pool.
@@ -102,43 +88,117 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
         Prepopulates proxies if the flag is set to put proxies that we previously
         saved into the pool.
 
-        Pt. 2
-        -----
-        Run until the broker returns a proxy with a value of None, which means that
-        there are no more proxies to find (we reached the limit defined by
-        proxy_limit).  We want the pool to stop processing the proxies, but keep
-        the proxies in the _pool so they can still be retrieved.
+        TODO:
+        ----
+        We should only run the proxybroker version if there are not enough
+        proxies that are from prepopulation, because it can slow things down.  For
+        GET requests, we should maybe limit the pool size to something like 20.
         """
-        if prepopulate:
-            if self._prepopulated:
-                raise RuntimeError("Pool was already prepopulated.")
-            await self.prepopulate(loop, limit=prepopulate_limit)
+        if self.prepopulate:
+            await self.prepopulate_proxies(loop)
 
-        # Right now, we are only using proxies that are in the pool to get it
-        # working without proxybroker.  We will eventuallly build proxybroker
-        # back in.
         self.start_event.set()
-        return
+        if self.collect:
+            await self.collect_proxies(loop)
 
-        tasks = []
-        while True:
-            proxy = await self._broker_proxies.get()
-            if proxy:
-                proxy = await Proxy.from_proxybroker(proxy, self.__method__, save=False)
-                if self.scheme not in proxy.schemes:
-                    # This should not be happening, but does sometimes with the
-                    # proxybroker.
-                    self._broker.increment_limit()
-                    self.log.error('Expected Scheme not in Proxy Schemes', extra={
-                        'proxy': proxy
-                    })
+    async def evaluate_proxy(self, proxy):
+        """
+        Makes sure that proxy is still valid according to what we require for
+        metrics.  This can change after a proxy that was initially valid is used.
+        **TOO MANY REQUESTS**
+        """
+        return proxy.evaluate(
+            num_requests=self.min_req_proxy,
+            error_rate=self.max_error_rate,
+            resp_time=self.max_resp_time,
+            # Trying to figure out what's going on with SSL error.
+            # scheme=self.scheme,
+        )
+
+    @starting('Proxy Prepopulation')
+    async def prepopulate_proxies(self, loop):
+        """
+        When initially starting, it sometimes takes awhile for the proxies with
+        valid credentials to populate and kickstart the password consumer.
+
+        Prepopulating the proxies from the designated text file can help and
+        dramatically increase speeds.
+
+        NOTE:
+        ----
+        Unlike the broker case, we can't run the loop/generator while
+            >>> len(futures) <= some limit
+
+        So we don't pass the limit into stream_proxies and only add futures if
+        the limit is not reached.
+        """
+        futures = []
+        async for proxy in stream_proxies(method=self.__method__):
+            if not self.prepopulate_limit or len(futures) < self.prepopulate_limit:
+                valid, reason = await self.evaluate_proxy(proxy)
+                if valid:
+                    futures.append(asyncio.create_task(self.put(proxy)))
                 else:
-                    task = asyncio.create_task(self.put(proxy))
-                    tasks.append(task)
-            else:
-                break
+                    self.log.warning('Cannot Add Saved Proxy to Pool', extra={
+                        'proxy': proxy,
+                        'other': reason,
+                    })
 
-        await asyncio.gather(*tasks)
+        # Assumes there were no errors adding proxies, which might not be the
+        # case.
+        await asyncio.gather(*futures)
+        if len(futures) != 0:
+            self.log.complete(f"Prepopulated {len(futures)} Proxies")
+        else:
+            self.log.warning('No Proxies to Prepopulate')
+
+    @starting('Proxy Collection')
+    async def collect_proxies(self, loop):
+        """
+        Retrieves proxies from the broker and converts them to our Proxy model.
+        The proxy is then evaluated as to whether or not it meets the standards
+        specified and conditionally added to the pool.
+
+        NOTE:
+        ----
+        The proxy returned from the broker should never be null (outside of edge
+        cases) - the broker should only return a null proxy when it's limit is
+        reached, and the limit is intentionally set much higher than the pool
+        limit.
+
+        TODO:
+        ----
+        We should maybe make this more dynamic, and add proxies from the broker
+        when the pool drops below the limit.
+        """
+        num_prepopoulated = len(self.pool)
+        num_to_collect = self.limit - num_prepopoulated
+
+        futures = []
+        while len(futures) < num_to_collect:
+            proxy = await self.broker_proxies.get()
+            if not proxy:
+                raise RuntimeError('Broker should not return null proxy.')
+
+            proxy = await Proxy.from_proxybroker(proxy, self.__method__)
+            valid, reason = await self.evaluate_proxy(proxy)
+            if valid:
+                if self.log_proxies:
+                    self.log.info('Found Proxy from Broker', extra={'proxy': proxy})
+                futures.append(asyncio.create_task(self.put(proxy)))
+            else:
+                self.log.warning('Cannot Add Broker Proxy to Pool', extra={
+                    'proxy': proxy,
+                    'other': reason,
+                })
+
+        await asyncio.gather(*futures)
+
+        # Note that if we are going to dynamically add back to the pool, we cannot
+        # do this.
+        # This might also cause issues since we do stop the broker from the
+        # proxy handler stop method as well.
+        self.broker.stop(loop)
 
     async def get(self):
         """
@@ -175,7 +235,7 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
         try:
             # We might not need this timeout, since it might be factored into the
             # session already.
-            proxy = await asyncio.wait_for(self._get(), timeout=self._timeout)
+            proxy = await asyncio.wait_for(self._get(), timeout=self.timeout)
         except asyncio.TimeoutError:
             raise PoolNoProxyError()
         else:
@@ -185,8 +245,8 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
         while True:
             priority, count, proxy = None, None, None
             async with self.lock:
-                if self._pool:
-                    priority, count, proxy = heapq.heappop(self._pool)
+                if self.pool:
+                    priority, count, proxy = heapq.heappop(self.pool)
 
             if proxy:
                 if proxy is not self.REMOVED:
@@ -210,36 +270,9 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
         if not isinstance(proxy, Proxy):
             raise RuntimeError('Invalid proxy passed in.')
 
-        # Makes sure that proxy is still valid according to what we require for
-        # metrics.  This can change after a proxy that was initially valid is used.
-        # ** TOO MANY REQUESTS **
-        valid, reason = proxy.evaluate(
-            num_requests=self._min_req_proxy,
-            error_rate=self._max_error_rate,
-            resp_time=self._max_resp_time,
-            scheme=self.scheme,
-        )
-
-        if not valid:
-            self._broker.increment_limit()
-            if proxy.unique_id in self.proxy_finder:
-                await self._remove_proxy(proxy, invalid=True, reason=reason)
-            else:
-                self.log.warning('Cannot Add Proxy to Pool', extra={
-                    'proxy': proxy,
-                    'other': reason,
-                })
-            return
-
         # Updating Proxy
         if proxy.unique_id in self.proxy_finder:
 
-            # This means whenever a proxy is used and put back in the queue, it's
-            # priority or other attributes will have changed, so it will be replaced.
-
-            # If we are updating the priority of a proxy in the queue, we cannot remove
-            # it completely because it would break the heapq invariants.  Instead,
-            # we mark it as removed and add the other proxy.
             current_entry = self.proxy_finder[proxy.unique_id]
             current = current_entry[-1]
 
@@ -247,7 +280,9 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
             differences = current.compare(proxy, return_difference=True)
             if differences:
                 # Make sure we maintain the proxy_limit value.
-                self._broker.increment_limit()
+                # We have no way of doing this anymore, we should maybe return
+                # a result to say if it was put in the queue or not.
+                # self._broker.increment_limit()
 
                 # Old proxy needs to be set to REMOVED
                 entry = self.proxy_finder[proxy.unique_id]
@@ -269,10 +304,10 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
         self.proxy_finder[proxy.unique_id] = [proxy.priority, count, proxy]
 
         async with self.lock:
-            heapq.heappush(self._pool, [proxy.priority, count, proxy])
+            heapq.heappush(self.pool, [proxy.priority, count, proxy])
 
         # Do not log prepopulated proxies.
-        if not proxy.id:
+        if not proxy.id or self.log_proxies:
             self.log.debug('Added Proxy to Pool', extra={'proxy': proxy})
 
     async def _remove_proxy(self, proxy, invalid=False, reason=None):
@@ -313,37 +348,3 @@ class CustomProxyPool(ProxyPool, MethodHandlerMixin):
             'proxy': proxy,
             'other': str(differences),
         })
-
-    # Not currently used, will factor into how we handle the priority of the proxies.
-    def evaluate_proxy_before_retrieval(self, proxy):
-        """
-        Not currently used - but we are going to have to somehow incorporate checks
-        into the proxy that we want to perform before returning from the heapq,
-        or possibly build into the priority of the heapq.
-
-        If we do it outside the context of the Proxy.priority value, this should
-        also ensure that evaluate_proxy_before_insert() is still called, since those
-        values are dynamic and will change over time.
-        """
-        # This needs to indicate that we still want to put it in the queue but
-        # we do not want to use it yet.
-        if proxy.last_used and proxy.time_since_used < 10:
-            return False
-
-        return True
-
-    async def save(self, loop):
-        """
-        TODO
-        ----
-        We might want to not include the prepopulated proxies in here.  When
-        collecting proxies, we don't prepopulate so that is not an issue, but
-        if we are attacking, the prepopulated proxies will be in the pool
-        (although this might be okay, since we will be updating their stats
-        in the database).
-        """
-        proxies = []
-        async with self.lock:
-            proxies = [proxy[2] for proxy in self._pool]
-
-        await update_or_create_proxies(self.__method__, proxies)

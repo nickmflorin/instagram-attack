@@ -3,7 +3,6 @@ import logging
 from .log_formats import (
     LOG_FORMAT_STRING, BARE_FORMAT_STRING, SIMPLE_FORMAT_STRING,
     EXTERNAL_FORMAT_STRING)
-from .utils import record_context, simple_context
 
 
 class TypeFilter(logging.Filter):
@@ -32,9 +31,8 @@ class CustomFormatter(logging.Formatter):
         self.format_string = format_string
 
     def format(self, record):
-        context = record_context(record)
         format_string = self.format_string(record)
-        return format_string.format(context)
+        return format_string.format(record)
 
 
 class CustomHandler(logging.StreamHandler):
@@ -52,9 +50,8 @@ class CustomHandler(logging.StreamHandler):
 class ExternalFormatter(logging.Formatter):
 
     def format(self, record):
-        context = simple_context(record)
         format_string = EXTERNAL_FORMAT_STRING(record)
-        return format_string.format(context)
+        return format_string.format(record)
 
 
 class ExternalHandler(logging.StreamHandler):

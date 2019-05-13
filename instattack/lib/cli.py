@@ -1,10 +1,6 @@
 from plumbum import cli
 
-from instattack.lib import is_numeric
-from instattack.lib import AppLogger
-
-
-log = AppLogger(__file__)
+from .validation import is_numeric
 
 
 def parse_dict_string(value, uppercase=False):
@@ -55,6 +51,9 @@ def parse_dict_string(value, uppercase=False):
 
 
 def dict_switch_body(value, uppercase=False, default=None):
+    from instattack.logger import AppLogger
+
+    log = AppLogger(f"{__name__}:dict_switch_body")
 
     default = default or {}
     default = default.copy()

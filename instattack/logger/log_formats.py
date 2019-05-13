@@ -1,41 +1,51 @@
 from plumbum import colors
 
 from .items import LogItem, LogItemLine, LogItemLines
-from .formats import Format, RecordAttributes, LoggingLevels
-from .utils import get_level_formatter, get_message_formatter
+from .formats import Format, RecordAttributes
+from .utils import (
+    get_record_request_method, get_record_time, get_record_status_code,
+    get_record_message, get_level_formatter, get_message_formatter,
+    get_record_response_reason)
 
 
 def message_items(record):
 
-    formatter = get_message_formatter(record)
-
-    if getattr(record, 'is_exception', False):
-        return [
-            LogItem('method', formatter=RecordAttributes.METHOD),
-            LogItem('msg', formatter=formatter),
-            LogItem('status_code', formatter=RecordAttributes.STATUS_CODE),
-        ]
-
-    return [LogItem(
-        "msg",
-        formatter=formatter,
-        line_index=getattr(record, 'line_index', None)
-    )]
+    return [
+        LogItem(
+            formatter=RecordAttributes.METHOD,
+            getter=get_record_request_method,
+            suffix=":",
+        ),
+        LogItem(
+            formatter=RecordAttributes.REASON,
+            getter=get_record_response_reason,
+            suffix=" -",
+        ),
+        LogItem(
+            formatter=get_message_formatter(record),
+            getter=get_record_message,
+            line_index=getattr(record, 'line_index', None),
+        ),
+        LogItem(
+            formatter=RecordAttributes.STATUS_CODE,
+            getter=get_record_status_code,
+        ),
+    ]
 
 
 def primary_items(record):
     return [
         LogItem(
-            'datetime',
-            formatter=RecordAttributes.DATETIME
+            formatter=RecordAttributes.DATETIME,
+            getter=get_record_time,
         ),
         LogItem(
-            "name",
+            params="name",
             suffix=" -",
             formatter=RecordAttributes.NAME
         ),
         LogItem(
-            "levelname",
+            params="levelname",
             suffix=" ",
             formatter=get_level_formatter(record),
         )
@@ -54,11 +64,28 @@ def simple_lines(record, indent=None):
     ]
 
 
+def proxy_lines(receord, indent=None):
+    return [
+        LogItem(
+            params=['proxy.url'],
+            formatter=RecordAttributes.PROXY,
+        ),
+        LogItem(
+            params=['proxy.method'],
+            formatter=RecordAttributes.PROXY,
+        ),
+        LogItem(
+            params=['proxy.num_requests'],
+            formatter=RecordAttributes.PROXY,
+        )
+    ]
+
+
 def context_lines(record, indent=None):
     return [
         LogItemLine(
             LogItem(
-                'index',
+                params='context.index',
                 label="Attempt #",
                 formatter=Format(colors.bold),
                 indent=indent
@@ -66,7 +93,7 @@ def context_lines(record, indent=None):
         ),
         LogItemLine(
             LogItem(
-                'parent_index',
+                params='context.parent_index',
                 label="Password #",
                 formatter=Format(colors.bold),
                 indent=indent
@@ -74,19 +101,16 @@ def context_lines(record, indent=None):
         ),
         LogItemLine(
             LogItem(
-                'password',
+                params='context.password',
                 label="Password",
                 formatter=RecordAttributes.PASSWORD,
                 indent=indent
             )
         ),
         LogItemLine(
-            LogItem(
-                'proxy',
-                label="Proxy",
-                formatter=RecordAttributes.PROXY,
-                indent=indent
-            )
+            *proxy_lines(record),
+            label="Proxy",
+            indent=indent,
         )
     ]
 
@@ -120,7 +144,7 @@ def LOG_FORMAT_STRING(record):
         *simple_lines(record, indent=0 if no_indent else 2),
         LogItemLine(
             LogItem(
-                "other",
+                params="other",
                 indent=2,
                 formatter=RecordAttributes.OTHER_MESSAGE
             ),
@@ -128,12 +152,12 @@ def LOG_FORMAT_STRING(record):
         *context_lines(record, indent=2),
         LogItemLine(
             LogItem(
-                "filename",
+                params="filename",
                 suffix=",",
                 formatter=Format(colors.fg('LightGray'))
             ),
             LogItem(
-                "lineno",
+                params="lineno",
                 formatter=Format(colors.bold)
             ),
             prefix="(",

@@ -37,7 +37,7 @@ DB_CONFIG = {
     },
     'apps': {
         'models': {
-            'models': ['instattack.models'],
+            'models': ['instattack.core.models'],
             'default_connection': 'default',
         }
     }
@@ -67,10 +67,25 @@ URLS = {
     'POST': INSTAGRAM_LOGIN_URL
 }
 
+# Proxies
+
 # Used when reading proxies from text files and converting to models.
 DEFAULT_SCHEMES = {
     'GET': urlparse(URLS['GET']).scheme.upper(),
     'POST': urlparse(URLS['POST']).scheme.upper()
+}
+
+PROXY_COUNTRIES = {
+    'GET': [],
+    'POST': [],
+}
+PROXY_TYPES = {
+    'GET': ['HTTP'],
+    'POST': ['HTTP'],
+}
+PROXY_POST = {
+    'GET': False,
+    'POST': True,
 }
 
 # Will be used to test proxies against simple request URLs.

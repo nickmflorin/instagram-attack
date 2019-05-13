@@ -1,6 +1,6 @@
 import asyncio
 
-from instattack.lib import AppLogger
+from instattack.logger import AppLogger
 
 from .base import mutation_gen
 
@@ -121,19 +121,16 @@ class password_gen(object):
         custom_gen,
     ]
 
-    def __init__(self, loop, user, limit=None):
+    def __init__(self, loop, user):
         self.user = user
         self.loop = loop
-        self.count = 0
         self.duplicates = []
-        self.limit = limit
 
     async def __call__(self):
         # Not sure if it makes sense to apply certain generators and not others.
         # combos = cls.all_combinations(cls.generators)
         # Definitely have to look over this logic and make sure we are not doing
         # anything completely unnecessary.
-        self.count = 0
         self.attempts = await self.user.get_attempts()
         self.generated = []
         self.duplicates = []
@@ -168,16 +165,14 @@ class password_gen(object):
 
         log.info(f'Generated {len(self.generated)} Passwords')
         if len(self.duplicates):
-            log.info(f'There Were {len(self.duplicates)} Generated Duplicates')
+            log.error(f'There Were {len(self.duplicates)} Generated Duplicates')
 
     def yield_with(self, value):
         self.generated.append(value)
         return value
 
     def safe_to_yield(self, val):
-        if self.limit and not self.count < self.limit:
-            return False
-        elif val in self.attempts:
+        if val in self.attempts:
             return False
         elif val in self.generated:
             # Don't log for each one, this is bound to happen a lot, but we want
@@ -190,10 +185,3 @@ class password_gen(object):
         async for value in gen(*args):
             if self.safe_to_yield(value):
                 yield value
-                self.count += 1
-            else:
-                # Cannot figure out why it keeps creating slightly more than the
-                # --limit desired passwords, but this didn't help.
-                if self.limit and not self.count < self.limit:
-                    task = asyncio.create_task(self.loop.shutdown_asyncgens())
-                    await task

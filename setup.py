@@ -11,10 +11,12 @@ setup(
     url="https://github.com/nickmflorin/instagram-attack",
     packages=find_packages(),
     install_requires=[
+        'aiodns',
         'aiosqlite',
         'aiofiles',
         'aiohttp',
         'asyncio',
+        'maxminddb',
         'proxybroker',
         'plumbum',
         'tortoise-orm',

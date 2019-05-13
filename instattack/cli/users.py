@@ -1,20 +1,13 @@
 from plumbum import cli
-import tortoise
 
-from instattack.models import User
+from instattack.core.models import User
 
 from .base import Instattack, BaseApplication
 
 
 @Instattack.subcommand('users')
 class UsersApplication(BaseApplication):
-
-    async def get_user(self, username):
-        try:
-            return await User.get(username=username)
-        except tortoise.exceptions.DoesNotExist:
-            self.log.error(f'User {username} does not exist.')
-            return None
+    pass
 
 
 @UsersApplication.subcommand('clean')

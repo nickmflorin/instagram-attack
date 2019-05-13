@@ -2,11 +2,6 @@ from __future__ import absolute_import
 
 import aiofiles
 
-from .logger import AppLogger
-
-
-log = AppLogger(__file__)
-
 
 async def stream_raw_data(filepath, limit=None):
     """
@@ -24,7 +19,7 @@ async def stream_raw_data(filepath, limit=None):
             break
         yield line
     """
-    from instattack.exceptions.io import InvalidFileLine
+    from instattack.exceptions import InvalidFileLine
 
     count = 0
     async with aiofiles.open(filepath) as f:

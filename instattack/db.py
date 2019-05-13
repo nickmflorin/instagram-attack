@@ -1,7 +1,7 @@
 from tortoise import Tortoise
 
-from instattack.lib import AppLogger
 from instattack import settings
+from instattack.logger import AppLogger
 
 
 log = AppLogger(__name__)

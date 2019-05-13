@@ -2,7 +2,7 @@ from __future__ import absolute_import
 
 from weakref import WeakKeyDictionary
 
-from instattack.lib import AppLogger
+from instattack.logger import AppLogger
 
 
 class DynamicProperty(object):

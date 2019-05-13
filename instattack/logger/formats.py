@@ -40,16 +40,16 @@ class FormattedEnum(Enum):
 class LoggingLevels(FormattedEnum):
 
     NOTE = Format(colors.fg('LightGray'))
-    START = Format(colors.fg('LightSteelBlue'), colors.bold)
-    COMPLETE = Format(colors.fg('Green'), colors.bold)
-
+    START = Format(colors.fg('CadetBlueA'))
+    STOP = Format(colors.fg('Red3'))
+    COMPLETE = Format(colors.fg('Green'))
     CRITICAL = Format(colors.fg('Yellow'), colors.bg('Black'), colors.bold,
         wrapper="[!] %s", format_with_wrapper=True)
     ERROR = Format(colors.fg('Red'), colors.underline)
-    WARNING = Format(colors.fg('Gold3A'), colors.bold)
-    NOTICE = Format(colors.fg('LightSkyBlue3A'), colors.bold)
-    INFO = Format(colors.fg('DeepSkyBlue2'), colors.bold)
-    DEBUG = Format(colors.fg('DarkGray'), colors.bold)
+    WARNING = Format(colors.fg('Gold3A'))
+    NOTICE = Format(colors.fg('LightSkyBlue3A'))
+    INFO = Format(colors.fg('DeepSkyBlue4B'))
+    DEBUG = Format(colors.fg('DarkGray'))
 
     @property
     def message_formatter(self):
@@ -66,7 +66,8 @@ class RecordAttributes(FormattedEnum):
     NAME = Format(colors.fg('DarkGray'))
     PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
     TOKEN = Format(colors.red)
-    STATUS_CODE = Format(colors.red, wrapper="[%s]")
-    METHOD = Format(colors.black, colors.bold)
+    STATUS_CODE = Format(colors.fg('Orange3'), wrapper="[%s]")
+    METHOD = Format(colors.fg('DarkGray'), colors.bold)
+    REASON = Format(colors.fg('DarkGray'))
     TASK = Format(colors.fg('LightBlue'), wrapper="(%s)")
     PASSWORD = Format(colors.black, colors.bold)

