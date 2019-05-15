@@ -36,7 +36,7 @@ class LoginHandler(PostRequestHandler):
         self.attempts_count = collections.Counter()  # Indexed by Password
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
-        self.save_tasks = []
+        self._all_tasks = []
 
     async def run(self, loop, token):
 
@@ -215,15 +215,14 @@ class LoginHandler(PostRequestHandler):
             self.attempt_batch_size
         )
 
-    def handle_response_error(self, e):
+    def handle_response_error(self, e, proxy, context):
         if isinstance(e, RuntimeError):
             """
             RuntimeError: File descriptor 87 is used by transport
             <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
             """
             self.log.error(e, extra={'context': context})
-            task = asyncio.create_task(self.proxy_inconclusive(proxy))
-            self.save_tasks.append(task)
+            return asyncio.create_task(self.proxy_inconclusive(proxy))
 
         elif isinstance(e, asyncio.CancelledError):
             # Don't want to mark as inconclusive because we don't want to note
@@ -242,17 +241,15 @@ class LoginHandler(PostRequestHandler):
                 e.message = 'Too many requests.'
 
             self.log.error(e, extra={'context': context})
-            task = asyncio.create_task(self.proxy_error(proxy, e))
-            self.save_tasks.append(task)
+            return asyncio.create_task(self.proxy_error(proxy, e))
 
-        except OSError as e:
+        elif isinstance(e, OSError):
             # We have only seen this for the following:
             # >>> OSError: [Errno 24] Too many open files -> Want to sleep
             # >>> OSError: [Errno 54] Connection reset by peer
             if e.errno == 54:
                 # Not sure if we want to note this at all.
-                task = asyncio.create_task(self.proxy_inconclusive(proxy, e))
-                self.save_tasks.append(task)
+                return asyncio.create_task(self.proxy_inconclusive(proxy, e))
 
             elif e.errno == 24:
                 await asyncio.sleep(3)
@@ -261,25 +258,9 @@ class LoginHandler(PostRequestHandler):
                     'other': f'Sleeping for {3} seconds...'
                 })
                 # Not sure if we want to note this at all.
-                task = asyncio.create_task(self.proxy_inconclusive(proxy, e))
-                self.save_tasks.append(task)
+                return asyncio.create_task(self.proxy_inconclusive(proxy, e))
             else:
                 raise e
-
-        except asyncio.CancelledError as e:
-            # Don't want to mark as inconclusive because we don't want to note
-            # the last time the proxy was used.
-            pass
-
-        except aiohttp.ClientError as e:
-            # For whatever reason these errors don't have any message...
-            if e.status == 429:
-                e.message = 'Too many requests.'
-
-            self.log.error(e, extra={'context': context})
-
-            task = asyncio.create_task(self.proxy_error(proxy, e))
-            self.save_tasks.append(task)
 
     async def login_request(self, loop, session, token, password, proxy, index=None):
         """
