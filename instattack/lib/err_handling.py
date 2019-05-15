@@ -41,9 +41,9 @@ def tb_context(frame):
     }
 
 
-def traceback_to(stack, back=0):
+def traceback_to(stack, frame_correction=0):
     try:
-        frame = stack[back]
+        frame = stack[frame_correction]
     except IndexError:
         raise ValueError('Not enough frames in stack.')
     else:

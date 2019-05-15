@@ -1,6 +1,6 @@
 from plumbum import cli
 
-from instattack.core.models import User
+from instattack.core.users import User
 
 from .base import Instattack, BaseApplication
 

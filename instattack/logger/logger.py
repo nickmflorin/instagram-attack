@@ -10,17 +10,35 @@ from .formats import LoggingLevels
 from .setup import add_base_handlers
 
 
+def log_conditionally(func):
+    def wrapped(instance, *args, **kwargs):
+        if instance._condition is not None:
+            if instance._condition:
+                func(instance, *args, **kwargs)
+        else:
+            func(instance, *args, **kwargs)
+    return wrapped
+
+
 class AppLogger(logging.Logger):
 
     def __init__(self, *args, **kwargs):
         super(AppLogger, self).__init__(*args, **kwargs)
+
         self.line_index = 0
+        self.log_once_messages = []
+
         add_base_handlers(self)
+        self._condition = None
 
         # Environment variable might not be set for usages of AppLogger
         # in __main__ module right away.
         if os.environ.get('level'):
             self.setLevel(os.environ['level'])
+
+    def conditional(self, value):
+        # self._condition = value
+        pass
 
     def updateLevel(self):
         # Environment variable might not be set for usages of AppLogger
@@ -58,74 +76,83 @@ class AppLogger(logging.Logger):
         if getattr(record, 'frame_correction', None):
             for key, val in record.frame_correction.items():
                 setattr(record, key, val)
+
         return record
 
-    def note(self, message, extra=None):
+    def once(self, message, extra=None, level=LoggingLevels.DEBUG, frame_correction=0):
+        """
+        Logs a message one time and only one time per Python session.  This is
+        useful when we want to show if we are waiting for awhile on a given
+        queue retrieval, but not show that we are waiting before every retrieval
+        from the queue.
+        """
+        if message not in self.log_once_messages:
+            extra = extra or {}
+            self.adjust_frame(extra, frame_correction=frame_correction + 1)
+
+            method = getattr(self, level.name.lower())
+            method(message, extra=extra)
+            self.log_once_messages.append(message)
+
+    def adjust_frame(self, extra, frame_correction=1):
         from instattack.lib import traceback_to
-
-        extra = extra or {}
-        extra.update(level=LoggingLevels.NOTE, show_level=False)
-
-        tb_context = traceback_to(inspect.stack(), back=1)
+        tb_context = traceback_to(inspect.stack(), frame_correction=frame_correction + 1)
         extra.update(frame_correction=tb_context)
 
+    # @log_conditionally
+    # def info(self, message, extra=None, frame_correction=0):
+
+    #     extra = extra or {}
+    #     self.adjust_frame(extra, frame_correction=frame_correction + 1)
+    #     if 'level' not in extra:
+    #         extra.update(level=LoggingLevels.INFO)
+
+    #     super(AppLogger, self).info(message, extra=extra)
+
+    def success(self, message, extra=None, frame_correction=0):
+        extra = extra or {}
+        extra.update(level=LoggingLevels.SUCCESS, show_level=False)
+
+        self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=extra)
 
-    def start(self, message, extra=None):
-        from instattack.lib import traceback_to
-
+    def start(self, message, extra=None, frame_correction=0):
         extra = extra or {}
         extra.update(level=LoggingLevels.START, show_level=False)
 
-        tb_context = traceback_to(inspect.stack(), back=1)
-        extra.update(frame_correction=tb_context)
-
+        self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=extra)
 
-    def stop(self, message, extra=None):
-        from instattack.lib import traceback_to
-
+    def stop(self, message, extra=None, frame_correction=0):
         extra = extra or {}
         extra.update(level=LoggingLevels.STOP, show_level=False)
 
-        tb_context = traceback_to(inspect.stack(), back=1)
-        extra.update(frame_correction=tb_context)
-
+        self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=extra)
 
-    def complete(self, message, extra=None):
-        from instattack.lib import traceback_to
-
+    def complete(self, message, extra=None, frame_correction=0):
         extra = extra or {}
         extra.update(level=LoggingLevels.COMPLETE, show_level=False)
 
-        tb_context = traceback_to(inspect.stack(), back=1)
-        extra.update(frame_correction=tb_context)
-
+        self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=extra)
 
-    def simple(self, message, color=None, extra=None):
-        from instattack.lib import traceback_to
+    def simple(self, message, color=None, extra=None, frame_correction=0):
 
         default = {'color': color, 'simple': True}
         extra = extra or {}
         default.update(**extra)
 
-        tb_context = traceback_to(inspect.stack(), back=1)
-        default.update(frame_correction=tb_context)
-
+        self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=default)
 
-    def bare(self, message, color='darkgray', extra=None):
-        from instattack.lib import traceback_to
+    def bare(self, message, color='darkgray', extra=None, frame_correction=0):
 
         default = {'color': color, 'bare': True}
         extra = extra or {}
         default.update(**extra)
 
-        tb_context = traceback_to(inspect.stack(), back=1)
-        default.update(frame_correction=tb_context)
-
+        self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=default)
 
     def before_lines(self):

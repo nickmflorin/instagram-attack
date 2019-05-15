@@ -1,7 +1,5 @@
-from plumbum import colors
-
 from .items import LogItem, LogItemLine, LogItemLines
-from .formats import Format, RecordAttributes, LoggingLevels
+from .formats import RecordAttributes, LoggingLevels
 from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
     get_record_message, get_level_formatter, get_message_formatter,
@@ -12,12 +10,14 @@ def message_items(record):
 
     return [
         LogItem(
-            formatter=RecordAttributes.METHOD,
+            formatter=record.level.formats.get(
+                'method', RecordAttributes.METHOD),
             getter=get_record_request_method,
             suffix=":",
         ),
         LogItem(
-            formatter=RecordAttributes.REASON,
+            formatter=record.level.formats.get(
+                'reason', RecordAttributes.REASON),
             getter=get_record_response_reason,
             suffix=" -",
         ),
@@ -27,7 +27,8 @@ def message_items(record):
             line_index=getattr(record, 'line_index', None),
         ),
         LogItem(
-            formatter=RecordAttributes.STATUS_CODE,
+            formatter=record.level.formats.get(
+                'status_code', RecordAttributes.STATUS_CODE),
             getter=get_record_status_code,
         ),
     ]
@@ -42,7 +43,8 @@ def primary_items(record):
         LogItem(
             params="name",
             suffix=" -",
-            formatter=RecordAttributes.NAME
+            formatter=record.level.formats.get(
+                'name', RecordAttributes.NAME),
         ),
         LogItem(
             params="levelname",
@@ -64,19 +66,23 @@ def simple_lines(record, indent=None):
     ]
 
 
-def proxy_lines(receord, indent=None):
+def proxy_lines(record, indent=None):
     return [
         LogItem(
-            params=['proxy.url'],
-            formatter=RecordAttributes.PROXY,
+            params=['proxy.method', 'context.proxy.method'],
+            formatter=record.level.formats.get(
+                'method', RecordAttributes.METHOD),
         ),
         LogItem(
-            params=['proxy.method'],
-            formatter=RecordAttributes.PROXY,
+            params=['proxy.url', 'context.proxy.url'],
+            formatter=record.level.formats.get(
+                'proxy', RecordAttributes.PROXY),
         ),
         LogItem(
-            params=['proxy.num_requests'],
-            formatter=RecordAttributes.PROXY,
+            label="Num Requests",
+            params=['proxy.num_requests', 'context.proxy.num_requests'],
+            formatter=record.level.formats.get(
+                'num_requests', RecordAttributes.NUM_REQUESTS),
         )
     ]
 
@@ -85,25 +91,28 @@ def context_lines(record, indent=None):
     return [
         LogItemLine(
             LogItem(
-                params='context.index',
-                label="Attempt #",
-                formatter=Format(colors.bold),
+                params=['index', 'context.index'],
+                label="Index",
+                formatter=record.level.formats.get(
+                    'index', RecordAttributes.INDEX),
                 indent=indent
             )
         ),
         LogItemLine(
             LogItem(
-                params='context.parent_index',
-                label="Password #",
-                formatter=Format(colors.bold),
+                params=['parent_index', 'context.parent_index'],
+                label="Parent Index",
+                formatter=record.level.formats.get(
+                    'index', RecordAttributes.INDEX),
                 indent=indent
             )
         ),
         LogItemLine(
             LogItem(
-                params='context.password',
+                params=['password' 'context.password'],
                 label="Password",
-                formatter=RecordAttributes.PASSWORD,
+                formatter=record.level.formats.get(
+                    'password', RecordAttributes.PASSWORD),
                 indent=indent
             )
         ),
@@ -113,6 +122,31 @@ def context_lines(record, indent=None):
             indent=indent,
         )
     ]
+
+
+def traceback_line(record, indent=None):
+    return LogItemLine(
+        LogItem(
+            params="filename",
+            suffix=",",
+            formatter=record.level.formats.get(
+                'filename', RecordAttributes.FILENAME)
+        ),
+        LogItem(
+            params="funcName",
+            suffix=",",
+            formatter=record.level.formats.get(
+                'funcName', RecordAttributes.FUNCNAME)
+        ),
+        LogItem(
+            params="lineno",
+            formatter=record.level.formats.get(
+                'lineno', RecordAttributes.LINENO)
+        ),
+        prefix="(",
+        suffix=")",
+        indent=indent,
+    )
 
 
 def BARE_FORMAT_STRING(record):
@@ -146,22 +180,10 @@ def LOG_FORMAT_STRING(record):
             LogItem(
                 params="other",
                 indent=2,
-                formatter=RecordAttributes.OTHER_MESSAGE
+                formatter=record.level.formats.get(
+                    'other', RecordAttributes.OTHER_MESSAGE)
             ),
         ),
         *context_lines(record, indent=2),
-        LogItemLine(
-            LogItem(
-                params="filename",
-                suffix=",",
-                formatter=Format(colors.fg('LightGray'))
-            ),
-            LogItem(
-                params="lineno",
-                formatter=Format(colors.bold)
-            ),
-            prefix="(",
-            suffix=")",
-            indent=2,
-        )
+        traceback_line(record, indent=2),
     )

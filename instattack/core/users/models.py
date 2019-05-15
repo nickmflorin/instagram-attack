@@ -10,9 +10,9 @@ from tortoise.models import Model
 from instattack import settings
 from instattack.logger import AppLogger
 from instattack.lib import stream_raw_data
-from instattack.exceptions import UserDirDoesNotExist, UserFileDoesNotExist
 
-from instattack.core.passwords import password_gen
+from .exceptions import UserDirDoesNotExist, UserFileDoesNotExist
+from .generator import password_gen
 
 
 class UserAttempt(Model):

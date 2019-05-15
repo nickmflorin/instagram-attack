@@ -1,14 +1,50 @@
 # -*- coding: utf-8 -*-
 import aiohttp
-
 from dataclasses import dataclass
+from dacite import from_dict
+from plumbum import colors
 from typing import List, Any, Optional
 
-from .proxies import Proxy
-from .tasks import LoginAttemptContext
+from instattack import settings
+from instattack.core.proxies import Proxy
+from instattack.core.models import TaskContext
 
 
-__all__ = ('InstagramResult', )
+__all__ = ('LoginContext', 'LoginAttemptContext', 'InstagramResult', )
+
+
+@dataclass
+class LoginContext(TaskContext):
+
+    password: str
+    token: str
+    index: int = 0
+
+    @property
+    def context_id(self):
+        return 'login'
+
+    @property
+    def name(self):
+        return f'Login Task'
+
+
+@dataclass
+class LoginAttemptContext(TaskContext):
+
+    password: str
+    token: str
+    proxy: Proxy
+    index: int = 0
+    parent_index: int = 0
+
+    @property
+    def context_id(self):
+        return 'attempt'
+
+    @property
+    def name(self):
+        return f'Login Task {self.parent_index} - Attempt {self.index}'
 
 
 @dataclass

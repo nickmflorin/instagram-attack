@@ -1,34 +1,43 @@
-from __future__ import absolute_import
-
 import asyncio
 import aiohttp
+import collections
 
 from instattack import settings
-from instattack.lib import starting
-from instattack.exceptions import TokenNotFound, TokenNotInResponse
+from instattack.lib import starting_context
 
-from instattack.core.models import TokenContext
 from instattack.core.utils import limit_on_success
+from instattack.core.base import RequestHandler
 
-from .base import GetRequestHandler
+from .exceptions import TokenNotFound, TokenNotInResponse
+from .models import TokenContext
+from .utils import get_token_from_response
+
+
+class GetRequestHandler(RequestHandler):
+
+    __method__ = 'GET'
+
+    def _get_token_from_response(self, response):
+        token = get_token_from_response(response)
+        if not token:
+            raise TokenNotInResponse()
+        return token
 
 
 class TokenHandler(GetRequestHandler):
 
     __name__ = 'Token Handler'
 
-    def __init__(self, proxy_handler, token_max_fetch_time=None, **kwargs):
-        kwargs.setdefault('method', 'GET')
-        super(TokenHandler, self).__init__(proxy_handler, **kwargs)
+    def __init__(self, config, proxy_handler, **kwargs):
+        super(TokenHandler, self).__init__(config, proxy_handler, **kwargs)
 
-        self._token_max_fetch_time = token_max_fetch_time
+        self.timeout = config['token']['timeout']
+        self.batch_size = config['token']['batch_size']
+        self.max_tries = config['token']['max_tries']
 
-        # Just for now, to make sure we are always using different proxies and
-        # nothing with queue is being weird.
-        self.proxies_tried = []
-        self.attempts_index = 0
+        self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
+        self.num_attempts = 0
 
-    @starting
     async def run(self, loop):
         """
         ClientSession
@@ -46,39 +55,49 @@ class TokenHandler(GetRequestHandler):
         """
         # Wait for start event to signal that we are ready to start making
         # requests with the proxies.
+
+        self.log.once('Waiting on Start Event')
         await self.start_event.wait()
-        try:
-            token = await asyncio.wait_for(self.fetch(loop),
-                timeout=self._token_max_fetch_time)
-        except (asyncio.TimeoutError, TimeoutError):
-            raise TokenNotFound()
-        else:
-            await asyncio.sleep(0)
-            return token
+
+        with starting_context(self):
+            try:
+                token = await asyncio.wait_for(self.fetch(loop), timeout=self.timeout)
+            except (asyncio.TimeoutError, TimeoutError):
+                raise TokenNotFound()
+            else:
+                await asyncio.sleep(0)
+                return token
 
     async def token_task_generator(self, loop, session):
         while True:
+            self.log.once('Waiting on Proxy from Pool')
             proxy = await self.proxy_handler.pool.get()
+            if proxy:
+                if proxy.unique_id in self.proxies_count:
+                    self.log.warning(
+                        f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
+                        extra={'proxy': proxy}
+                    )
 
-            if proxy.unique_id not in self.proxies_tried:
-                context = TokenContext(index=self.attempts_index, proxy=proxy)
+                self.proxies_count[proxy.unique_id] += 1
+
+                context = TokenContext(index=self.num_attempts, proxy=proxy)
                 yield self.fetch_with_proxy(loop, session, context, proxy)
 
-                self.proxies_tried.append(proxy.unique_id)
-                self.attempts_index += 1
+                self.num_attempts += 1
 
             else:
                 self.log.error('Proxy already tried.', extra={'proxy': proxy})
 
-    async def fetch(self, loop, batch_size=3, max_tries=20):
+    async def fetch(self, loop):
         async with aiohttp.ClientSession(
             connector=self._connector,
             timeout=self._timeout
         ) as session:
             return await limit_on_success(
                 self.token_task_generator(loop, session),
-                batch_size=batch_size,
-                max_tries=max_tries
+                batch_size=self.batch_size,
+                max_tries=self.max_tries
             )
 
     async def fetch_with_proxy(self, loop, session, context, proxy):
@@ -101,18 +120,17 @@ class TokenHandler(GetRequestHandler):
                 except TokenNotInResponse as e:
                     # This seems to happen a lot more when using the HTTP scheme
                     # vs. the HTTPS scheme.
-                    # Start storing number of successful/unsuccessful requests.
-                    loop.call_soon(self.maintain_proxy, proxy)
-                    self.log.error(e, extra={'context': context, 'response': response})
+                    loop.call_soon(self.add_proxy_error, proxy, e)
+                    self.log.error(e, extra={
+                        'context': context,
+                        'response': response
+                    })
                 else:
                     # Start storing number of successful/unsuccessful requests.
                     # Note that proxy was a good candidate.
-                    loop.call_soon(self.maintain_proxy, proxy)
-                    self.log.complete('Received Token',
-                        extra={'context': context, 'response': response})
+                    loop.call_soon(self.add_proxy_success, proxy)
                     return token
 
-        # Start storing number of successful/unsuccessful requests.
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
             self.log.error(e, extra={'context': context})
             loop.call_soon(self.add_proxy_error, proxy, e)

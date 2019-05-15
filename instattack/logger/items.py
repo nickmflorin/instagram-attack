@@ -1,4 +1,3 @@
-from collections import Iterable
 from .formats import RecordAttributes
 
 __all__ = (
@@ -8,7 +7,7 @@ __all__ = (
 )
 
 
-def get_off_record_obj(record, param):
+def get_off_record_obj(obj, param):
     """
     Priorities overridden values explicitly provided in extra, and will
     check record.extra['context'] if the value is not in 'extra'.
@@ -19,16 +18,17 @@ def get_off_record_obj(record, param):
     if "." in param:
         parts = param.split(".")
         if len(parts) > 1:
-            if hasattr(record, parts[0]):
-                return get_off_record_obj(record, '.'.join(parts[1:]))
+            if hasattr(obj, parts[0]):
+                nested_obj = getattr(obj, parts[0])
+                return get_off_record_obj(nested_obj, '.'.join(parts[1:]))
             else:
                 return None
         else:
-            if hasattr(record, parts[0]):
-                return getattr(record, parts[0])
+            if hasattr(obj, parts[0]):
+                return getattr(obj, parts[0])
     else:
-        if hasattr(record, param):
-            return getattr(record, param)
+        if hasattr(obj, param):
+            return getattr(obj, param)
         return None
 
 
@@ -46,7 +46,7 @@ def get_value(record, params=None, getter=None):
         # Higher priority is given to less deeply nested versions.
         for param in params:
             value = get_off_record_obj(record, param)
-            if value:
+            if value is not None:
                 return value
     else:
         return getter(record)
@@ -104,7 +104,7 @@ class LogAbstractObject(object):
 
     def value(self, record, **kwargs):
         value = get_value(record, params=self.params, getter=self.getter)
-        if value:
+        if value is not None:
             return self._format_value(
                 value,
                 formatter=self._formatter

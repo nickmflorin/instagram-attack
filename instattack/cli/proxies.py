@@ -2,18 +2,17 @@ import asyncio
 from plumbum import cli
 
 from instattack.lib import CustomProgressbar
-from instattack.exceptions import ArgumentError, PoolNoProxyError
+from instattack.exceptions import ArgumentError
 
-from instattack.core.models import ProxyError
-from instattack.core.handlers import ProxyHandler
-from instattack.core.utils import remove_proxies
+from instattack.core.proxies.exceptions import PoolNoProxyError
+from instattack.core.proxies import ProxyHandler, Proxy
+from instattack.core.proxies.utils import remove_proxies
 
-from .args import ProxyArgs
 from .base import Instattack, BaseApplication
 
 
 @Instattack.subcommand('proxies')
-class ProxyApplication(BaseApplication, ProxyArgs):
+class ProxyApplication(BaseApplication):
 
     __group__ = 'Proxy Pool'
     _method = 'GET'
@@ -47,10 +46,12 @@ class ProxyClean(ProxyApplication):
             raise ArgumentError(f'Invalid argument {arg}.')
 
     async def clean_errors(self):
-        progress = CustomProgressbar(ProxyError.count_all(), label='Cleaning Errors')
+        progress = CustomProgressbar(Proxy.count_all(), label='Cleaning Errors')
         progress.start()
-        async for error in ProxyError.all():
-            await error.delete()
+        async for proxy in Proxy.all():
+            proxy.errors = {}
+            await proxy.save()
+
             progress.update()
         progress.finish()
 
@@ -65,12 +66,6 @@ class ProxyRemove(ProxyApplication):
 
 @ProxyApplication.subcommand('collect')
 class ProxyCollect(ProxyApplication):
-    """
-    TODO:
-    ----
-    Incorporate an --ensure_new flag, which would use preexisting proxies saved
-    make sure that we are only creating new proxies and now updating any.
-    """
 
     def main(self):
         loop = asyncio.get_event_loop()
@@ -80,18 +75,28 @@ class ProxyCollect(ProxyApplication):
         start_event = asyncio.Event()
         lock = asyncio.Lock()
 
+        config = self.config.override(**{
+            'token': {
+                'proxies': {
+                    'prepopulate': False,
+                    'collect': True,
+                }
+            },
+            'login': {
+                'proxies': {
+                    'prepopulate': False,
+                    'collect': True,
+                }
+            }
+        })
+
         handler = ProxyHandler(
             method=self._method,
             lock=lock,
             start_event=start_event,
-            broker_config=self.broker_config(method=self._method),
-            pool_config=self.pool_config(
-                method=self._method,
-                prepopulate=False,
-                collect=True,
-                log_proxies=True,
-            ),
+            config=config
         )
+
         loop.run_until_complete(self.collect(loop, handler))
 
     async def collect(self, loop, handler):

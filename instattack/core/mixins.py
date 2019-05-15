@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-
+from urllib.parse import urlparse
 from weakref import WeakKeyDictionary
 
+from instattack import settings
 from instattack.logger import AppLogger
 
 
@@ -54,3 +54,53 @@ class LoggableMixin(object):
 
     name = Identifier()
     log = DynamicLogger()
+
+
+class ModelMixin(LoggableMixin):
+
+    @classmethod
+    def count_all(cls):
+        """
+        Do not ask me why the count() method returns a CountQuery that does
+        not have an easily accessible integer value.
+        """
+        return cls.all().count().__sizeof__()
+
+
+class HandlerMixin(LoggableMixin):
+
+    def engage(self, lock=None, start_event=None, stop_event=None,
+            user=None, queue=None):
+
+        self._stopped = False
+        self.lock = lock
+
+        # TODO: Figure out how to incorporate the start_event into the behavior
+        # of the stopped property.
+        self.stop_event = stop_event
+        self.start_event = start_event
+        self.user = user
+
+    def issue_start_event(self, reason=None):
+        if self.start_event.is_set():
+            raise RuntimeError('Start event already set.')
+        self.log.info('Setting Start Event', extra={'other': reason})
+        self.start_event.set()
+
+
+class MethodHandlerMixin(HandlerMixin):
+
+    def engage(self, method=None, **kwargs):
+        if method:
+            self.__method__ = method
+        if not self.__method__:
+            raise RuntimeError(
+                'Extensions of MethodHandlerMixin must initialize with '
+                'a method or have it set as a constant class attribute.'
+            )
+        super(MethodHandlerMixin, self).engage(**kwargs)
+
+    @property
+    def scheme(self):
+        scheme = urlparse(settings.URLS[self.__method__]).scheme
+        return scheme.upper()

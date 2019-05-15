@@ -2,28 +2,29 @@ from proxybroker import Broker
 
 from instattack import settings
 from instattack.lib import starting, stopping
-from instattack.core.handlers.base import MethodHandlerMixin
+from instattack.core.mixins import MethodHandlerMixin
 
 
-class CustomBroker(Broker, MethodHandlerMixin):
+class InstattackProxyBroker(Broker, MethodHandlerMixin):
 
     __name__ = 'Proxy Broker'
 
-    def __init__(self, proxies, config=None, **kwargs):
-        self.limit = config['limit']
+    def __init__(self, config, proxies, **kwargs):
         self.engage(**kwargs)
 
-        super(CustomBroker, self).__init__(
+        method_config = config.for_method(self.__method__)
+        self.limit = method_config['proxies']['limit']
+
+        super(InstattackProxyBroker, self).__init__(
             proxies,
-            max_tries=config['max_tries'],
-            max_conn=config['max_conn'],
-            timeout=config['timeout'],
+            max_tries=method_config['proxies']['broker']['max_tries'],
+            max_conn=method_config['proxies']['broker']['max_conn'],
+            timeout=method_config['proxies']['broker']['timeout'],
             verify_ssl=False,
         )
 
     @starting
     async def start(self, loop):
-        await self.start_event.wait()
         await self.find(
             limit=self.limit,
             post=settings.PROXY_POST[self.__method__],
@@ -40,5 +41,6 @@ class CustomBroker(Broker, MethodHandlerMixin):
         if self._stopped:
             raise RuntimeError('Proxy Broker Already Stopped')
 
+        self._stopped = True
+        super(InstattackProxyBroker, self).stop(*args, **kwargs)
         self._proxies.put_nowait(None)
-        super(CustomBroker, self).stop(*args, **kwargs)

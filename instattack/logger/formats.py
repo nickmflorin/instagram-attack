@@ -40,7 +40,12 @@ class Format(object):
 class FormattedEnum(Enum):
 
     def __init__(self, format):
-        self.format = format
+        if isinstance(format, dict):
+            self.format = format['base']
+            self.formats = format
+        else:
+            self.format = format
+            self.formats = {'base': format}
 
     def __call__(self, text):
         return self.format(text)
@@ -48,9 +53,12 @@ class FormattedEnum(Enum):
 
 class LoggingLevels(FormattedEnum):
 
-    NOTE = Format(colors.fg('LightGray'))
+    SUCCESS = {
+        'base': Format(colors.fg('SpringGreen3')),
+        'other': Format(colors.black),
+    }
     START = Format(
-        colors.fg('CadetBlueA'),
+        colors.fg('DarkOliveGreen3'),
         wrapper="[+] %s",
         format_with_wrapper=True
     )
@@ -60,7 +68,7 @@ class LoggingLevels(FormattedEnum):
         format_with_wrapper=True
     )
     COMPLETE = Format(
-        colors.fg('DarkOliveGreen3'),
+        colors.fg('IndianRed'),
         wrapper="[-] %s",
         format_with_wrapper=True
     )
@@ -70,32 +78,55 @@ class LoggingLevels(FormattedEnum):
         format_with_wrapper=True
     )
     ERROR = Format(
-        colors.fg('Red'), colors.underline,
+        colors.fg('Red1'), colors.bold,
         wrapper="[!] %s",
         format_with_wrapper=True
     )
-    WARNING = Format(colors.fg('Gold3A'))
-    NOTICE = Format(colors.fg('LightSkyBlue3A'))
-    INFO = Format(colors.fg('DeepSkyBlue4B'))
-    DEBUG = Format(colors.fg('DarkGray'))
+    WARNING = Format(colors.fg('Gold3A'), colors.bold,)
+    INFO = Format(colors.fg('DeepSkyBlue4B'), colors.bold)
+    DEBUG = Format(colors.fg('DarkGray'), colors.bold)
 
     @property
     def message_formatter(self):
-        return self.format.without_text_decoration()
+        if self in [
+            LoggingLevels.SUCCESS,
+            LoggingLevels.WARNING,
+            LoggingLevels.STOP,
+            LoggingLevels.START,
+            LoggingLevels.COMPLETE,
+            LoggingLevels.CRITICAL
+        ]:
+            return self.format.without_text_decoration()
+        return RecordAttributes.MESSAGE
 
 
 class RecordAttributes(FormattedEnum):
 
     LINE_INDEX = Format(colors.black, wrapper="[%s] ")
     DATETIME = Format(colors.fg('LightYellow3'), wrapper="[%s] ")
-    LABEL = Format(colors.fg('DarkGray'), wrapper="%s: ")
-    OTHER_MESSAGE = Format(colors.fg('Grey69'))
-    SPECIAL_MESSAGE = Format(colors.bg('LightGray'), colors.fg('Magenta'))
+    MESSAGE = Format(colors.fg('Grey7'))
     NAME = Format(colors.fg('DarkGray'))
-    PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
-    TOKEN = Format(colors.red)
+    OTHER_MESSAGE = Format(colors.fg('DarkGray'))
+
+    # Exception Messages
     STATUS_CODE = Format(colors.fg('DarkGray'), wrapper="[%s]")
     METHOD = Format(colors.fg('DarkGray'), colors.bold)
-    REASON = Format(colors.fg('DarkGray'))
+    REASON = Format(colors.fg('Grey69'))
+
+    # Context
     TASK = Format(colors.fg('LightBlue'), wrapper="(%s)")
-    PASSWORD = Format(colors.black, colors.bold)
+    PASSWORD = Format(colors.fg('Grey69'), colors.bold)
+    NUM_REQUESTS = Format(colors.fg('DarkGray'), colors.bold)
+    INDEX = Format(colors.fg('Grey69'), colors.bold)
+    PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
+    TOKEN = Format(colors.fg('Grey69'))
+    LABEL = Format(colors.fg('DarkGray'), wrapper="%s: ")
+
+    # Traceback
+    FILENAME = Format(colors.fg('LightGray'))
+    LINENO = Format(colors.fg('DarkGray'), colors.bold)
+    FUNCNAME = Format(
+        colors.fg('DarkGray'),
+        format_with_wrapper=True,
+        wrapper="def %s",
+    )

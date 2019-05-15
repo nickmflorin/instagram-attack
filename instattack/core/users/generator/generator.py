@@ -1,9 +1,6 @@
-import asyncio
-
 from instattack.logger import AppLogger
 
 from .base import mutation_gen
-
 from .char_gen import char_gen
 from .case_gen import case_gen
 

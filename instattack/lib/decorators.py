@@ -10,7 +10,7 @@ class starting_context(ContextDecorator):
         self.name = name or getattr(instance, 'name', None) or instance.__class__.__name__
 
     def __enter__(self):
-        self.instance.log.start(f'Starting {self.name}')
+        self.instance.log.start(f'Starting {self.name}', frame_correction=1)
         return self
 
     def __exit__(self, *exc):
@@ -24,7 +24,7 @@ class stopping_context(ContextDecorator):
         self.name = name or getattr(instance, 'name', None) or instance.__class__.__name__
 
     def __enter__(self):
-        self.instance.log.stop(f'Stopping {self.name}')
+        self.instance.log.stop(f'Stopping {self.name}', frame_correction=1)
         return self
 
     def __exit__(self, *exc):
@@ -37,7 +37,7 @@ def starting(*args):
 
         def _wrapped(instance, *args, **kwargs):
             log_name = name or instance.name
-            instance.log.start(f'Starting {log_name}')
+            instance.log.start(f'Starting {log_name}', frame_correction=1)
             return func(instance, *args, **kwargs)
 
         return _wrapped
@@ -54,7 +54,7 @@ def stopping(*args):
 
         def _wrapped(instance, *args, **kwargs):
             log_name = name or instance.name
-            instance.log.stop(f'Stopping {log_name}')
+            instance.log.stop(f'Stopping {log_name}', frame_correction=1)
             return func(instance, *args, **kwargs)
 
         return _wrapped

