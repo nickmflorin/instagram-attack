@@ -10,11 +10,15 @@ from .formats import LoggingLevels
 from .setup import add_base_handlers
 
 
+log = logging.getLogger('AppLogger')
+
+
 def log_conditionally(func):
     def wrapped(instance, *args, **kwargs):
         if instance._condition is not None:
             if instance._condition:
-                func(instance, *args, **kwargs)
+                return
+            func(instance, *args, **kwargs)
         else:
             func(instance, *args, **kwargs)
     return wrapped
@@ -37,8 +41,7 @@ class AppLogger(logging.Logger):
             self.setLevel(os.environ['level'])
 
     def conditional(self, value):
-        # self._condition = value
-        pass
+        self._condition = value
 
     def updateLevel(self):
         # Environment variable might not be set for usages of AppLogger
@@ -116,6 +119,7 @@ class AppLogger(logging.Logger):
         self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=extra)
 
+    @log_conditionally
     def start(self, message, extra=None, frame_correction=0):
         extra = extra or {}
         extra.update(level=LoggingLevels.START, show_level=False)
@@ -130,6 +134,7 @@ class AppLogger(logging.Logger):
         self.adjust_frame(extra, frame_correction=frame_correction + 1)
         self.info(message, extra=extra)
 
+    @log_conditionally
     def complete(self, message, extra=None, frame_correction=0):
         extra = extra or {}
         extra.update(level=LoggingLevels.COMPLETE, show_level=False)

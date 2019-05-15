@@ -3,6 +3,7 @@ import argparse
 from argparse import ArgumentTypeError
 import asyncio
 from dotenv import load_dotenv
+import os
 import pathlib
 import signal
 import tortoise
@@ -110,6 +111,8 @@ def shutdown(loop, signal=None):
 
     if signal:
         log.warning(f'Received exit signal {signal.name}...')
+
+    log.conditional(os.environ.get('SILENT_SHUTDOWN'))
 
     log.start('Starting Shut Down')
 

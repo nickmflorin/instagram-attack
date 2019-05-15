@@ -12,7 +12,7 @@ from .base import Instattack, BaseApplication
 
 
 @Instattack.subcommand('proxies')
-class ProxyApplication(BaseApplication):
+class BaseProxy(BaseApplication):
 
     __group__ = 'Proxy Pool'
     _method = 'GET'
@@ -22,17 +22,8 @@ class ProxyApplication(BaseApplication):
         self._method = method.upper()
 
 
-@ProxyApplication.subcommand('test')
-class ProxyTest(ProxyApplication):
-    """
-    Will be used to test proxies against simple request URLs.
-    Not sure if we will maintain this.
-    """
-    pass
-
-
-@ProxyApplication.subcommand('clean')
-class ProxyClean(ProxyApplication):
+@BaseProxy.subcommand('clean')
+class ProxyClean(BaseProxy):
     """
     Will be used to remove duplicate proxies that are saved.  Potentially also
     be used to update metrics if we get that far in this project.
@@ -56,16 +47,16 @@ class ProxyClean(ProxyApplication):
         progress.finish()
 
 
-@ProxyApplication.subcommand('remove')
-class ProxyRemove(ProxyApplication):
+@BaseProxy.subcommand('remove')
+class ProxyRemove(BaseProxy):
 
     def main(self):
         loop = asyncio.get_event_loop()
         loop.run_until_complete(remove_proxies(self._method))
 
 
-@ProxyApplication.subcommand('collect')
-class ProxyCollect(ProxyApplication):
+@BaseProxy.subcommand('collect')
+class ProxyCollect(BaseProxy):
 
     def main(self):
         loop = asyncio.get_event_loop()

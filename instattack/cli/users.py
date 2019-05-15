@@ -1,3 +1,4 @@
+import asyncio
 from plumbum import cli
 
 from instattack.core.users import User
@@ -6,16 +7,29 @@ from .base import Instattack, BaseApplication
 
 
 @Instattack.subcommand('users')
-class UsersApplication(BaseApplication):
+class BaseUsers(BaseApplication):
     pass
 
 
-@UsersApplication.subcommand('clean')
-class UsersCleanApplication(UsersApplication):
+@Instattack.subcommand('user')
+class BaseUser(BaseApplication):
+    pass
+
+
+class UserOperation(BaseApplication):
+
+    def main(self, *args):
+        self.silent_shutdown()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.operation(loop, *args))
+
+
+@BaseUsers.subcommand('clean')
+class CleanUsers(BaseUsers):
 
     def main(self):
-        with self.loop_session() as loop:
-            loop.run_until_complete(self.clean())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.clean())
 
     async def clean(self):
         async for user in User.all():
@@ -23,8 +37,8 @@ class UsersCleanApplication(UsersApplication):
             self.log.info(f'Cleaned Directory for User {user.username}.')
 
 
-@UsersApplication.subcommand('show')
-class UsersShowApplication(UsersApplication):
+@BaseUser.subcommand('show')
+class UsersShowApplication(UserOperation):
 
     limit = cli.SwitchAttr('--limit', int, default=None)
     new = cli.Flag('--new', default=False)
@@ -37,10 +51,6 @@ class UsersShowApplication(UsersApplication):
             'numerics': self.numerics,
             'attempts': self.attempts,
         }
-
-    def main(self, item, username):
-        with self.loop_session() as loop:
-            loop.run_until_complete(self.operation(loop, item, username))
 
     async def operation(self, loop, item, username):
         method = self.methods.get(item)
@@ -56,21 +66,29 @@ class UsersShowApplication(UsersApplication):
         await method(loop, user)
 
     async def passwords(self, loop, user):
+        self.log.start(f'Showing User {user.username} Passwords')
+
         self.log.before_lines()
         async for item in user.get_passwords(limit=self.limit):
             self.log.line(item)
 
     async def alterations(self, loop, user):
+        self.log.start(f'Showing User {user.username} Alterations')
+
         self.log.before_lines()
         async for item in user.get_alterations(limit=self.limit):
             self.log.line(item)
 
     async def numerics(self, loop, user):
+        self.log.start(f'Showing User {user.username} Numerics')
+
         self.log.before_lines()
         async for item in user.get_numerics(limit=self.limit):
             self.log.line(item)
 
     async def attempts(self, loop, user):
+        self.log.start(f'Showing User {user.username} Attempts')
+
         if self.new:
             generated = []
             self.log.before_lines()
@@ -89,40 +107,30 @@ class UsersShowApplication(UsersApplication):
                 self.log.line_by_line(attempts)
 
 
-class UserOperation(UsersApplication):
-
-    def main(self, *args):
-        if len(args) != 1:
-            self.log.error('Must provide single username argument.')
-            return
-
-        username = args[0]
-        with self.loop_session() as loop:
-            loop.run_until_complete(self.operation(username))
-
-
-@UsersApplication.subcommand('delete')
+@BaseUser.subcommand('delete')
 class DeleteUser(UserOperation):
 
-    async def operation(self, username):
+    async def operation(self, loop, username):
         user = await self.get_user(username)
         if not user:
             self.log.error('User does not exist.')
-        else:
-            self.log.info('Removing user directory...')
-            user.teardown()
-            self.log.info('Deleting user from database...')
-            await user.delete()
-            self.log.info('Success.')
+            return
+
+        self.log.start('Removing user directory...')
+        user.teardown()
+        self.log.start('Deleting user from database...')
+        await user.delete()
+        self.log.success('Success.')
 
 
-@UsersApplication.subcommand('add')
+@BaseUser.subcommand('add')
 class AddUser(UserOperation):
 
-    async def operation(self, username):
+    async def operation(self, loop, username):
         user = await self.get_user(username)
-        if not user:
-            user = await User.create(username=username)
-            self.log.info(f'Successfully created user {user.username}.')
-        else:
+        if user:
             self.log.error('User already exists.')
+            return
+
+        user = await User.create(username=username)
+        self.log.info(f'Successfully created user {user.username}.')

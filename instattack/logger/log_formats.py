@@ -150,7 +150,7 @@ def traceback_line(record, indent=None):
 
 
 def BARE_FORMAT_STRING(record):
-    return LogItemLine(message_items(record))
+    return LogItemLine(*message_items(record))
 
 
 def SIMPLE_FORMAT_STRING(record):

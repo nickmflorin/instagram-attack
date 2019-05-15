@@ -2,6 +2,7 @@ from argparse import ArgumentTypeError
 from platform import python_version
 from plumbum import cli
 import tortoise
+import os
 
 from instattack.lib import validate_log_level
 
@@ -47,6 +48,9 @@ class BaseApplication(cli.Application, LoggableMixin):
 
     def get_handlers(self, user):
         return get_handlers(user, self._config)
+
+    def silent_shutdown(self):
+        os.environ['SILENT_SHUTDOWN'] = "1"
 
 
 class Instattack(BaseApplication):

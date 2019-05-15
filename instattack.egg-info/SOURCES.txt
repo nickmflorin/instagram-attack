@@ -16,6 +16,7 @@ instattack/cli/attack.py
 instattack/cli/base.py
 instattack/cli/config.py
 instattack/cli/proxies.py
+instattack/cli/test.py
 instattack/cli/users.py
 instattack/core/__init__.py
 instattack/core/attack.py
