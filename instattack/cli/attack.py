@@ -2,11 +2,11 @@ import asyncio
 
 from instattack.core.attack import attack, get_token
 
-from .base import Instattack
+from .base import EntryPoint, BaseApplication
 
 
-@Instattack.subcommand('attack')
-class BaseAttack(Instattack):
+@EntryPoint.subcommand('attack')
+class BaseAttack(BaseApplication):
 
     async def attempt_attack(self, loop, token):
         return await attack(loop, token, self.user, self.config)

@@ -79,6 +79,10 @@ def proxy_lines(record, indent=None):
                 'proxy', RecordAttributes.PROXY),
         ),
         LogItem(
+            params=['proxy.humanized_state', 'context.proxy.humanized_state'],
+            formatter=RecordAttributes.PROXY,
+        ),
+        LogItem(
             label="Num Requests",
             params=['proxy.num_requests', 'context.proxy.num_requests'],
             formatter=record.level.formats.get(

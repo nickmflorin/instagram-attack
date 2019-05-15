@@ -7,3 +7,4 @@ maxminddb
 proxybroker
 plumbum
 tortoise-orm
+PyYAML

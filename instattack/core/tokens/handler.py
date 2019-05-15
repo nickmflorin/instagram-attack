@@ -37,6 +37,7 @@ class TokenHandler(GetRequestHandler):
 
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
         self.num_attempts = 0
+        self.save_tasks = []
 
     async def run(self, loop):
         """
@@ -94,11 +95,19 @@ class TokenHandler(GetRequestHandler):
             connector=self._connector,
             timeout=self._timeout
         ) as session:
-            return await limit_on_success(
+            result = await limit_on_success(
                 self.token_task_generator(loop, session),
                 batch_size=self.batch_size,
                 max_tries=self.max_tries
             )
+
+        # If we return the result right away, the handler will be stopped and
+        # leftover tasks will be cancelled.  We have to make sure to save the
+        # proxies before doing that.
+        leftover = [tsk for tsk in self.save_tasks if not tsk.done()]
+        self.log.info(f'Cleaning Up {len(leftover)} Proxy Saves...')
+        await asyncio.gather(*self.save_tasks)
+        return result
 
     async def fetch_with_proxy(self, loop, session, context, proxy):
         """
@@ -119,8 +128,11 @@ class TokenHandler(GetRequestHandler):
                     token = self._get_token_from_response(response)
                 except TokenNotInResponse as e:
                     # This seems to happen a lot more when using the HTTP scheme
-                    # vs. the HTTPS scheme.
-                    loop.call_soon(self.add_proxy_error, proxy, e)
+                    # vs. the HTTPS scheme.  Not sure if we want to note this as
+                    # an error or inconclusive.
+                    task = asyncio.create_task(self.proxy_error(proxy, e))
+                    self.save_tasks.append(task)
+
                     self.log.error(e, extra={
                         'context': context,
                         'response': response
@@ -128,20 +140,26 @@ class TokenHandler(GetRequestHandler):
                 else:
                     # Start storing number of successful/unsuccessful requests.
                     # Note that proxy was a good candidate.
-                    loop.call_soon(self.add_proxy_success, proxy)
+                    task = asyncio.create_task(self.proxy_success(proxy))
+                    self.save_tasks.append(task)
                     return token
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
             self.log.error(e, extra={'context': context})
-            loop.call_soon(self.add_proxy_error, proxy, e)
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
 
         except aiohttp.ClientError as e:
             self.log.error(e, extra={'context': context})
-            loop.call_soon(self.add_proxy_error, proxy, e)
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
 
         except asyncio.CancelledError:
-            loop.call_soon(self.maintain_proxy, proxy)
+            # Don't want to mark as inconclusive because we don't want to note
+            # the last time the proxy was used.
+            pass
 
         except (TimeoutError, asyncio.TimeoutError) as e:
             self.log.error(e, extra={'context': context})
-            loop.call_soon(self.add_proxy_error, proxy, e)
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)

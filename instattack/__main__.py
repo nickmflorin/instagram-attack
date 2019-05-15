@@ -15,7 +15,7 @@ from .logger import (
     AppLogger, apply_external_loggers, disable_external_loggers, progressbar_wrap)
 from .lib import validate_log_level, get_env_file, write_env_file
 from .core.utils import cancel_remaining_tasks
-from .cli import Instattack
+from .cli import EntryPoint
 
 """
 May want to catch other signals too - these are not currently being
@@ -99,7 +99,7 @@ def start(loop, args):
     # that.
     with progressbar_wrap():
         try:
-            Instattack.run()
+            EntryPoint.run()
         except ArgumentTypeError as e:
             log.error(e)
         finally:
@@ -118,7 +118,13 @@ def shutdown(loop, signal=None):
 
     log.start('Cancelling Tasks')
     cancelled = loop.run_until_complete(cancel_remaining_tasks())
-    log.complete(f'Cancelled {cancelled} Tasks')
+    if len(cancelled) != 0:
+        log.complete(f'Cancelled {len(cancelled)} Tasks')
+        log.before_lines()
+        for task in cancelled:
+            log.line(task._coro.__name__)
+    else:
+        log.complete('No Leftover Tasks to Cancel')
 
     log.start('Shutting Down Database')
     loop.run_until_complete(tortoise.Tortoise.close_connections())

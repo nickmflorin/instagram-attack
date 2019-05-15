@@ -66,19 +66,19 @@ class RequestHandler(MethodHandler):
             total=self.timeout
         )
 
-    def maintain_proxy(self, proxy):
-        """
-        >>> Not sure if using these callbacks versus just creating the tasks immediately
-        >>> in the async func makes a huge difference, but we'll keep for now.
-        """
-        proxy.update_time()
-        asyncio.create_task(self.proxy_handler.pool.put(proxy))
+    async def proxy_success(self, proxy):
+        proxy.success()
+        self.log.info('Saving Proxy', extra={'proxy': proxy})
+        await proxy.save()
+        await self.proxy_handler.pool.put(proxy)
 
-    def add_proxy_success(self, proxy):
-        proxy.was_success()
-        asyncio.create_task(self.proxy_handler.pool.put(proxy))
+    async def proxy_inconclusive(self, proxy):
+        proxy.inconclusive()
+        self.log.info('Saving Proxy', extra={'proxy': proxy})
+        await proxy.save()
+        await self.proxy_handler.pool.put(proxy)
 
-    def add_proxy_error(self, proxy, e):
+    async def proxy_error(self, proxy, e):
         """
         Since errors are stored as foreign keys and not on the proxy, we
         have to save them.  That is a lot of database transactions that
@@ -90,5 +90,7 @@ class RequestHandler(MethodHandler):
         >>> Not sure if using these callbacks versus just creating the tasks immediately
         >>> in the async func makes a huge difference, but we'll keep for now.
         """
-        proxy.was_error(e)
-        asyncio.create_task(self.proxy_handler.pool.put(proxy))
+        proxy.error(e)
+        self.log.info('Saving Proxy', extra={'proxy': proxy})
+        await proxy.save()
+        await self.proxy_handler.pool.put(proxy)

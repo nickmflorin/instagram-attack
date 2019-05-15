@@ -8,10 +8,10 @@ from instattack.core.proxies.exceptions import PoolNoProxyError
 from instattack.core.proxies import ProxyHandler, Proxy
 from instattack.core.proxies.utils import remove_proxies
 
-from .base import Instattack, BaseApplication
+from .base import EntryPoint, BaseApplication
 
 
-@Instattack.subcommand('proxies')
+@EntryPoint.subcommand('proxies')
 class BaseProxy(BaseApplication):
 
     __group__ = 'Proxy Pool'

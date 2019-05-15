@@ -88,6 +88,15 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin):
     method = fields.CharField(max_length=4)
     schemes = fields.JSONField(default=[])
 
+    # Invalid means that the last request this was used for resulted in a
+    # fatal error.
+    invalid = fields.BooleanField(default=False)
+
+    # Confirmed means that the last request this was used for did not result in
+    # an error that would cause it to be invalid, but instead resulted in a
+    # a result or in an error that does not rule out the validity of the proxy.
+    confirmed = fields.BooleanField(default=False)
+
     errors = fields.JSONField(default={})
     num_successful_requests = fields.IntField(default=0)
     num_failed_requests = fields.IntField(default=0)
@@ -95,6 +104,7 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin):
 
     # Used to determine if the proxy is fundamentally different in database.
     priority_fields = (
+        (-1, 'state'),
         (-1, 'num_successful_requests'),
         (1, 'flattened_error_rate'),
         (-1, 'time_since_used'),
@@ -117,6 +127,22 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin):
     @property
     def num_requests(self):
         return self.num_successful_requests + self.num_failed_requests
+
+    @property
+    def state(self):
+        if self.confirmed:
+            return 1
+        elif self.invalid:
+            return -1
+        return 0
+
+    @property
+    def humanized_state(self):
+        if self.confirmed:
+            return 'Confirmed'
+        elif self.invalid:
+            return 'Invalid'
+        return 'Inconclusive'
 
     @property
     def error_rate(self):
@@ -180,14 +206,21 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin):
         else:
             self.errors[err_name] = 1
 
-    def was_success(self):
+    def success(self):
         self.update_time()
         self.num_successful_requests += 1
+        self.invalid = False
+        self.confirmed = True
 
-    def was_error(self, e):
+    def inconclusive(self):
+        self.update_time()
+
+    def error(self, e):
         self.update_time()
         self.add_error(e)
         self.num_failed_requests += 1
+        self.invalid = True
+        self.confirmed = False
 
     def update_time(self):
         self.last_used = datetime.now()
@@ -247,6 +280,10 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin):
     async def save(self, *args, **kwargs):
         if self.method not in ["GET", "POST"]:
             raise tortoise.exceptions.IntegrityError(f"Invalid method {self.method}.")
+
+        if self.confirmed and self.invalid:
+            raise tortoise.exceptions.IntegrityError(
+                f"Proxy cannot be both confirmed and invalid.")
 
         if not self.errors:
             self.errors = {}

@@ -53,7 +53,7 @@ class BaseApplication(cli.Application, LoggableMixin):
         os.environ['SILENT_SHUTDOWN'] = "1"
 
 
-class Instattack(BaseApplication):
+class EntryPoint(BaseApplication):
 
     def main(self, *args):
         self.validate(*args)

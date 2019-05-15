@@ -3,15 +3,15 @@ from plumbum import cli
 
 from instattack.core.users import User
 
-from .base import Instattack, BaseApplication
+from .base import EntryPoint, BaseApplication
 
 
-@Instattack.subcommand('users')
+@EntryPoint.subcommand('users')
 class BaseUsers(BaseApplication):
     pass
 
 
-@Instattack.subcommand('user')
+@EntryPoint.subcommand('user')
 class BaseUser(BaseApplication):
     pass
 

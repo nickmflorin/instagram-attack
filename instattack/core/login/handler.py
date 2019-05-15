@@ -36,6 +36,8 @@ class LoginHandler(PostRequestHandler):
         self.attempts_count = collections.Counter()  # Indexed by Password
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
+        self.save_tasks = []
+
     async def run(self, loop, token):
 
         await self.prepopulate(loop)
@@ -51,7 +53,14 @@ class LoginHandler(PostRequestHandler):
         async for password in self.user.generate_attempts(loop, limit=self.limit):
             futures.append(self.passwords.put(password))
 
-        await asyncio.gather(*futures)
+        results = await asyncio.gather(*futures)
+        for res in results:
+            try:
+                res.result()
+            except Exception as e:
+                self.log.traceback(e)
+                raise e
+
         if len(futures) == 0:
             raise NoPasswordsError()
 
@@ -141,6 +150,7 @@ class LoginHandler(PostRequestHandler):
                 await self.results.put(res)
 
                 if res.authorized:
+                    self.log.debug('Authorized Result: Setting Stop Event')
                     self.stop_event.set()
                     break
 
@@ -157,7 +167,26 @@ class LoginHandler(PostRequestHandler):
                 connector=self._connector,
                 timeout=self._timeout
             ) as session:
-                return await self.login_with_password(loop, session, token, password)
+                result = await self.login_with_password(loop, session, token, password)
+
+        # If we return the result right away, the handler will be stopped and
+        # leftover tasks will be cancelled.  We have to make sure to save the
+        # proxies before doing that.
+        leftover = [tsk for tsk in self.save_tasks if not tsk.done()]
+        self.log.info(f'Cleaning Up {len(leftover)} Proxy Saves...')
+        save_results = await asyncio.gather(*self.save_tasks, return_exceptions=True)
+
+        leftover = [tsk for tsk in self.save_tasks if not tsk.done()]
+        self.log.info(f'Done Cleaning Up {len(leftover)} Proxy Saves...')
+
+        for i, res in enumerate(save_results):
+            self.log.info('Checking Save Result %s' % i)
+            if isinstance(res, Exception):
+                self.log.critical('Found exception')
+
+        leftover = [tsk for tsk in self.save_tasks if not tsk.done()]
+        self.log.info(f'Now {len(leftover)} Tasks.')
+        return result
 
     async def login_with_password(self, loop, session, token, password):
         """
@@ -186,6 +215,72 @@ class LoginHandler(PostRequestHandler):
             self.attempt_batch_size
         )
 
+    def handle_response_error(self, e):
+        if isinstance(e, RuntimeError):
+            """
+            RuntimeError: File descriptor 87 is used by transport
+            <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
+            """
+            self.log.error(e, extra={'context': context})
+            task = asyncio.create_task(self.proxy_inconclusive(proxy))
+            self.save_tasks.append(task)
+
+        elif isinstance(e, asyncio.CancelledError):
+            # Don't want to mark as inconclusive because we don't want to note
+            # the last time the proxy was used.
+            pass
+
+        elif isinstance(e, (
+            aiohttp.ClientError,
+            aiohttp.ClientProxyConnectionError,
+            aiohttp.ClientConnectionError,
+            aiohttp.ServerTimeoutError,
+            asyncio.TimeoutError,
+        )):
+            if isinstance(e, aiohttp.ClientError) and e.status == 429:
+                # For whatever reason these errors don't have any message...
+                e.message = 'Too many requests.'
+
+            self.log.error(e, extra={'context': context})
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
+
+        except OSError as e:
+            # We have only seen this for the following:
+            # >>> OSError: [Errno 24] Too many open files -> Want to sleep
+            # >>> OSError: [Errno 54] Connection reset by peer
+            if e.errno == 54:
+                # Not sure if we want to note this at all.
+                task = asyncio.create_task(self.proxy_inconclusive(proxy, e))
+                self.save_tasks.append(task)
+
+            elif e.errno == 24:
+                await asyncio.sleep(3)
+                self.log.error(e, extra={
+                    'context': context,
+                    'other': f'Sleeping for {3} seconds...'
+                })
+                # Not sure if we want to note this at all.
+                task = asyncio.create_task(self.proxy_inconclusive(proxy, e))
+                self.save_tasks.append(task)
+            else:
+                raise e
+
+        except asyncio.CancelledError as e:
+            # Don't want to mark as inconclusive because we don't want to note
+            # the last time the proxy was used.
+            pass
+
+        except aiohttp.ClientError as e:
+            # For whatever reason these errors don't have any message...
+            if e.status == 429:
+                e.message = 'Too many requests.'
+
+            self.log.error(e, extra={'context': context})
+
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
+
     async def login_request(self, loop, session, token, password, proxy, index=None):
         """
         TODO
@@ -201,8 +296,6 @@ class LoginHandler(PostRequestHandler):
             token=token,
             proxy=proxy,
         )
-
-        self.log.debug('Login Request', extra={'context': context})
         try:
             async with session.post(
                 settings.INSTAGRAM_LOGIN_URL,
@@ -214,55 +307,68 @@ class LoginHandler(PostRequestHandler):
                 try:
                     result = await self._handle_client_response(response, context)
                 except ResultNotInResponse as e:
-                    loop.call_soon(self.add_proxy_error, proxy, e)
-                    self.log.error(e, extra={'response': response, 'context': context})
+                    self.log.error(e, extra={
+                        'response': response,
+                        'context': context
+                    })
+                    # Not sure if we want to note this as an error or not, it might
+                    # be better to note as inconclusive.
+                    task = asyncio.create_task(self.proxy_error(proxy, e))
+                    self.save_tasks.append(task)
                 else:
                     try:
                         result = await self._handle_parsed_result(result, context)
                     except InstagramResultError as e:
-                        loop.call_soon(self.add_proxy_error, proxy, e)
                         self.log.error(e, extra={'response': response, 'context': context})
+                        # Not sure if we want to note this as an error or not, it might
+                        # be better to note as inconclusive.
+                        task = asyncio.create_task(self.proxy_error(proxy, e))
+                        self.save_tasks.append(task)
                     else:
                         if not result:
                             raise RuntimeError("Result should not be None here.")
-                        loop.call_soon(self.add_proxy_success, proxy)
+
+                        task = asyncio.create_task(self.proxy_success(proxy))
+                        self.save_tasks.append(task)
+
                         return result
 
-        # TODO: For certain situations, we might want to mark the proxy as invalid,
-        # so that we can still put it back in the pool so it will not be lost but
-        # we don't want to reuse it.  Have to branch out of the add_proxy_error
-        # method so that we can add the error but mark it as invalid/not
         except RuntimeError as e:
             """
             RuntimeError: File descriptor 87 is used by transport
             <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
             """
-            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
+
+            task = asyncio.create_task(self.proxy_inconclusive(proxy))
+            self.save_tasks.append(task)
 
         except (aiohttp.ClientProxyConnectionError, aiohttp.ServerTimeoutError) as e:
-            # Situation in which we would want to mark proxy as invalid.
-            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
+
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
 
         except asyncio.TimeoutError as e:
-            # Situation in which we would want to mark proxy as invalid.
-            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
 
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
+
         except aiohttp.ClientConnectionError as e:
-            # Situation in which we would want to mark proxy as invalid.
-            loop.call_soon(self.add_proxy_error, proxy, e)
             self.log.error(e, extra={'context': context})
+
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
 
         except OSError as e:
             # We have only seen this for the following:
             # >>> OSError: [Errno 24] Too many open files -> Want to sleep
             # >>> OSError: [Errno 54] Connection reset by peer
             if e.errno == 54:
-                # Not sure if we should maintain proxy or not?
-                loop.call_soon(self.add_proxy_error, proxy, e)
-                self.log.error(e, extra={'context': context})
+                # Not sure if we want to note this at all.
+                task = asyncio.create_task(self.proxy_inconclusive(proxy, e))
+                self.save_tasks.append(task)
 
             elif e.errno == 24:
                 await asyncio.sleep(3)
@@ -270,23 +376,26 @@ class LoginHandler(PostRequestHandler):
                     'context': context,
                     'other': f'Sleeping for {3} seconds...'
                 })
-                loop.call_soon(self.maintain_proxy, proxy)
+                # Not sure if we want to note this at all.
+                task = asyncio.create_task(self.proxy_inconclusive(proxy, e))
+                self.save_tasks.append(task)
             else:
                 raise e
 
         except asyncio.CancelledError as e:
-            loop.call_soon(self.maintain_proxy, proxy)
+            # Don't want to mark as inconclusive because we don't want to note
+            # the last time the proxy was used.
+            pass
 
         except aiohttp.ClientError as e:
             # For whatever reason these errors don't have any message...
             if e.status == 429:
                 e.message = 'Too many requests.'
 
-                loop.call_soon(self.add_proxy_error, proxy, e)
-                self.log.error(e, extra={'context': context})
-            else:
-                loop.call_soon(self.add_proxy_error, proxy, e)
-                self.log.error(e, extra={'context': context})
+            self.log.error(e, extra={'context': context})
+
+            task = asyncio.create_task(self.proxy_error(proxy, e))
+            self.save_tasks.append(task)
 
     async def save(self, loop):
         self.log.info('Dumping Password Attempts')

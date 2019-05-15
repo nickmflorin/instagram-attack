@@ -2,10 +2,10 @@ import asyncio
 
 from .proxies import BaseProxy
 from .attack import BaseAttack
-from .base import Instattack, BaseApplication
+from .base import EntryPoint, BaseApplication
 
 
-@Instattack.subcommand('test')
+@EntryPoint.subcommand('test')
 class Test(BaseApplication):
     pass
 

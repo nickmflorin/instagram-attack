@@ -91,6 +91,7 @@ async def cancel_remaining_tasks(futures=None):
 
     tasks = [task for task in futures if task is not
          asyncio.tasks.Task.current_task()]
+
     list(map(lambda task: task.cancel(), tasks))
     await asyncio.gather(*tasks, return_exceptions=True)
-    return len(tasks)
+    return tasks

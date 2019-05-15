@@ -94,7 +94,8 @@ class LoggingLevels(FormattedEnum):
             LoggingLevels.STOP,
             LoggingLevels.START,
             LoggingLevels.COMPLETE,
-            LoggingLevels.CRITICAL
+            LoggingLevels.CRITICAL,
+            LoggingLevels.INFO
         ]:
             return self.format.without_text_decoration()
         return RecordAttributes.MESSAGE
