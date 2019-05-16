@@ -1,24 +1,21 @@
-from plumbum.path import LocalPath
+from .utils import get_root, dir_str
 
-
-def get_root():
-    parents = LocalPath(__file__).parents
-    return [p for p in parents if p.name == APP_NAME][0].parent
-
-
-def dir_str(path):
-    return "%s/%s" % (path.dirname, path.name)
-
-
+# Directory Configuration
 APP_NAME = 'instattack'
 DB_NAME = APP_NAME
 
 ROOT_DIR = get_root()
 USER_DIR = ROOT_DIR / "users"
 
-PASSWORDS = "passwords"
-ALTERATIONS = "alterations"
-NUMERICS = "numerics"
+# Instagram Constants
+INSTAGRAM_URL = 'https://www.instagram.com/'
+INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
+
+URLS = {
+    'GET': INSTAGRAM_URL,
+    'POST': INSTAGRAM_LOGIN_URL
+}
+
 
 # Database Configuration
 DB_PATH = ROOT_DIR / f"{APP_NAME}.db"
@@ -37,39 +34,41 @@ DB_CONFIG = {
     'apps': {
         'models': {
             'models': [
-                'instattack.core.proxies.models',
-                'instattack.core.users.models',
+                'instattack.proxies.models',
+                'instattack.users.models',
             ],
             'default_connection': 'default',
         }
     }
 }
 
+VERSION = 18
+RELEASE = 4.3
+MFG = "Xiaomi"
+MODEL = "HM 1SW"
+
+# TODO: Come Up with List of User Agents
+USERAGENT = (
+    f'Instagram 9.2.0 Android ({VERSION}/{RELEASE}; '
+    f'320dpi; 720x1280; {MFG}; {MODEL}; armani; qcom; en_US)'
+)
 
 # Instagram Requests
 HEADER = {
     'Referer': 'https://www.instagram.com/',
-    'Content-Type': 'application/x-www-form-urlencoded',
-}
-TOKEN_HEADER = 'x-csrftoken'
-
-INSTAGRAM_USERNAME_FIELD = 'username'
-INSTAGRAM_PASSWORD_FIELD = 'password'
-
-# Instagram Response
-CHECKPOINT_REQUIRED = "checkpoint_required"
-GENERIC_REQUEST_ERROR = 'generic_request_error'
-GENERIC_REQUEST_MESSAGE = 'Sorry, there was a problem with your request.'
-
-INSTAGRAM_URL = 'https://www.instagram.com/'
-INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
-
-URLS = {
-    'GET': INSTAGRAM_URL,
-    'POST': INSTAGRAM_LOGIN_URL
+    "User-Agent": USERAGENT,
+    # 'Content-Type': 'application/x-www-form-urlencoded',
 }
 
-# Proxies
+
+def HEADERS(token=None):
+    headers = HEADER.copy()
+    if token:
+        headers["X-CSRFToken"] = token
+    return headers
+
+
+# Proxies Constants
 PROXY_COUNTRIES = {
     'GET': [],
     'POST': [],
@@ -93,27 +92,3 @@ LEVELS = [
 ]
 
 METHODS = ['GET', 'POST']
-
-USER_AGENTS = [
-    'Googlebot/2.1 (+http://www.google.com/bot.html)',
-    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Safari/537.36',  # noqa
-    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; Google Web Preview Analytics) Chrome/27.0.1453 Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 8_3 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Version/8.0 Mobile/12F70 Safari/600.1.4 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 8_3 like Mac OS X) AppleWebKit/600.1.4 (KHTML, like Gecko) Version/8.0 Mobile/12F70 Safari/600.1.4 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',  # noqa
-    'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 6_0 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/6.0 Mobile/10A5376e Safari/8536.25 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',  # noqa
-    'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.96 Mobile Safari/537.36 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',  # noqa
-    'Mozilla/5.0 (compatible; bingbot/2.0;  http://www.bing.com/bingbot.htm)',
-    'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
-    'Mozilla/5.0 (compatible; adidxbot/2.0;  http://www.bing.com/bingbot.htm)',
-    'Mozilla/5.0 (compatible; adidxbot/2.0; +http://www.bing.com/bingbot.htm)',
-    'Mozilla/5.0 (seoanalyzer; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
-    'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) SitemapProbe',
-    'Mozilla/5.0 (Windows Phone 8.1; ARM; Trident/7.0; Touch; rv:11.0; IEMobile/11.0; NOKIA; Lumia 530) like Gecko (compatible; adidxbot/2.0; +http://www.bing.com/bingbot.htm)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53 (compatible; adidxbot/2.0;  http://www.bing.com/bingbot.htm)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53 (compatible; adidxbot/2.0; +http://www.bing.com/bingbot.htm)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53 (compatible; bingbot/2.0;  http://www.bing.com/bingbot.htm)',  # noqa
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 7_0 like Mac OS X) AppleWebKit/537.51.1 (KHTML, like Gecko) Version/7.0 Mobile/11A465 Safari/9537.53 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',  # noqa
-]

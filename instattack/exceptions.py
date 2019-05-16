@@ -39,6 +39,16 @@ class HttpException(AppException):
     pass
 
 
+class ClientResponseError(HttpException):
+
+    def __init__(self, response):
+        self.response = response
+        self.status_code = response.status
+
+    def __str__(self):
+        return f"[{self.status_code}] {self.__message__}"
+
+
 class InvalidFileLine(AppException):
     def __init__(self, index, line, reason=None):
         self.index = index

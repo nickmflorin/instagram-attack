@@ -8,7 +8,6 @@ token:
 
     connection:
         limit_per_host: 0
-        force_close: False
         timeout: 5
         limit: 50
 
@@ -37,7 +36,6 @@ login:
 
     connection:
         limit_per_host: 0
-        force_close: False
         timeout: 5
         limit: 200
 

@@ -1,6 +1,5 @@
 from argparse import ArgumentTypeError
 from plumbum.path import LocalPath, Path
-import yaml
 
 from instattack.settings import LEVELS, METHODS, ROOT_DIR, dir_str
 
