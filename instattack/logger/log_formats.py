@@ -1,4 +1,4 @@
-from .items import LogItem, LogItemLine, LogItemLines
+from .items import Separator, Item, Line, Lines
 from .formats import RecordAttributes, LoggingLevels
 from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
@@ -9,26 +9,23 @@ from .utils import (
 def message_items(record):
 
     return [
-        LogItem(
-            formatter=record.level.formats.get(
-                'method', RecordAttributes.METHOD),
+        Item(
+            formatter=RecordAttributes.METHOD,
             getter=get_record_request_method,
-            suffix=":",
         ),
-        LogItem(
-            formatter=record.level.formats.get(
-                'reason', RecordAttributes.REASON),
+        Separator(': '),
+        Item(
+            formatter=RecordAttributes.REASON,
             getter=get_record_response_reason,
-            suffix=" -",
         ),
-        LogItem(
+        Separator(' - '),
+        Item(
             formatter=get_message_formatter(record),
             getter=get_record_message,
             line_index=getattr(record, 'line_index', None),
         ),
-        LogItem(
-            formatter=record.level.formats.get(
-                'status_code', RecordAttributes.STATUS_CODE),
+        Item(
+            formatter=RecordAttributes.STATUS_CODE,
             getter=get_record_status_code,
         ),
     ]
@@ -36,19 +33,24 @@ def message_items(record):
 
 def primary_items(record):
     return [
-        LogItem(
+        Item(
             formatter=RecordAttributes.DATETIME,
             getter=get_record_time,
         ),
-        LogItem(
+        Item(
             params="name",
-            suffix=" -",
             formatter=record.level.formats.get(
                 'name', RecordAttributes.NAME),
         ),
-        LogItem(
+        Separator(': '),
+        Item(
+            params="subname",
+            formatter=record.level.formats.get(
+                'subname', RecordAttributes.SUBNAME),
+        ),
+        Separator('  '),
+        Item(
             params="levelname",
-            suffix=" ",
             formatter=get_level_formatter(record),
         )
     ]
@@ -56,10 +58,10 @@ def primary_items(record):
 
 def simple_lines(record, indent=None):
     return [
-        LogItemLine(
+        Line(
             *primary_items(record)
         ),
-        LogItemLine(
+        Line(
             *message_items(record),
             indent=indent
         )
@@ -68,59 +70,53 @@ def simple_lines(record, indent=None):
 
 def proxy_lines(record, indent=None):
     return [
-        LogItem(
+        Item(
             params=['proxy.method', 'context.proxy.method'],
-            formatter=record.level.formats.get(
-                'method', RecordAttributes.METHOD),
+            formatter=RecordAttributes.METHOD,
         ),
-        LogItem(
+        Item(
             params=['proxy.url', 'context.proxy.url'],
-            formatter=record.level.formats.get(
-                'proxy', RecordAttributes.PROXY),
+            formatter=RecordAttributes.PROXY
         ),
-        LogItem(
+        Item(
             params=['proxy.humanized_state', 'context.proxy.humanized_state'],
             formatter=RecordAttributes.PROXY,
         ),
-        LogItem(
+        Item(
             label="Num Requests",
             params=['proxy.num_requests', 'context.proxy.num_requests'],
-            formatter=record.level.formats.get(
-                'num_requests', RecordAttributes.NUM_REQUESTS),
+            formatter=RecordAttributes.NUM_REQUESTS,
         )
     ]
 
 
 def context_lines(record, indent=None):
     return [
-        LogItemLine(
-            LogItem(
+        Line(
+            Item(
                 params=['index', 'context.index'],
                 label="Index",
-                formatter=record.level.formats.get(
-                    'index', RecordAttributes.INDEX),
+                formatter=RecordAttributes.INDEX,
                 indent=indent
             )
         ),
-        LogItemLine(
-            LogItem(
+        Line(
+            Item(
                 params=['parent_index', 'context.parent_index'],
                 label="Parent Index",
-                formatter=record.level.formats.get(
-                    'index', RecordAttributes.INDEX),
+                formatter=RecordAttributes.INDEX,
                 indent=indent
             )
         ),
-        LogItemLine(
-            LogItem(
+        Line(
+            Item(
                 params=['password' 'context.password'],
                 label="Password",
-                formatter=record.level.formats.get(
-                    'password', RecordAttributes.PASSWORD),
+                formatter=RecordAttributes.PASSWORD,
                 indent=indent
             )
         ),
-        LogItemLine(
+        Line(
             *proxy_lines(record),
             label="Proxy",
             indent=indent,
@@ -129,38 +125,35 @@ def context_lines(record, indent=None):
 
 
 def traceback_line(record, indent=None):
-    return LogItemLine(
-        LogItem(
+    return Line(
+        Separator('('),
+        Item(
             params="filename",
-            suffix=",",
-            formatter=record.level.formats.get(
-                'filename', RecordAttributes.FILENAME)
+            formatter=RecordAttributes.FILENAME
         ),
-        LogItem(
+        Separator(','),
+        Item(
             params="funcName",
-            suffix=",",
-            formatter=record.level.formats.get(
-                'funcName', RecordAttributes.FUNCNAME)
+            formatter=RecordAttributes.FUNCNAME
         ),
-        LogItem(
+        Separator(','),
+        Item(
             params="lineno",
-            formatter=record.level.formats.get(
-                'lineno', RecordAttributes.LINENO)
+            formatter=RecordAttributes.LINENO
         ),
-        prefix="(",
-        suffix=")",
+        Separator(')'),
         indent=indent,
     )
 
 
 def BARE_FORMAT_STRING(record):
-    return LogItemLine(*message_items(record))
+    return Line(*message_items(record))
 
 
 def SIMPLE_FORMAT_STRING(record):
-    return LogItemLines(
+    return Lines(
         *simple_lines(record, indent=2),
-        newline=True
+        lines_above=1
     )
 
 
@@ -168,9 +161,9 @@ def EXTERNAL_FORMAT_STRING(record):
     level = LoggingLevels[record.levelname]
     setattr(record, 'level', level)
 
-    return LogItemLines(
+    return Lines(
         *simple_lines(record, indent=2),
-        newline=True
+        lines_above=1
     )
 
 
@@ -178,16 +171,27 @@ def LOG_FORMAT_STRING(record):
 
     no_indent = getattr(record, 'no_indent', False)
 
-    return LogItemLines(
+    return Lines(
         *simple_lines(record, indent=0 if no_indent else 2),
-        LogItemLine(
-            LogItem(
+        Line(
+            Item(
                 params="other",
                 indent=2,
                 formatter=record.level.formats.get(
                     'other', RecordAttributes.OTHER_MESSAGE)
             ),
         ),
-        *context_lines(record, indent=2),
-        traceback_line(record, indent=2),
+        Lines(
+            *context_lines(record, indent=2),
+            lines_above=1,
+            lines_below=1,
+        ),
+        Lines(
+            traceback_line(record, indent=2),
+            lines_above=0,
+            lines_below=0
+        ),
+        lines_above=1,
+        lines_below=0,
+        header_char="-",
     )

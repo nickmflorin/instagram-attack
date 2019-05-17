@@ -107,6 +107,7 @@ class RecordAttributes(FormattedEnum):
     DATETIME = Format(colors.fg('LightYellow3'), wrapper="[%s] ")
     MESSAGE = Format(colors.fg('Grey7'))
     NAME = Format(colors.fg('DarkGray'))
+    SUBNAME = Format(colors.black)
     OTHER_MESSAGE = Format(colors.fg('DarkGray'))
 
     # Exception Messages

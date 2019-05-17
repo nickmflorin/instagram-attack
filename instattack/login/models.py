@@ -61,6 +61,7 @@ class InstagramResultErrors:
 @dataclass
 class InstagramResult:
 
+    context: LoginAttemptContext
     status: str = None
     user: Optional[bool] = None
     authenticated: Optional[bool] = None
@@ -82,7 +83,8 @@ class InstagramResult:
             return (colors.fg('DarkGray') & colors.bold | string_rep)
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data, context):
+        data['context'] = context
         return from_dict(data_class=cls, data=data)
 
     @property

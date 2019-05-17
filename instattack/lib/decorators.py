@@ -5,12 +5,16 @@ from contextlib import ContextDecorator
 
 class starting_context(ContextDecorator):
 
-    def __init__(self, instance, name=None):
+    def __init__(self, instance, name=None, subname=None):
         self.instance = instance
         self.name = name or getattr(instance, 'name', None) or instance.__class__.__name__
+        self.subname = subname
 
     def __enter__(self):
-        self.instance.log.start(f'Starting {self.name}', frame_correction=1)
+        logger = self.instance.log
+        if self.subname:
+            logger = logger.sublogger(self.subname)
+        logger.start(f'Starting {self.name}', frame_correction=1)
         return self
 
     def __exit__(self, *exc):
@@ -24,7 +28,10 @@ class stopping_context(ContextDecorator):
         self.name = name or getattr(instance, 'name', None) or instance.__class__.__name__
 
     def __enter__(self):
-        self.instance.log.stop(f'Stopping {self.name}', frame_correction=1)
+        logger = self.instance.log
+        if self.subname:
+            logger = logger.sublogger(self.subname)
+        logger.stop(f'Stopping {self.name}', frame_correction=1)
         return self
 
     def __exit__(self, *exc):
@@ -37,7 +44,8 @@ def starting(*args):
 
         def _wrapped(instance, *args, **kwargs):
             log_name = name or instance.name
-            instance.log.start(f'Starting {log_name}', frame_correction=1)
+            sublog = instance.log.sublogger(func.__name__)
+            sublog.start(f'Starting {log_name}', frame_correction=1)
             return func(instance, *args, **kwargs)
 
         return _wrapped
@@ -54,7 +62,8 @@ def stopping(*args):
 
         def _wrapped(instance, *args, **kwargs):
             log_name = name or instance.name
-            instance.log.stop(f'Stopping {log_name}', frame_correction=1)
+            sublog = instance.log.sublogger(func.__name__)
+            sublog.stop(f'Stopping {log_name}', frame_correction=1)
             return func(instance, *args, **kwargs)
 
         return _wrapped

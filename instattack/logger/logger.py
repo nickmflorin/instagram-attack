@@ -27,6 +27,7 @@ def log_conditionally(func):
 class AppLogger(logging.Logger):
 
     def __init__(self, *args, **kwargs):
+        self.subname = kwargs.pop('subname', None)
         super(AppLogger, self).__init__(*args, **kwargs)
 
         self.line_index = 0
@@ -39,6 +40,10 @@ class AppLogger(logging.Logger):
         # in __main__ module right away.
         if os.environ.get('level'):
             self.setLevel(os.environ['level'])
+
+    def sublogger(self, subname):
+        logger = self.__class__(self.name, subname=subname)
+        return logger
 
     def conditional(self, value):
         self._condition = value
@@ -55,6 +60,7 @@ class AppLogger(logging.Logger):
 
     def makeRecord(self, *args, **kwargs):
         record = super(AppLogger, self).makeRecord(*args, **kwargs)
+        setattr(record, 'subname', self.subname)
 
         self.default(record, 'level_format')
         self.default(record, 'line_index')

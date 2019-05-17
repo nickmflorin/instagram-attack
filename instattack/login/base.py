@@ -110,13 +110,9 @@ class RequestHandler(MethodHandler):
             self._token = re.search('(?<="csrf_token":")\w+', text).group(0)
             if not self._token:
                 raise RuntimeError('Could not find token.')
-            self.log.info('Set Token: %s' % self._token)
 
             self._cookies = resp.cookies
-            self.log.info('Set Cookies')
-
             self._headers = settings.HEADERS(self._token)
-            self.log.info('Set Headers: %s' % self._headers)
             await sess.close()
 
         return self._cookies
@@ -212,7 +208,7 @@ class PostRequestHandler(RequestHandler):
             constants.INSTAGRAM_PASSWORD_FIELD: password
         }
 
-    async def parse_response_result(self, result):
+    async def parse_response_result(self, result, context):
         """
         Raises an exception if the result that was in the response is either
         non-conclusive or has an error in it.
@@ -220,7 +216,7 @@ class PostRequestHandler(RequestHandler):
         If the result does not have an error and is non conslusive, than we
         can assume that the proxy was most likely good.
         """
-        result = InstagramResult.from_dict(result)
+        result = InstagramResult.from_dict(result, context)
         if result.has_error:
             raise InstagramResultError(result.error_message)
         else:
@@ -228,7 +224,7 @@ class PostRequestHandler(RequestHandler):
                 raise InstagramResultError("Inconslusive result.")
             return result
 
-    async def handle_client_response(self, response):
+    async def handle_client_response(self, response, context):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
         InstagramResult object.
@@ -240,26 +236,26 @@ class PostRequestHandler(RequestHandler):
         via a `checkpoint_required` value, we cannot raise_for_status until after
         we try to first get the response json.
         """
-        try:
-            response.raise_for_status()
-        except (
-            aiohttp.client_exceptions.ClientResponseError,
-            aiohttp.ClientResponseError,
-            aiohttp.exceptions.ClientResponseError,
-        ) as e:
-            if response.status == 400:
-                try:
-                    json = await response.json()
-                except ValueError:
-                    raise InvalidResponseJson(response)
-                else:
-                    return await self.parse_response_result(json)
-            else:
-                raise ClientResponseError(response)
-        else:
+        if response.status == 400:
             try:
                 json = await response.json()
             except ValueError:
                 raise InvalidResponseJson(response)
             else:
-                return await self.parse_response_result(json)
+                return await self.parse_response_result(json, context)
+        else:
+            try:
+                response.raise_for_status()
+            except (
+                aiohttp.client_exceptions.ClientResponseError,
+                aiohttp.ClientResponseError,
+                aiohttp.exceptions.ClientResponseError,
+            ) as e:
+                raise ClientResponseError(response)
+            else:
+                try:
+                    json = await response.json()
+                except ValueError:
+                    raise InvalidResponseJson(response)
+                else:
+                    return await self.parse_response_result(json, context)
