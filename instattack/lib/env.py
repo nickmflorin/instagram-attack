@@ -1,4 +1,4 @@
-from instattack import settings
+from instattack.conf import settings
 
 
 def get_env_file():

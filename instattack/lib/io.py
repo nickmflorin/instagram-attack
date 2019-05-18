@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import aiofiles
 
 
@@ -19,7 +17,7 @@ async def stream_raw_data(filepath, limit=None):
             break
         yield line
     """
-    from instattack.exceptions import InvalidFileLine
+    from instattack.src.exceptions import InvalidFileLine
 
     count = 0
     async with aiofiles.open(filepath) as f:

@@ -1,5 +1,5 @@
 from .items import Separator, Item, Line, Lines
-from .formats import RecordAttributes, LoggingLevels
+from .constants import RecordAttributes
 from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
     get_record_message, get_level_formatter, get_message_formatter,
@@ -7,7 +7,6 @@ from .utils import (
 
 
 def message_items(record):
-
     return [
         Item(
             formatter=RecordAttributes.METHOD,
@@ -39,18 +38,16 @@ def primary_items(record):
         ),
         Item(
             params="name",
-            formatter=record.level.formats.get(
-                'name', RecordAttributes.NAME),
+            formatter=RecordAttributes.NAME
         ),
         Separator(': '),
         Item(
             params="subname",
-            formatter=record.level.formats.get(
-                'subname', RecordAttributes.SUBNAME),
+            formatter=RecordAttributes.SUBNAME
         ),
         Separator('  '),
         Item(
-            params="levelname",
+            params=["level.name"],
             formatter=get_level_formatter(record),
         )
     ]
@@ -131,12 +128,12 @@ def traceback_line(record, indent=None):
             params="filename",
             formatter=RecordAttributes.FILENAME
         ),
-        Separator(','),
+        Separator(', '),
         Item(
             params="funcName",
             formatter=RecordAttributes.FUNCNAME
         ),
-        Separator(','),
+        Separator(', '),
         Item(
             params="lineno",
             formatter=RecordAttributes.LINENO
@@ -157,28 +154,24 @@ def SIMPLE_FORMAT_STRING(record):
     )
 
 
-def EXTERNAL_FORMAT_STRING(record):
-    level = LoggingLevels[record.levelname]
-    setattr(record, 'level', level)
-
+def TRACEBACK_FORMAT_STRING(record):
     return Lines(
-        *simple_lines(record, indent=2),
-        lines_above=1
+        Line(*primary_items(record)),
+        Line(Item(
+            params=['msg'],
+            formatter=get_message_formatter(record),
+        ))
     )
 
 
 def LOG_FORMAT_STRING(record):
-
-    no_indent = getattr(record, 'no_indent', False)
-
     return Lines(
-        *simple_lines(record, indent=0 if no_indent else 2),
+        *simple_lines(record, indent=2),
         Line(
             Item(
                 params="other",
                 indent=2,
-                formatter=record.level.formats.get(
-                    'other', RecordAttributes.OTHER_MESSAGE)
+                formatter=RecordAttributes.OTHER_MESSAGE
             ),
         ),
         Lines(

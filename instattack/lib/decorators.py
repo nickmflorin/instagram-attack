@@ -1,6 +1,7 @@
 import functools
 
 from contextlib import ContextDecorator
+import inspect
 
 
 class starting_context(ContextDecorator):
@@ -11,10 +12,15 @@ class starting_context(ContextDecorator):
         self.subname = subname
 
     def __enter__(self):
-        logger = self.instance.log
+        # TODO: Is there anyway to determine if this is coming from an async
+        # or a sync function?  Sync logging will block thread, although that
+        # is probably not a big deal, since this isn't used often.
+        stack_info = inspect.stack()
+
+        logger = self.instance.log_sync
         if self.subname:
             logger = logger.sublogger(self.subname)
-        logger.start(f'Starting {self.name}', frame_correction=1)
+        logger.start(f'Starting {self.name}', stack_info=stack_info)
         return self
 
     def __exit__(self, *exc):
@@ -28,10 +34,15 @@ class stopping_context(ContextDecorator):
         self.name = name or getattr(instance, 'name', None) or instance.__class__.__name__
 
     def __enter__(self):
-        logger = self.instance.log
+        # TODO: Is there anyway to determine if this is coming from an async
+        # or a sync function?  Sync logging will block thread, although that
+        # is probably not a big deal, since this isn't used often.
+        stack_info = inspect.stack()
+
+        logger = self.instance.log_sync
         if self.subname:
             logger = logger.sublogger(self.subname)
-        logger.stop(f'Stopping {self.name}', frame_correction=1)
+        logger.stop(f'Stopping {self.name}', stack_info=stack_info)
         return self
 
     def __exit__(self, *exc):
@@ -43,9 +54,14 @@ def starting(*args):
     def _starting(func, name=None):
 
         def _wrapped(instance, *args, **kwargs):
+            # TODO: Is there anyway to determine if this is coming from an async
+            # or a sync function?  Sync logging will block thread, although that
+            # is probably not a big deal, since this isn't used often.
+            stack_info = inspect.stack()
+
             log_name = name or instance.name
-            sublog = instance.log.sublogger(func.__name__)
-            sublog.start(f'Starting {log_name}', frame_correction=1)
+            sublog = instance.log_sync.sublogger(func.__name__)
+            sublog.start(f'Starting {log_name}', stack_info=stack_info)
             return func(instance, *args, **kwargs)
 
         return _wrapped
@@ -61,9 +77,14 @@ def stopping(*args):
     def _stopping(func, name=None):
 
         def _wrapped(instance, *args, **kwargs):
+            # TODO: Is there anyway to determine if this is coming from an async
+            # or a sync function?  Sync logging will block thread, although that
+            # is probably not a big deal, since this isn't used often.
+            stack_info = inspect.stack()
+
             log_name = name or instance.name
-            sublog = instance.log.sublogger(func.__name__)
-            sublog.stop(f'Stopping {log_name}', frame_correction=1)
+            sublog = instance.log_sync.sublogger(func.__name__)
+            sublog.stop(f'Stopping {log_name}', stack_info=stack_info)
             return func(instance, *args, **kwargs)
 
         return _wrapped

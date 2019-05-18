@@ -2,8 +2,8 @@
 import argparse
 import asyncio
 
-from .lib import validate_log_level
-from .entry import start
+from instattack.conf.utils import validate_log_level
+from .cli import start
 
 
 def main():

@@ -1,7 +1,52 @@
 from datetime import datetime
+from enum import Enum
 from plumbum import colors
 
-from .formats import RecordAttributes, Format, DATE_FORMAT
+
+class Format(object):
+    def __init__(self, *args, wrapper=None, format_with_wrapper=False):
+        self.colors = args
+        self.wrapper = wrapper
+        self.format_with_wrapper = format_with_wrapper
+
+    def __call__(self, text):
+
+        if self.wrapper and self.format_with_wrapper:
+            text = self.wrapper % text
+
+        c = colors.do_nothing
+        for i in range(len(self.colors)):
+            c = c & self.colors[i]
+
+        # Apply wrapper after styling so we don't style the wrapper.
+        text = (c | text)
+
+        if self.wrapper and not self.format_with_wrapper:
+            text = self.wrapper % text
+        return text
+
+    def without_text_decoration(self):
+        undecorated = [c for c in self.colors
+            if c not in [colors.underline, colors.bold]]
+        return Format(
+            *undecorated,
+            wrapper=self.wrapper,
+            format_with_wrapper=self.format_with_wrapper
+        )
+
+
+class FormattedEnum(Enum):
+
+    def __init__(self, format):
+        if isinstance(format, dict):
+            self.format = format['base']
+            self.formats = format
+        else:
+            self.format = format
+            self.formats = {'base': format}
+
+    def __call__(self, text):
+        return self.format(text)
 
 
 def get_record_message(record):
@@ -42,19 +87,19 @@ def get_record_request_method(record):
 
 
 def get_record_time(record):
+    from .constants import DATE_FORMAT
     return datetime.now().strftime(DATE_FORMAT)
 
 
 def get_level_formatter(record):
-    if getattr(record, 'level_format', None):
-        return record.level_format
-    elif getattr(record, 'color', None):
+    if getattr(record, 'color', None):
         return Format(record.color, colors.bold)
     else:
-        return record.level
+        return record.level.format
 
 
 def get_message_formatter(record):
+    from .constants import RecordAttributes
     if getattr(record, 'highlight', None):
         return RecordAttributes.SPECIAL_MESSAGE
     elif getattr(record, 'level_format', None):

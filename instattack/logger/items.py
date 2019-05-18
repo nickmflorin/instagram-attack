@@ -1,10 +1,11 @@
 import re
-from .formats import RecordAttributes
+
 
 __all__ = (
-    'LogItem',
-    'LogItemLine',
-    'LogItemLines',
+    'Item',
+    'Separator',
+    'Line',
+    'Lines',
 )
 
 """
@@ -71,18 +72,17 @@ class AbstractObj(object):
         self,
         formatter=None,
         label=None,
-        label_formatter=RecordAttributes.LABEL,
         line_index=None,
-        line_index_formatter=RecordAttributes.LINE_INDEX,
         indent=None,
     ):
+        from .constants import RecordAttributes
         self._formatter = formatter
 
         self._label = label
-        self._label_formatter = label_formatter
+        self._label_formatter = RecordAttributes.LABEL
 
         self._line_index = line_index
-        self._line_index_formatter = line_index_formatter
+        self._line_index_formatter = RecordAttributes.LINE_INDEX
 
         self._indent = indent
 
@@ -199,17 +199,17 @@ class AbstractGroup(AbstractObj):
             return header
 
     def value(self, record):
-        # Component
         if self.valid:
             value = ""
             children = self.valid_children(record)
             for i, child in enumerate(children):
                 if isinstance(child, Separator):
-                    if i == len(children) - 1:
-                        continue
                     value += child.format(record)
                 else:
-                    value += (self.spacer + child.format(record))
+                    if i != 0 and not isinstance(children[i - 1], Separator):
+                        value += (self.spacer + child.format(record))
+                    else:
+                        value += child.format(record)
             return value
 
 
@@ -236,7 +236,6 @@ class Item(AbstractObj):
         return self.value(record) is not None
 
     def value(self, record):
-        # Component
         value = get_value(record, params=self.params, getter=self.getter)
         if value is not None:
             return self._format_component(

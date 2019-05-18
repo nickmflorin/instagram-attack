@@ -1,7 +1,11 @@
 import progressbar
 from plumbum import colors
 
-from instattack.logger.formats import Format
+from instattack.logger.utils import Format
+
+
+def percentage(num1, num2):
+    return f"{'{0:.2f}'.format((num1 / num2 * 100))} %"
 
 
 # TODO: Replace with Plumbum Progressbar

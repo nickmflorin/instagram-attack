@@ -38,6 +38,7 @@ def tb_context(frame):
     return {
         'lineno': frame.lineno,
         'filename': frame.filename,
+        'funcName': frame.function,
     }
 
 
