@@ -49,13 +49,6 @@ def validate_log_level(val):
         return val.upper()
 
 
-def validate_method(value):
-    from .settings import METHODS
-    if value.upper() not in METHODS:
-        raise ArgumentTypeError('Invalid method.')
-    return value.upper()
-
-
 def validate_config_filepath(value):
     """
     Validates the path specified or defaulted for the configuration file.  If the

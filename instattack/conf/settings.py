@@ -69,18 +69,8 @@ def HEADERS(token=None):
 
 
 # Proxies Constants
-PROXY_COUNTRIES = {
-    'GET': [],
-    'POST': [],
-}
-PROXY_TYPES = {
-    'GET': ['HTTP'],
-    'POST': ['HTTP'],
-}
-PROXY_POST = {
-    'GET': False,
-    'POST': True,
-}
+PROXY_COUNTRIES = []
+PROXY_TYPES = ["HTTP"]
 
 # General
 LEVELS = [
@@ -90,5 +80,3 @@ LEVELS = [
     'SUCCESS',
     'CRITICAL',
 ]
-
-METHODS = ['GET', 'POST']

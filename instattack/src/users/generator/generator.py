@@ -5,9 +5,6 @@ from .char_gen import char_gen
 from .case_gen import case_gen
 
 
-log = logger.get_async(__name__)
-
-
 """
 TODO
 ----
@@ -124,6 +121,8 @@ class password_gen(object):
         self.duplicates = []
 
     async def __call__(self):
+        log = logger.get_async("Generating Passwords")
+
         # Not sure if it makes sense to apply certain generators and not others.
         # combos = cls.all_combinations(cls.generators)
         # Definitely have to look over this logic and make sure we are not doing
@@ -163,6 +162,8 @@ class password_gen(object):
         await log.info(f'Generated {len(self.generated)} Passwords')
         if len(self.duplicates):
             await log.error(f'There Were {len(self.duplicates)} Generated Duplicates')
+
+        await log.shutdown()
 
     def yield_with(self, value):
         self.generated.append(value)

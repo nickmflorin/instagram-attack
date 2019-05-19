@@ -1,12 +1,10 @@
 import aiohttp
 import asyncio
-import contextlib
-import requests
 import re
 
 from instattack.conf import settings
 from instattack.src.exceptions import ClientResponseError
-from instattack.src.base import MethodHandler
+from instattack.src.base import Handler
 from instattack.src.login import constants
 
 from .exceptions import InvalidResponseJson, InstagramResultError
@@ -33,32 +31,7 @@ event loop to allow any open underlying connections to close.
 """
 
 
-class CS:
-
-    _cs: aiohttp.ClientSession
-
-    def __init__(self, cookies):
-        self._cs = ClientSession(connector=self._connector, cookies=cookies)
-
-    @property
-    def _connector(self):
-        return aiohttp.TCPConnector(
-            ssl=False,
-            force_close=True,
-            # limit=self.limit,
-            # limit_per_host=self.limit_per_host,
-            enable_cleanup_closed=True,
-        )
-
-    async def post(self, url):
-        async with self._cs.post(url) as resp:
-            return await resp.json()
-
-    async def close(self):
-        await self._cs.close()
-
-
-class RequestHandler(MethodHandler):
+class RequestHandler(Handler):
 
     def __init__(self, config, proxy_handler, **kwargs):
         super(RequestHandler, self).__init__(**kwargs)
@@ -68,10 +41,6 @@ class RequestHandler(MethodHandler):
         self._cookies = None
         self._token = None
 
-        if self.__method__ is None:
-            raise RuntimeError('Method should not be null.')
-
-        config = config.for_method(self.__method__)
         self.limit = config['connection']['limit']
         self.timeout = config['connection']['timeout']
         self.limit_per_host = config['connection']['limit_per_host']
@@ -162,7 +131,10 @@ class RequestHandler(MethodHandler):
         elif isinstance(e, (
             aiohttp.ClientProxyConnectionError,
             aiohttp.ServerConnectionError,
+            # Not sure why we have to add these even though they should be
+            # covered by their parents...
             aiohttp.ClientConnectorError,
+            aiohttp.ClientConnectorCertificateError,
         )):
             log.error(e, extra={'context': context})
             return asyncio.create_task(self.proxy_error(proxy, e))
@@ -200,8 +172,6 @@ class RequestHandler(MethodHandler):
 
 
 class PostRequestHandler(RequestHandler):
-
-    __method__ = 'POST'
 
     def _login_data(self, password):
         return {

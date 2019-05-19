@@ -98,40 +98,48 @@ class LoggerMixin(object):
     def _init(self, name, subname=None):
         self.subname = subname
 
-        self._condition = None
+        self._conditional = None
         self.line_index = 0
         self.log_once_messages = []
 
         # Environment variable might not be set for usages of AppLogger
         # in __main__ module right away.
-        if os.environ.get('level'):
-            self.setLevel(os.environ['level'])
+        if os.environ.get('LEVEL'):
+            self.setLevel(os.environ['LEVEL'])
 
     def sublogger(self, subname):
         logger = self.__class__(self.name, subname=subname)
         return logger
 
-    def conditional(self, value):
-        self._condition = value
+    def disable_on_false(self, value):
+        self._conditional = (value, False)
 
-    def create_conditional(self, value, subname=None):
+    def disable_on_true(self, value):
+        self._conditional = (value, True)
+
+    def condition_on_true(self, value, subname=None):
         logger = self.__class__(self.name, subname=subname)
-        logger.conditional(value)
+        logger.disable_on_true(value)
+        return logger
+
+    def condition_on_false(self, value, subname=None):
+        logger = self.__class__(self.name, subname=subname)
+        logger.disable_on_false(value)
         return logger
 
     @property
     def conditionally_disabled(self):
-        if self._condition is not None:
-            if self._condition is False:
+        if self._conditional is not None:
+            if self._conditional[0] == self._conditional[1]:
                 return True
         return False
 
     def updateLevel(self):
         # Environment variable might not be set for usages of AppLogger
         # in __main__ module right away.
-        if not os.environ.get('level'):
+        if not os.environ.get('LEVEL'):
             raise RuntimeError('Level is not in the environment variables.')
-        self.setLevel(os.environ['level'])
+        self.setLevel(os.environ['LEVEL'])
 
     def traceback(self, ex, raw=False):
         """
@@ -158,6 +166,7 @@ class LoggerMixin(object):
 class SyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
 
     __handlers__ = SYNC_HANDLERS
+    adaptable = ('info', 'warning', 'debug', 'error', 'critical', )
 
     def __init__(self, name, subname=None):
         super(SyncLogger, self).__init__(name)
@@ -166,10 +175,53 @@ class SyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
         for handler in self.__handlers__:
             self.addHandler(handler)
 
+    def _log(self, *args, **kwargs):
+        if not self.conditionally_disabled:  # Reason We Override
+            super(SyncLogger, self)._log(*args, **kwargs)
+
+    def adapt(self, obj):
+        """
+        Returns a copy of this instantiated logger class with the log methods
+        adapted to a new object.  Useful for adjusting the logging methods in
+        a single object and passing in the object.
+
+        Usage
+        -----
+
+        >>> class Adapter(object):
+        >>>     def info(self, message):
+        >>>         print(f"Adapted Message {message}")
+        >>>
+        >>> log = logger.get_sync('Test Logger')
+        >>> new_log = log.adapt(Adapter)
+        >>> new_log.info('Test')
+        >>>
+        >>> "Adapted Message Test"
+        """
+        adapted_logger = type(
+            'adapted_logger', self.__class__.__bases__, dict(self.__class__.__dict__))
+
+        methods = [
+            method_name for method_name in dir(obj)
+            if (
+                callable(getattr(obj, method_name)) and method_name in self.adaptable
+            )
+        ]
+
+        for method_name in methods:
+            new_method = getattr(obj, method_name)
+            # Produces a callable that behaves like the new method, but
+            # automatically passes in `self` as the first argument.
+            new_method = new_method.__get__(self)
+            setattr(adapted_logger, method_name, new_method)
+
+        return adapted_logger
+
 
 class AsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
 
     __handlers__ = ASYNC_HANDLERS
+    adaptable = ('info', 'warning', 'debug', 'error', 'critical', )
 
     def __init__(self, name, subname=None):
         aiologger.Logger.__init__(self, name=name)
@@ -177,6 +229,43 @@ class AsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
         self._init(name, subname=subname)
         for handler in self.__handlers__:
             self.addHandler(handler)
+
+    def adapt(self, obj, helpers=[]):
+        """
+        Returns a copy of this instantiated logger class with the log methods
+        adapted to a new object.  Useful for adjusting the logging methods in
+        a single object and passing in the object.
+
+        Usage
+        -----
+
+        >>> class Adapter(object):
+        >>>     def info(self, message):
+        >>>         print(f"Adapted Message {message}")
+        >>>
+        >>> log = logger.get_sync('Test Logger')
+        >>> new_log = log.adapt(Adapter)
+        >>> new_log.info('Test')
+        >>>
+        >>> "Adapted Message Test"
+        """
+        adapted_logger = type(
+            'adapted_logger', self.__class__.__bases__, dict(self.__class__.__dict__))
+
+        methods = [
+            method_name for method_name in dir(obj)
+            if (callable(getattr(obj, method_name)) and
+                (method_name in self.adaptable or method_name in helpers))
+        ]
+
+        for method_name in methods:
+            new_method = getattr(obj, method_name)
+            # Produces a callable that behaves like the new method, but
+            # automatically passes in `self` as the first argument.
+            new_method = new_method.__get__(self)
+            setattr(adapted_logger, method_name, new_method)
+
+        return adapted_logger
 
     async def _log(
         self,

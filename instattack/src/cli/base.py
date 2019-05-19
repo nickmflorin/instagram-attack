@@ -3,51 +3,50 @@ import asyncio
 from platform import python_version
 from plumbum import cli
 import tortoise
-import os
 
+from instattack import logger
 from instattack.conf import Configuration
-from instattack.conf.utils import validate_log_level
 from instattack.src.users import User
-from instattack.src.mixins import LoggableMixin
 
 from .attack import post_handlers, attack
 
 
-class BaseApplication(cli.Application, LoggableMixin):
+class BaseApplication(cli.Application):
     """
     Used so that we can easily extend Instattack without having to worry about
     overriding the main method.
     """
-
-    # Even though we are not using the log level internally, and setting
-    # it in __main__, we still have to allow this to be a switch otherwise
-    # CLI will complain about unknown switch.
-    level = cli.SwitchAttr("--level", validate_log_level, default='INFO')
-    _config_path = cli.SwitchAttr("--config", str, default="conf.yaml")
+    log = logger.get_sync('Application')
     _config = None
 
     @property
     def config(self):
         if not self._config:
-            self._config = Configuration(self._config_path)
-            self._config.validate()
+            self._config = Configuration.load()
+            # TODO: Validate just the structure of the configuration object
+            # here, but not the path.
         return self._config
 
     async def get_user(self, username):
         try:
             user = await User.get(username=username)
         except tortoise.exceptions.DoesNotExist:
-            self.log_sync.error(f'User {username} does not exist.')
+            self.log.error(f'User {username} does not exist.')
             return None
         else:
             user.setup()
             return user
 
+    async def check_if_user_exists(self, username):
+        try:
+            user = await User.get(username=username)
+        except tortoise.exceptions.DoesNotExist:
+            return None
+        else:
+            return user
+
     def post_handlers(self, user):
         return post_handlers(user, self.config)
-
-    def silent_shutdown(self):
-        os.environ['SILENT_SHUTDOWN'] = "1"
 
 
 class EntryPoint(BaseApplication):
@@ -81,7 +80,7 @@ class BaseAttack(BaseApplication):
 
         result = loop.run_until_complete(self.attempt_attack(loop, user))
         if result:
-            self.log_sync.info(f'Authenticated User!', extra={
+            self.log.info(f'Authenticated User!', extra={
                 'password': result.context.password
             })
 

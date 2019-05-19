@@ -1,7 +1,48 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass
 
-from .mixins import HandlerMixin, MethodHandlerMixin
+from instattack.lib import Identifier
+
+
+class ModelMixin(object):
+
+    name = Identifier()
+
+    @classmethod
+    def count_all(cls):
+        """
+        Do not ask me why the count() method returns a CountQuery that does
+        not have an easily accessible integer value.
+        """
+        return cls.all().count().__sizeof__()
+
+
+class HandlerMixin(object):
+
+    name = Identifier()
+
+    def engage(self, lock=None, start_event=None, stop_event=None,
+            user=None, queue=None):
+
+        self._stopped = False
+        self.lock = lock
+
+        self.stop_event = stop_event
+        self.start_event = start_event
+        self.user = user
+
+    def issue_start_event(self, reason=None):
+        """
+        Assumes caller is an async function.
+
+        TODO:  Is there an easy way to determine whether or not the caller is
+        async or sync?
+        """
+        if self.start_event.is_set():
+            raise RuntimeError('Start event already set.')
+
+        self.log_async.info('Setting Start Event', extra={'other': reason})
+        self.start_event.set()
 
 
 class BaseHandler(object):
@@ -11,11 +52,10 @@ class BaseHandler(object):
 
 
 class Handler(BaseHandler, HandlerMixin):
-    pass
 
-
-class MethodHandler(BaseHandler, MethodHandlerMixin):
-    pass
+    @property
+    def starting_message(self):
+        return f"Starting {self.name}"
 
 
 @dataclass

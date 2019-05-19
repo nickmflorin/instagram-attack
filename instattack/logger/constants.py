@@ -24,17 +24,18 @@ class LoggingLevels(FormattedEnum):
 
     @property
     def message_formatter(self):
-        if self in [
-            LoggingLevels.SUCCESS,
-            LoggingLevels.WARNING,
-            LoggingLevels.STOP,
-            LoggingLevels.START,
-            LoggingLevels.COMPLETE,
-            LoggingLevels.CRITICAL,
-            LoggingLevels.INFO
-        ]:
-            return self.format.without_text_decoration()
-        return RecordAttributes.MESSAGE
+        # if self in [
+        #     LoggingLevels.SUCCESS,
+        #     LoggingLevels.WARNING,
+        #     LoggingLevels.STOP,
+        #     LoggingLevels.START,
+        #     LoggingLevels.COMPLETE,
+        #     LoggingLevels.CRITICAL,
+        #     LoggingLevels.INFO
+        # ]:
+        #     return self.format.without_text_decoration()
+        # return RecordAttributes.MESSAGE
+        return self.format
 
 
 class RecordAttributes(FormattedEnum):

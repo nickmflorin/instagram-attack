@@ -1,13 +1,13 @@
 import asyncio
 
 from instattack.lib import starting
-from instattack.src.base import MethodHandler
+from instattack.src.base import Handler
 
 from .broker import InstattackProxyBroker
 from .pool import InstattackProxyPool
 
 
-class ProxyHandler(MethodHandler):
+class ProxyHandler(Handler):
     """
     Imports and gives proxies from queue on demand.
     We might not even need to inherit from the ProxyPool anymore... just the
@@ -19,18 +19,17 @@ class ProxyHandler(MethodHandler):
     def __init__(self, config, **kwargs):
         super(ProxyHandler, self).__init__(**kwargs)
 
-        self.proxies = asyncio.Queue()
-        self.broker = InstattackProxyBroker(config, self.proxies, **kwargs)
+        self.broker = InstattackProxyBroker(
+            config['proxies']['broker'],
+            **kwargs
+        )
 
         # !! TODO:
-        # What would be really cool would be if we could pass in the pool
-        # directly to the broker so that the broker populated our custom pool
-        # with our custom ProxyModel's.
+        # What would be really cool would be if we could pass in our custom pool
+        # directly so that the broker popoulated that queue with the proxies.
         self.pool = InstattackProxyPool(
-            config,
-            self.proxies,
+            config['proxies']['pool'],
             self.broker,
-            method=kwargs['method'],
             start_event=self.start_event,
         )
 

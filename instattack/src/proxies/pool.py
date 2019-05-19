@@ -1,27 +1,28 @@
+from instattack import logger
 from instattack.lib import starting
-from instattack.src.mixins import MethodHandlerMixin
+from instattack.src.base import HandlerMixin
 
 from .utils import stream_proxies, update_or_create_proxies
-from .models import Proxy
 from .queue import ProxyPriorityQueue
 
 
-class InstattackProxyPool(ProxyPriorityQueue, MethodHandlerMixin):
+log = logger.get_async('Proxy Pool')
+
+
+class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
 
     __name__ = 'Proxy Pool Queue'
 
-    def __init__(self, config, proxies, broker, **kwargs):
+    def __init__(self, config, broker, **kwargs):
         self.engage(**kwargs)
-        method_config = config.for_method(self.__method__)
 
         super(InstattackProxyPool, self).__init__(config)
 
-        self.broker_proxies = proxies
         self.broker = broker
 
-        self.should_collect = method_config['proxies'].get('collect', True)
-        self.should_prepopulate = method_config['proxies'].get('prepopulate', True)
-        self.prepopulate_limit = method_config['proxies'].get('prepopulate_limit')
+        self.should_collect = config.get('collect', True)
+        self.should_prepopulate = config.get('prepopulate', True)
+        self.prepopulate_limit = config.get('prepopulate_limit')
 
     async def save(self, loop):
         """
@@ -40,10 +41,10 @@ class InstattackProxyPool(ProxyPriorityQueue, MethodHandlerMixin):
             proxies.append(proxy)
 
         if len(proxies) == 0:
-            self.log_async.error('No Proxies to Save')
+            log.error('No Proxies to Save')
             return
 
-        await update_or_create_proxies(self.__method__, proxies)
+        await update_or_create_proxies(proxies)
 
     @starting('Proxy Prepopulation')
     async def prepopulate(self, loop):
@@ -71,21 +72,20 @@ class InstattackProxyPool(ProxyPriorityQueue, MethodHandlerMixin):
         # Instead of doing:
         # >>> max_limit = len(await Proxy.filter(method=self.__method__).all())
 
-        async for proxy in stream_proxies(method=self.__method__):
+        async for proxy in stream_proxies():
             if self.prepopulate_limit:
                 if not self.qsize() < self.prepopulate_limit:
                     break
 
-            # Logic Here We're Not Sure of Yet...
-            if not proxy.invalid:
-                proxy.reset()
-                await self.put(proxy, source='Database')
+            # Proxy Filtered to be Valid or Non Confirmed
+            proxy.reset()
+            await self.put(proxy, source='Database')
 
         if self.qsize() == 0:
-            self.log_async.error('No Proxies to Prepopulate')
+            log.error('No Proxies to Prepopulate')
             return
 
-        self.log_async.complete(f"Prepopulated {self.qsize()} Proxies")
+        log.complete(f"Prepopulated {self.qsize()} Proxies")
 
     @starting('Proxy Collection')
     async def collect(self, loop):
@@ -99,34 +99,20 @@ class InstattackProxyPool(ProxyPriorityQueue, MethodHandlerMixin):
         We should maybe make this more dynamic, and add proxies from the broker
         when the pool drops below the limit.
         """
-        collect_limit = max(self._maxsize - self.qsize(), 0)
-        if collect_limit == 0:
-            self.issue_start_event('No Proxies to Collect')
-            return
+        # collect_limit = max(self._maxsize - self.qsize(), 0)
+        # if collect_limit == 0:
+        #     self.issue_start_event('No Proxies to Collect')
+        #     return
 
-        self.log_async.debug(f'Number of Proxies to Collect: {collect_limit}.')
+        # self.log_async.debug(f'Number of Proxies to Collect: {collect_limit}.')
 
         added = []
-        while len(added) < collect_limit:
-            self.log_async.once('Waiting on First Proxy from Broker...')
-
-            proxy = await self.broker_proxies.get()
-            if not proxy:
-                if self.broker._stopped:
-                    self.log_async.warning('Null Proxy Returned from Broker... Stopping')
-                    return
-                else:
-                    # This can happen if we do not have the limit high enough and are
-                    # not collecting proxies, we might run out of proxies from the Broker.
-                    # We should maybe restart the broker here...
-                    raise RuntimeError('Broker should not return null proxy.')
-
-            # Do not save instances now, we save at the end.
-            proxy = await Proxy.from_proxybroker(proxy, self.__method__)
+        # while len(added) < collect_limit:
+        async for proxy in self.broker.collect():
             added_proxy = await self.put(proxy, source='Broker')
             if added_proxy:
                 added.append(added_proxy)
 
                 # Set Start Event on First Proxy Retrieved from Broker
-                if not self.start_event.is_set():
+                if self.start_event and not self.start_event.is_set():
                     self.issue_start_event('Broker Started Sending Proxies')

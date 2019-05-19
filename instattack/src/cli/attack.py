@@ -16,7 +16,6 @@ def post_handlers(user, config):
 
     proxy_handler = ProxyHandler(
         config,
-        method='POST',
         lock=lock,
         start_event=start_event,
     )
@@ -61,17 +60,17 @@ async def attack(loop, user, config):
     Proxies will not be saved if it wasn't started, but that is probably
     desired behavior.
     """
-    post_proxy_handler, password_handler = post_handlers(user, config)
+    proxy_handler, password_handler = post_handlers(user, config)
 
     try:
         results = await asyncio.gather(
             password_handler.run(loop),
-            post_proxy_handler.run(loop)
+            proxy_handler.run(loop)
         )
 
     except Exception as e:
-        if not post_proxy_handler.broker._stopped:
-            post_proxy_handler.broker.stop(loop)
+        if not proxy_handler.broker._stopped:
+            proxy_handler.broker.stop(loop)
 
         # We might need a stop method for the password handler still just in case
         # an exception is raised.
@@ -80,13 +79,13 @@ async def attack(loop, user, config):
         # Save Attempts Up Until This Point & Save Proxies
         # Do we really want to save proxies on exceptions?
         await password_handler.save(loop)
-        await post_proxy_handler.pool.save(loop)
+        await proxy_handler.pool.save(loop)
 
         loop.call_exception_handler({'exception': e})
 
     else:
         # Proxy Handler Should be Stopped?
-        post_proxy_handler.broker.stop(loop)
+        proxy_handler.broker.stop(loop)
 
         # We might need a stop method for the password handler still just in case
         # an exception is raised.
@@ -94,6 +93,6 @@ async def attack(loop, user, config):
 
         # Save Attempts Up Until This Point & Save Proxies
         await password_handler.save(loop)
-        await post_proxy_handler.pool.save(loop)
+        await proxy_handler.pool.save(loop)
 
         return results[0]

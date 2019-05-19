@@ -11,34 +11,40 @@ import tortoise
 from tortoise import fields
 from tortoise.models import Model
 
+from instattack import logger
 from instattack.conf import settings
-from instattack.conf.utils import validate_method
-
-from instattack.src.mixins import ModelMixin
+from instattack.src.base import ModelMixin
 
 
 __all__ = ('Proxy', )
 
 
+log = logger.get_async('Proxy Model')
+
+
 class ProxyBrokerMixin(object):
 
     @classmethod
-    async def find_for_proxybroker(cls, proxy, method):
+    async def find_for_proxybroker(cls, proxy):
         """
         Finds the related Proxy model for a given proxybroker Proxy model
         and returns the instance if present.
         """
+        raise Exception('If duplicates found, use oldest proxy and delete others...')
         try:
             return await cls.get(
                 host=proxy.host,
                 port=proxy.port,
-                method=method,
             )
         except tortoise.exceptions.DoesNotExist:
             return None
+        except tortoise.exceptions.MultipleObjectsReturned:
+
+            log.critical(f'Found Multiple Proxies for {proxy.host} - {proxy.port}.')
+            use_proxy = cls.filter(host=proxy.host, port=proxy.port).all()[0]
 
     @classmethod
-    async def from_proxybroker(cls, broker_proxy, method):
+    async def from_proxybroker(cls, broker_proxy):
         """
         Finds the possibly related Proxy instance for a proxybroker Proxy instance
         and updates it with relevant info from the proxybroker instance if
@@ -54,7 +60,7 @@ class ProxyBrokerMixin(object):
         # Figure out how to translate this to our system.
         broker_errors = broker_proxy.stat['errors']
 
-        proxy = await cls.find_for_proxybroker(broker_proxy, method)
+        proxy = await cls.find_for_proxybroker(broker_proxy)
         if proxy:
             # Only do this for as long as we are not measuring this value ourselves.
             proxy.avg_resp_time = broker_proxy.avg_resp_time
@@ -63,14 +69,13 @@ class ProxyBrokerMixin(object):
             proxy = Proxy(
                 host=broker_proxy.host,
                 port=broker_proxy.port,
-                method=method,
                 avg_resp_time=broker_proxy.avg_resp_time,
             )
             return proxy
 
     @classmethod
-    async def create_from_proxybroker(cls, broker_proxy, method):
-        proxy = await cls.from_proxybroker(broker_proxy, method)
+    async def create_from_proxybroker(cls, broker_proxy):
+        proxy = await cls.from_proxybroker(broker_proxy)
         await proxy.save()
         return proxy
 
@@ -159,7 +164,7 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
     port = fields.IntField()
     avg_resp_time = fields.FloatField()
     last_used = fields.DatetimeField(null=True)
-    method = fields.CharField(max_length=4)
+    date_added = fields.DatetimeField(auto_now_add=True)
 
     # Invalid means that the last request this was used for resulted in a
     # fatal error.
@@ -187,14 +192,12 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
     identifier_fields = (
         'host',
         'port',
-        'method'
     )
 
     class Meta:
         unique_together = (
             'host',
             'port',
-            'method'
         )
 
     def reset(self):
@@ -269,7 +272,7 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
         self.confirmed = False
         self.num_failed_requests += 1
         if save:
-            self.log_async.debug('Saving Proxy with Error: %s' % err_name)
+            log.debug('Saving Proxy with Error: %s' % err_name)
             await self.save()
 
     async def was_inconclusive(self, save=True):
@@ -288,9 +291,6 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
         await self.save()
 
     async def save(self, *args, **kwargs):
-        if self.method not in ["GET", "POST"]:
-            raise tortoise.exceptions.IntegrityError(f"Invalid method {self.method}.")
-
         if self.confirmed and self.invalid:
             raise tortoise.exceptions.IntegrityError(
                 f"Proxy cannot be both confirmed and invalid.")

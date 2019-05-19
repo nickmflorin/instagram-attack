@@ -1,6 +1,7 @@
 import asyncio
 from plumbum import cli
 
+from instattack.src.exceptions import ArgumentError
 from instattack.src.users import User
 
 from .base import EntryPoint, BaseApplication
@@ -19,7 +20,9 @@ class BaseUser(BaseApplication):
 class UserOperation(BaseApplication):
 
     def main(self, *args):
-        self.silent_shutdown()
+        if len(args) == 0:
+            raise ArgumentError('Must provide username.')
+
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self.operation(loop, *args))
 
@@ -127,7 +130,7 @@ class DeleteUser(UserOperation):
 class AddUser(UserOperation):
 
     async def operation(self, loop, username):
-        user = await self.get_user(username)
+        user = await self.check_if_user_exists(username)
         if user:
             self.log.error('User already exists.')
             return

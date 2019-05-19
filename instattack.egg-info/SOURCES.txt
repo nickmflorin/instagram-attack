@@ -30,6 +30,7 @@ instattack/lib/progress.py
 instattack/logger/__init__.py
 instattack/logger/constants.py
 instattack/logger/handler.py
+instattack/logger/handlers.py
 instattack/logger/items.py
 instattack/logger/log_formats.py
 instattack/logger/logger.py

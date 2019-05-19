@@ -1,12 +1,14 @@
 import asyncio
 import itertools
 
-from instattack.src.mixins import LoggableMixin
-
+from instattack import logger
 from .exceptions import PoolNoProxyError
 
 
-class ProxyLoggerMixin(LoggableMixin):
+log = logger.get_async('Proxy Priority Queue')
+
+
+class ProxyLoggerAdapter(object):
 
     def format_message(self, message, source=None):
         if 'Source' in message:
@@ -16,49 +18,47 @@ class ProxyLoggerMixin(LoggableMixin):
                 message = message.replace('Source ', '')
         return message
 
-    def warn(self, message, proxy, source=None, other=None, force=False):
-        if self.log_proxies or force:
-            message = self.format_message(message, source=source)
-            extra = {
-                'proxy': proxy,
-                'other': (other or "") + f"Pool Size: {self.qsize()}"
-            }
-            self.log.warning(message, extra=extra)
+    def warn(self, queue, message, proxy, source=None, other=None, force=False):
+        message = self.format_message(message, source=source)
+        extra = {
+            'proxy': proxy,
+            'other': (other or "") + f"Pool Size: {queue.qsize()}"
+        }
+        log.warning(message, extra=extra)
 
-    def info(self, message, proxy, source=None, other=None, force=False):
-        if self.log_proxies or force:
-            message = self.format_message(message, source=source)
-            extra = {
-                'proxy': proxy,
-                'other': (other or "") + f"Pool Size: {self.qsize()}"
-            }
-            self.log.info(message, extra=extra)
+    def info(self, queue, message, proxy, source=None, other=None, force=False):
+        message = self.format_message(message, source=source)
+        extra = {
+            'proxy': proxy,
+            'other': (other or "") + f"Pool Size: {queue.qsize()}"
+        }
+        log.info(message, extra=extra)
 
-    def debug(self, message, proxy, source=None, other=None, force=False):
-        if self.log_proxies or force:
-            message = self.format_message(message, source=source)
-            extra = {
-                'proxy': proxy,
-                'other': (other or "") + f"Pool Size: {self.qsize()}"
-            }
-            self.log.debug(message, extra=extra)
+    def debug(self, queue, message, proxy, source=None, other=None, force=False):
+        message = self.format_message(message, source=source)
+        extra = {
+            'proxy': proxy,
+            'other': (other or "") + f"Pool Size: {queue.qsize()}"
+        }
+        log.debug(message, extra=extra)
 
 
-class ProxyPriorityQueue(asyncio.PriorityQueue, ProxyLoggerMixin):
+log = log.adapt(ProxyLoggerAdapter)
+
+
+class ProxyPriorityQueue(asyncio.PriorityQueue):
 
     REMOVED = '<removed-proxy>'
 
     def __init__(self, config):
-        method_config = config.for_method(self.__method__)
-        super(ProxyPriorityQueue, self).__init__(method_config['proxies'].get('limit', -1))
+        super(ProxyPriorityQueue, self).__init__(config['proxies'].get('limit', -1))
 
-        self.log_proxies = config['log']['proxies']
+        log.disable_on_false(config['log'].get('proxies', False))
 
-        pool_config = method_config['proxies']['pool']
-        self.max_error_rate = pool_config['max_error_rate']
-        self.max_resp_time = pool_config['max_resp_time']
-        self.min_req_proxy = pool_config['min_req_proxy']
-        self.timeout = pool_config['timeout']
+        self.max_error_rate = config['proxies']['pool']['max_error_rate']
+        self.max_resp_time = config['proxies']['pool']['max_resp_time']
+        self.min_req_proxy = config['proxies']['pool']['min_req_proxy']
+        self.timeout = config['proxies']['pool']['timeout']
 
         # Mapping of proxies to entries in the heapq
         self.proxy_finder = {}
@@ -68,8 +68,6 @@ class ProxyPriorityQueue(asyncio.PriorityQueue, ProxyLoggerMixin):
         # And since no two entry counts are the same, the tuple comparison will
         # never attempt to directly compare two tasks.
         self.proxy_counter = itertools.count()
-
-        # self.log.conditional(self.log_proxies)
 
     async def put(self, proxy, source=None):
         valid, reason = proxy.evaluate(
@@ -81,24 +79,24 @@ class ProxyPriorityQueue(asyncio.PriorityQueue, ProxyLoggerMixin):
         if not valid:
             current = self.proxy_finder.get(proxy.unique_id)
             if current and current != self.REMOVED:
-                self.warn('Have to Remove Invalid Source Proxy from Pool',
+                log.warning(self, 'Have to Remove Invalid Source Proxy from Pool',
                     proxy, source=source, other=reason, force=True)
                 await self._remove_proxy(proxy, invalid=True, reason=reason)
             else:
-                self.warn('Cannot Add Source Proxy to Pool',
+                log.warning(self, 'Cannot Add Source Proxy to Pool',
                     proxy, source=source, other=reason)
             return None
 
         current = self.proxy_finder.get(proxy.unique_id)
         if not current:
-            self.info('Adding New Source Proxy to Pool', proxy, source=source)
+            log.info(self, 'Adding New Source Proxy to Pool', proxy, source=source)
             return await self._put_proxy(proxy)
 
         # Only want to include proxy if it is fundamentally different
         # than proxies we have already.
         differences = current.compare(proxy, return_difference=True)
         if differences:
-            self.info('Updating Source Proxy in Pool',
+            log.info(self, 'Updating Source Proxy in Pool',
                 proxy, other=str(differences), source=source)
 
             return await self._update_proxy(current, proxy)
@@ -139,7 +137,7 @@ class ProxyPriorityQueue(asyncio.PriorityQueue, ProxyLoggerMixin):
             # We might not need this timeout, since it might be factored into the
             # session already.
             if self.qsize() <= 20:
-                self.log_async(f'Running Low on Proxies: {self.qsize()}')
+                log.info(self, f'Running Low on Proxies: {self.qsize()}')
             proxy = await asyncio.wait_for(self._get_proxy(), timeout=self.timeout)
         except asyncio.TimeoutError:
             raise PoolNoProxyError()
@@ -163,7 +161,7 @@ class ProxyPriorityQueue(asyncio.PriorityQueue, ProxyLoggerMixin):
             try:
                 current = self.proxy_finder[proxy.unique_id]
             except KeyError:
-                self.log_async.critical(
+                log.critical(self,
                     f'Proxy {proxy.unique_id} Missing from Proxy Finder... Should be Present.')
             else:
                 if current is not self.REMOVED:

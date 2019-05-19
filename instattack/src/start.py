@@ -1,23 +1,22 @@
 #!/usr/bin/env python3
 from argparse import ArgumentTypeError
-from dotenv import load_dotenv
-import os
+import logging
 import pathlib
 import signal
+import sys
 import tortoise
 from tortoise import Tortoise
 
+from instattack import logger
 from instattack.logger import (
-    SyncLogger, disable_external_loggers, progressbar_wrap)
-from instattack.lib import get_env_file, write_env_file, cancel_remaining_tasks
+    SyncLogger, AsyncLogger, disable_external_loggers, progressbar_wrap)
+from instattack.lib import cancel_remaining_tasks
 
 from instattack.conf.settings import USER_DIR, DB_CONFIG
 from instattack.conf.utils import dir_str, get_app_root
 
-from .base import *  # noqa
-from .proxies import *  # noqa
-from .test import *  # noqa
-from .users import *  # noqa
+from .exceptions import ArgumentError
+from .cli import EntryPoint
 
 """
 May want to catch other signals too - these are not currently being
@@ -52,7 +51,7 @@ def handle_exception(loop, context):
     exc = context['exception']
     log.traceback(exc)
 
-    loop.run_until_complete(shutdown(loop))
+    shutdown(loop)
 
 
 def setup_loop(loop):
@@ -84,15 +83,7 @@ def setup_logger():
     )
 
 
-def setup_environment(args):
-    if hasattr(args, 'level'):
-        write_env_file({'level': args.level})
-    filepath = get_env_file()
-    load_dotenv(dotenv_path=dir_str(filepath))
-
-
-def setup(loop, args):
-    setup_environment(args)
+def setup(loop):
     setup_directories()
     setup_logger()
 
@@ -102,15 +93,34 @@ def setup(loop, args):
     setup_loop(loop)
 
 
-def shutdown(loop, signal=None):
-    log = SyncLogger(f"{__name__}:shutdown")
+def shutdown_async_loggers(loop, log):
+
+    loggers = [logging.getLogger(name)
+        for name in logging.root.manager.loggerDict]
+
+    for lgr in loggers:
+        if isinstance(lgr, AsyncLogger):
+            log.start('Shutting Down Logger...')
+            loop.run_until_complete(lgr.shutdown())
+
+
+def shutdown(loop, config=None, signal=None):
+    log = logger.get_sync('Shutdown')
 
     if signal:
         log.warning(f'Received exit signal {signal.name}...')
 
-    log.conditional(os.environ.get('SILENT_SHUTDOWN'))
+    # Temporary Issue - We cannot pass in the config object from the loop
+    # exception handler, only from teh start() method.  Eventually we might
+    # want to find a better way to do this.
+    if config:
+        log.disable_on_true(config['log'].get('silent_shutdown'))
 
     log.start('Starting Shut Down')
+
+    log.start('Shutting Down Async Loggers')
+    shutdown_async_loggers(loop, log)
+    log.complete('Async Loggers Shutdown')
 
     log.start('Cancelling Tasks')
     cancelled = loop.run_until_complete(cancel_remaining_tasks())
@@ -130,19 +140,24 @@ def shutdown(loop, signal=None):
     log.complete('Shutdown Complete')
 
 
-def start(loop, args):
+def start(loop, config, *a):
 
     log = SyncLogger(f"{__name__}:start")
 
-    setup(loop, args)
+    setup(loop)
     log.updateLevel()
 
-    # Log environment is now only for progress bar, we can probably deprecate
-    # that.
+    cli_args = sys.argv
+    cli_args = [ag for ag in cli_args if '--level' not in ag and '--config' not in ag]
+
+    # It would be easier if there was a way to pass this through to the CLI
+    # application directly, instead of storing as ENV variable.
+    config.store()
+
     with progressbar_wrap():
         try:
-            EntryPoint.run()
-        except ArgumentTypeError as e:
+            EntryPoint.run(argv=cli_args)
+        except (ArgumentTypeError, ArgumentError) as e:
             log.error(e)
         finally:
-            shutdown(loop)
+            shutdown(loop, config=config)
