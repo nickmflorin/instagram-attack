@@ -8,6 +8,16 @@ from .exceptions import PoolNoProxyError
 log = logger.get_async('Proxy Priority Queue')
 
 
+"""
+TODO
+----
+This can definitely be simplified.  Since we do not put duplicate proxies
+in the queue, by default, we probably don't need to worry about tracking
+the REMOVED status, and can just not put back in the queue if it is invalid
+on put, and keep looking if it is not valid on get.
+"""
+
+
 class ProxyPriorityQueue(asyncio.PriorityQueue):
 
     REMOVED = '<removed-proxy>'

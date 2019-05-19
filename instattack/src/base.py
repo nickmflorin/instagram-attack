@@ -31,19 +31,6 @@ class HandlerMixin(object):
         self.start_event = start_event
         self.user = user
 
-    def issue_start_event(self, reason=None):
-        """
-        Assumes caller is an async function.
-
-        TODO:  Is there an easy way to determine whether or not the caller is
-        async or sync?
-        """
-        if self.start_event.is_set():
-            raise RuntimeError('Start event already set.')
-
-        self.log_async.info('Setting Start Event', extra={'other': reason})
-        self.start_event.set()
-
 
 class BaseHandler(object):
 

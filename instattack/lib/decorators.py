@@ -21,8 +21,8 @@ def starting(*args):
                 log = logger.get_sync(log_name, subname=func.__name__)
 
             log.start(f'Starting {log_name}', stack_info=stack_info)
-            if is_async:
-                asyncio.create_task(log.shutdown())
+            # if is_async:
+            #     asyncio.create_task(log.shutdown())
             return func(instance, *args, **kwargs)
 
         return _wrapped
@@ -48,8 +48,8 @@ def stopping(*args):
                 log = logger.get_sync(log_name, subname=func.__name__)
 
             log.stop(f'Stopping {log_name}', stack_info=stack_info)
-            if is_async:
-                asyncio.create_task(log.shutdown())
+            # if is_async:
+            #     asyncio.create_task(log.shutdown())
             return func(instance, *args, **kwargs)
 
         return _wrapped

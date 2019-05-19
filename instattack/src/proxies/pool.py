@@ -115,4 +115,7 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
 
                 # Set Start Event on First Proxy Retrieved from Broker
                 if self.start_event and not self.start_event.is_set():
-                    self.issue_start_event('Broker Started Sending Proxies')
+                    self.start_event.set()
+                    log.info('Setting Start Event', extra={
+                        'other': 'Broker Started Sending Proxies'
+                    })

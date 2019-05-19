@@ -1,10 +1,14 @@
 import asyncio
 
+from instattack import logger
 from instattack.lib import starting
 from instattack.src.base import Handler
 
 from .broker import InstattackProxyBroker
 from .pool import InstattackProxyPool
+
+
+log = logger.get_async('Proxy Handler')
 
 
 class ProxyHandler(Handler):
@@ -43,16 +47,17 @@ class ProxyHandler(Handler):
         saved into the pool.
         """
         def collection_done(fut):
-            if fut.exception():
-                raise fut.exception()
-            else:
-                # Broker can be stopped if the token was received already.
-                if not self.broker._stopped:
-                    self.broker.stop(loop)
+            if fut.done() and not fut.cancelled():
+                if fut.exception():
+                    raise fut.exception()
+                else:
+                    # Broker can be stopped if the token was received already.
+                    if not self.broker._stopped:
+                        self.broker.stop(loop)
 
         if self.pool.should_prepopulate:
             try:
-                self.log_async.debug('Prepopulating Pool...')
+                log.debug('Prepopulating Pool...')
                 await self.pool.prepopulate(loop)
             except Exception as e:
                 raise e
@@ -63,4 +68,9 @@ class ProxyHandler(Handler):
             collection_task = asyncio.create_task(self.pool.collect(loop))
             collection_task.add_done_callback(collection_done)
         else:
-            self.issue_start_event('Prepopulated Proxies Done')
+            if self.start_event.is_set():
+                raise RuntimeError('Start Event Already Set')
+            self.start_event.set()
+            log.info('Setting Start Event', extra={
+                'other': 'Pool Prepopulated'
+            })
