@@ -46,15 +46,6 @@ class ProxyHandler(Handler):
         Prepopulates proxies if the flag is set to put proxies that we previously
         saved into the pool.
         """
-        def collection_done(fut):
-            if fut.done() and not fut.cancelled():
-                if fut.exception():
-                    raise fut.exception()
-                else:
-                    # Broker can be stopped if the token was received already.
-                    if not self.broker._stopped:
-                        self.broker.stop(loop)
-
         if self.pool.should_prepopulate:
             try:
                 log.debug('Prepopulating Pool...')
@@ -63,10 +54,8 @@ class ProxyHandler(Handler):
                 raise e
 
         if self.pool.should_collect:
-            asyncio.create_task(self.broker.start(loop))
-
-            collection_task = asyncio.create_task(self.pool.collect(loop))
-            collection_task.add_done_callback(collection_done)
+            async with self.broker.session(loop):
+                await self.pool.collect(loop)
         else:
             if self.start_event.is_set():
                 raise RuntimeError('Start Event Already Set')
