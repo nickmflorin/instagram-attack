@@ -1,5 +1,4 @@
 log:
-    proxies: False
     attempts: False
     login: True
     silent_shutdown: False
@@ -23,9 +22,11 @@ proxies:
         prepopulate: True
         collect: True
         # prepopulate_limit: 10000
+        log: False
 
     broker:
         # limit: 2000
         max_conn: 200
         max_tries: 2
         timeout: 5
+        log: False

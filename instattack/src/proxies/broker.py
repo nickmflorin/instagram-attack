@@ -21,6 +21,9 @@ class InstattackProxyBroker(Broker, HandlerMixin):
         self.engage(**kwargs)
         self.personal_start_event = asyncio.Event()
 
+        # Don't want to disable entire logger.
+        self.log_proxies = config.get('log', False)
+
         # ProxyBroker needs a numeric limit unfortunately... if we do not set it,
         # it will be arbitrarily high.
         self.limit = limit or config.get('limit', 10000)
@@ -72,6 +75,8 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             if proxy:
                 # Do not save instances now, we save at the end.
                 proxy = await Proxy.from_proxybroker(proxy)
+                if self.log_proxies:
+                    log.debug('Broker Returned Proxy', {'proxy': proxy})
                 yield proxy
             else:
                 log.warning('Null Proxy Returned from Broker... Stopping')
