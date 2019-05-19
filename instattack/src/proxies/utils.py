@@ -1,5 +1,6 @@
 import asyncio
 from bs4 import BeautifulSoup
+import inspect
 import requests
 
 from tortoise.exceptions import IntegrityError
@@ -78,7 +79,7 @@ async def save_proxies(proxies, concurrent=False):
     log = logger.get_async('Saving Proxies')
 
     async def proxy_generator(proxy_iterable):
-        if asyncio.iscoroutine(proxy_iterable):
+        if inspect.isasyncgen(proxy_iterable):
             async for proxy in proxy_iterable:
                 yield proxy
         else:
@@ -124,7 +125,7 @@ async def save_proxies(proxies, concurrent=False):
     else:
         num_saved = await save_proxies_iteratively(proxies)
 
-    log.complete(f'Saved {num_saved} Scraped Proxies')
+    log.complete(f'Saved {num_saved} Proxies')
 
 
 async def update_or_create_proxy(proxy):

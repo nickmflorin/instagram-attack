@@ -1,1 +1,1 @@
-from .start import start  # noqa
+from .start import start, setup  # noqa

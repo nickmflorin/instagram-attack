@@ -12,21 +12,56 @@ class Configuration(dict):
     env_key = 'INSTATTACK_CONFIG'
 
     def __init__(self, path=None, data=None):
+        super(Configuration, self).__init__({})
+
         self.path = path
+        if self.path:
+            self.read()
 
-        data = data or {}
         if data:
-            data = self.recursively_wrap(data)
-        super(Configuration, self).__init__(data)
+            self.establish(data)
+        self.store()
 
-    def recursively_wrap(self, data):
-        created = {}
+    def read(self):
+        self._validate()
+        with open(self.path, 'r') as ymlfile:
+            try:
+                data = yaml.load(ymlfile)
+            except (yaml.YAMLLoadWarning, yaml.scanner.ScannerError) as e:
+                raise ArgumentTypeError(str(e))
+        self.update(data)
+
+    def establish(self, data):
+        """
+        Similiar to regular dict update, in that nested dicts update for the
+        entire structure, but all dict structures are sub-nested as instances
+        of Configuration.
+        """
         for key, val in data.items():
             if isinstance(val, dict):
-                created[key] = Configuration(self.path, data=val)
+                # Will recursively update the nested dict objects in the __init__
+                # method.
+                self[key] = Configuration(data=val)
             else:
-                created[key] = val
-        return created
+                self[key] = val
+
+    def update(self, data):
+        """
+        Similar to regular dict update, but will only update nested dict values
+        for single keys, not the entire structures.
+        """
+        def mutate_in_place(original, obj):
+            for key, val in obj.items():
+                if isinstance(val, dict):
+                    if key in original:
+                        mutate_in_place(original[key], val)
+                    else:
+                        original[key] = val
+                else:
+                    original[key] = val
+
+        mutate_in_place(self, data)
+        self.store()
 
     def _validate(self):
         """
@@ -37,16 +72,6 @@ class Configuration(dict):
         if not self.path:
             raise RuntimeError('Configuration must be provided a path in order to validate.')
         self.path = validate_config_filepath(self.path)
-
-    def read(self):
-        with open(self.path, 'r') as ymlfile:
-            try:
-                data = yaml.load(ymlfile)
-            except (yaml.YAMLLoadWarning, yaml.scanner.ScannerError) as e:
-                raise ArgumentTypeError(str(e))
-            else:
-                data = self.recursively_wrap(data)
-                self.update(**data)
 
     def store(self):
         os.environ[self.env_key] = json.dumps(self)

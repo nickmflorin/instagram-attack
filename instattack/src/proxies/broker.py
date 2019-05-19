@@ -1,9 +1,10 @@
 import asyncio
+import contextlib
 from proxybroker import Broker
 
 from instattack import logger
 from instattack.conf import settings
-from instattack.lib import starting, stopping
+from instattack.lib import starting, stopping, cancel_remaining_tasks
 from instattack.src.base import HandlerMixin
 
 from .models import Proxy
@@ -36,18 +37,26 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             verify_ssl=False,
         )
 
+    @contextlib.asynccontextmanager
+    async def session(self, loop):
+        await self.start(loop)
+        try:
+            yield self
+        finally:
+            self.stop(loop)
+
     @starting
     async def start(self, loop):
         self._started = True
 
-        log.start('Starting Broker')
+        log.start(f'Starting Broker with Limit = {self.limit}')
         await self.find(
             limit=self.limit,
             post=True,
             countries=settings.PROXY_COUNTRIES,
             types=settings.PROXY_TYPES,
         )
-        log.complete('Broker Started')
+        log.complete('Broker Successfully Started')
         self.personal_start_event.set()
 
     async def collect(self):
@@ -55,7 +64,7 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             raise RuntimeError('Cannot collect proxies without starting broker.')
 
         log.debug('Waiting on Start Event')
-        await self.personal_start_event
+        await self.personal_start_event.wait()
         log.start('Starting Proxy Collection')
 
         while True:
@@ -66,17 +75,42 @@ class InstattackProxyBroker(Broker, HandlerMixin):
                 yield proxy
             else:
                 log.warning('Null Proxy Returned from Broker... Stopping')
-                yield None
+                break
 
     @stopping
-    def stop(self, loop, *args, **kwargs):
+    def stop(self, loop):
         """
+        Stop all tasks, and the local proxy server if it's running.
+
         This has to by a synchronous method because ProxyBroker attaches signals
         to the overridden stop method.
+
+        We still use the logic in the original Proxy Broker stop method so we do
+        not need to call super().
         """
         if self._stopped:
             raise RuntimeError('Proxy Broker Already Stopped')
 
         self._stopped = True
-        super(InstattackProxyBroker, self).stop(*args, **kwargs)
-        self._proxies.put_nowait(None)
+
+        # We tried doing this in this manner so that all of the connections/tasks
+        # will be closed for the broker when stop() is completed, so they are
+        # not seen in the tasks cancelled at the end of the base loop.  It is not
+        # working perfectly - some tasks are still remaining unclosed.
+        task = asyncio.ensure_future(self._override_done())
+        asyncio.wait_for(task, timeout=5)
+
+        # This might be the cause of the leftover unfinished tasks.
+        if self._server:
+            self._server.stop()
+            self._server = None
+
+    async def _override_done(self):
+        """
+        We cannot override _done() since it is called by other methods in the
+        Proxy Broker Broker class.  We do this in an attempt to await the
+        cancellation of remaining tasks, so that they were all cancelled after
+        the stop() method completes.
+        """
+        await cancel_remaining_tasks(futures=self._all_tasks)
+        self._push_to_result(None)

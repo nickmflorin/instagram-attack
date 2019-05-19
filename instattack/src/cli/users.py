@@ -4,31 +4,25 @@ from plumbum import cli
 from instattack.src.exceptions import ArgumentError
 from instattack.src.users import User
 
-from .base import EntryPoint, BaseApplication
+from .base import EntryPoint, UtilityApplication
 
 
 @EntryPoint.subcommand('users')
-class BaseUsers(BaseApplication):
-    pass
+class BaseUsers(UtilityApplication):
+
+    def main(self):
+        self.silent_shutdown()
 
 
 @EntryPoint.subcommand('user')
-class BaseUser(BaseApplication):
-    pass
+class BaseUser(UtilityApplication):
 
-
-class UserOperation(BaseApplication):
-
-    def main(self, *args):
-        if len(args) == 0:
-            raise ArgumentError('Must provide username.')
-
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.operation(loop, *args))
+    def main(self):
+        self.silent_shutdown()
 
 
 @BaseUsers.subcommand('clean')
-class CleanUsers(BaseUsers):
+class CleanUsers(UtilityApplication):
 
     def main(self):
         loop = asyncio.get_event_loop()
@@ -40,67 +34,83 @@ class CleanUsers(BaseUsers):
             self.log.info(f'Cleaned Directory for User {user.username}.')
 
 
+@BaseUsers.subcommand('show')
+class UsersShowApplication(UtilityApplication):
+
+    def main(self):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.users(loop))
+
+    async def users(self, loop):
+        with self.log.logging_lines():
+            users = await User.all()
+            for user in users:
+                self.log.line(user.username)
+
+
 @BaseUser.subcommand('show')
-class UsersShowApplication(UserOperation):
+class UserShowApplication(UtilityApplication):
 
     limit = cli.SwitchAttr('--limit', int, default=None)
-    new = cli.Flag('--new', default=False)
 
-    @property
-    def methods(self):
-        return {
-            'passwords': self.passwords,
-            'alterations': self.alterations,
-            'numerics': self.numerics,
-            'attempts': self.attempts,
-        }
+    def main(self, *args):
+        if len(args) != 2:
+            raise ArgumentError('Must provide username and items to show.')
 
-    async def operation(self, loop, item, username):
-        method = self.methods.get(item)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.operation(loop, *args))
+
+    async def operation(self, loop, *args):
+        method = getattr(self, args[0], None)
         if not method:
-            self.log.error(f'Invalid argument {item}.')
+            self.log.error(f'Invalid argument {args[0]}.')
             return
-
-        user = await self.get_user(username)
-        if not user:
-            self.log.error('User does not exist.')
+        try:
+            username = args[1]
+        except IndexError:
+            self.log.error('Must provide username.')
             return
+        else:
+            user = await self.get_user(username)
+            if not user:
+                self.log.error('User does not exist.')
+                return
 
-        await method(loop, user)
+            await method(loop, user)
 
     async def passwords(self, loop, user):
         self.log.start(f'Showing User {user.username} Passwords')
 
-        self.log.before_lines()
-        async for item in user.get_passwords(limit=self.limit):
-            self.log.line(item)
+        with self.log.logging_lines():
+            async for item in user.get_passwords(limit=self.limit):
+                self.log.line(item)
 
     async def alterations(self, loop, user):
         self.log.start(f'Showing User {user.username} Alterations')
 
-        self.log.before_lines()
-        async for item in user.get_alterations(limit=self.limit):
-            self.log.line(item)
+        with self.log.logging_lines():
+            async for item in user.get_alterations(limit=self.limit):
+                self.log.line(item)
 
     async def numerics(self, loop, user):
         self.log.start(f'Showing User {user.username} Numerics')
 
-        self.log.before_lines()
-        async for item in user.get_numerics(limit=self.limit):
-            self.log.line(item)
+        with self.log.logging_lines():
+            async for item in user.get_numerics(limit=self.limit):
+                self.log.line(item)
 
     async def attempts(self, loop, user):
         self.log.start(f'Showing User {user.username} Attempts')
 
         if self.new:
             generated = []
-            self.log.before_lines()
-            async for item in user.generate_attempts(loop, limit=self.limit):
-                self.log.line(item)
-                generated.append(item)
+            with self.log.logging_lines():
+                async for item in user.generate_attempts(loop, limit=self.limit):
+                    self.log.line(item)
+                    generated.append(item)
 
-            assert len(generated) == len(set(generated))
-            self.log.simple(f"Generated {len(generated)} Attempts!")
+                assert len(generated) == len(set(generated))
+                self.log.simple(f"Generated {len(generated)} Attempts!")
 
         else:
             attempts = user.get_attempts(limit=self.limit)
@@ -111,7 +121,12 @@ class UsersShowApplication(UserOperation):
 
 
 @BaseUser.subcommand('delete')
-class DeleteUser(UserOperation):
+class DeleteUser(UtilityApplication):
+
+    def main(self, username):
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.operation(loop, username))
 
     async def operation(self, loop, username):
         user = await self.get_user(username)
@@ -127,7 +142,12 @@ class DeleteUser(UserOperation):
 
 
 @BaseUser.subcommand('add')
-class AddUser(UserOperation):
+class AddUser(UtilityApplication):
+
+    def main(self, username):
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.operation(loop, username))
 
     async def operation(self, loop, username):
         user = await self.check_if_user_exists(username)
@@ -136,4 +156,4 @@ class AddUser(UserOperation):
             return
 
         user = await User.create(username=username)
-        self.log.info(f'Successfully created user {user.username}.')
+        self.log.success(f'Successfully created user {user.username}.')

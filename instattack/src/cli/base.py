@@ -66,6 +66,28 @@ class EntryPoint(BaseApplication):
             raise ArgumentTypeError("No command given")
 
 
+class UtilityApplication(BaseApplication):
+
+    @property
+    def config(self):
+        if not self._config:
+            self._config = Configuration.load()
+            # Need to find cleaner way of doing this.
+            self._config.update({'log': {'silent_shutdown': True}})
+            # TODO: Validate just the structure of the configuration object
+            # here, but not the path.
+        return self._config
+
+    def silent_shutdown(self):
+        """
+        If the utility application never accesses config, it will not set the
+        silent shutdown to True.  This is kind of hacky but we will leave for
+        the time being, until we have a better solution to passing config into
+        the CLI.
+        """
+        self.config
+
+
 @EntryPoint.subcommand('attack')
 class BaseAttack(BaseApplication):
 

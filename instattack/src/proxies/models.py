@@ -30,7 +30,6 @@ class ProxyBrokerMixin(object):
         Finds the related Proxy model for a given proxybroker Proxy model
         and returns the instance if present.
         """
-        raise Exception('If duplicates found, use oldest proxy and delete others...')
         try:
             return await cls.get(
                 host=proxy.host,
@@ -39,9 +38,16 @@ class ProxyBrokerMixin(object):
         except tortoise.exceptions.DoesNotExist:
             return None
         except tortoise.exceptions.MultipleObjectsReturned:
+            all_proxies = await cls.filter(host=proxyx.host, port=proxy.port).all()
+            all_proxies = sorted(all_proxies, key=lambda x: x.date_added)
+            log.critical(
+                f'Found {len(all_proxies)} Duplicate Proxies for {proxy.host} - {proxy.port}.')
 
-            log.critical(f'Found Multiple Proxies for {proxy.host} - {proxy.port}.')
-            use_proxy = cls.filter(host=proxy.host, port=proxy.port).all()[0]
+            for proxy in all_proxies[1:]:
+                log.warning('Deleting Duplicate Proxy', extra={'proxy': proxy})
+                await proxy.delete()
+
+            return all_proxies[0]
 
     @classmethod
     async def from_proxybroker(cls, broker_proxy):

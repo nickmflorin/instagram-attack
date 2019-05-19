@@ -8,6 +8,7 @@ import tortoise
 from tortoise import Tortoise
 
 from instattack import logger
+from instattack.conf import Configuration
 from instattack.logger import (
     SyncLogger, AsyncLogger, disable_external_loggers, progressbar_wrap)
 from instattack.lib import cancel_remaining_tasks
@@ -109,6 +110,10 @@ def shutdown(loop, config=None, signal=None):
 
     if signal:
         log.warning(f'Received exit signal {signal.name}...')
+
+    # It would be easier if there was a way to pass this through to the CLI
+    # application directly, instead of storing as ENV variable.
+    config = Configuration.load()
 
     # Temporary Issue - We cannot pass in the config object from the loop
     # exception handler, only from teh start() method.  Eventually we might

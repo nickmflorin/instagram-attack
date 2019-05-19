@@ -81,12 +81,5 @@ class ProxyCollect(BaseProxy):
             limit=self.limit,
         )
 
-        await broker.start(loop)
-
-        gen = await broker.collect()
-
-        for i in range(5):
-            res = await gen.__anext__()
-            print(res)
-        return
-        await save_proxies(gen, concurrent=self.concurrent)
+        async with broker.session(loop):
+            await save_proxies(broker.collect(), concurrent=self.concurrent)
