@@ -1,3 +1,5 @@
+from itertools import chain, islice
+
 from instattack import logger
 
 from .base import mutation_gen
@@ -48,30 +50,31 @@ class numeric_gen(mutation_gen):
     numbers, which might require not using generators and combining numbers
     with previous number sequences.
     """
-    async def __call__(self, numeric):
+
+    def __call__(self, numeric):
         # Skipping for now to make faster
         # yield self.numeric_before(word, numeric)
         yield self.numeric_after(numeric)
 
     def numeric_before(self, numeric):
-        return "%s%s" % (numeric, self.word)
+        return "%s%s" % (numeric, self.base)
 
     def numeric_after(self, numeric):
-        return "%s%s" % (self.word, numeric)
+        return "%s%s" % (self.base, numeric)
 
 
 class alteration_gen(mutation_gen):
 
-    async def __call__(self, alteration):
+    def __call__(self, alteration):
         # Skipping for now to make faster
         # yield self.alteration_before(word, numeric)
         yield self.alteration_after(alteration)
 
     def alteration_before(self, alteration):
-        return "%s%s" % (alteration, self.word)
+        return "%s%s" % (alteration, self.base)
 
     def alteration_after(self, alteration):
-        return "%s%s" % (self.word, alteration)
+        return "%s%s" % (self.base, alteration)
 
 
 class custom_gen(mutation_gen):
@@ -84,15 +87,15 @@ class custom_gen(mutation_gen):
         char_gen,
     ]
 
-    async def __call__(self):
+    def __call__(self):
         """
         Applies generators alone and in tandem with one another.
         """
         combos = self.all_combinations(self.generators)
         for combo in combos:
             for gen in combo:
-                initialized = gen(self.word)
-                async for item in initialized():
+                initialized = gen(self.base)
+                for item in initialized():
                     yield item
 
 
@@ -115,59 +118,81 @@ class password_gen(object):
         custom_gen,
     ]
 
-    def __init__(self, loop, user):
-        self.user = user
+    def __init__(self, loop, user, attempts, limit=None):
+
         self.loop = loop
-        self.duplicates = []
+        self.limit = limit
 
-    async def __call__(self):
-        log = logger.get_async("Generating Passwords")
+        self.passwords = user.get_passwords()
+        self.alterations = user.get_alterations()
+        self.numerics = user.get_numerics()
+        self.attempts = attempts
 
-        # Not sure if it makes sense to apply certain generators and not others.
-        # combos = cls.all_combinations(cls.generators)
-        # Definitely have to look over this logic and make sure we are not doing
-        # anything completely unnecessary.
-        self.attempts = await self.user.get_attempts()
         self.generated = []
         self.duplicates = []
 
-        async for password in self.safe_yield(self.user.get_passwords):
-            yield self.yield_with(password)
+    def apply_base_alterations(self, base):
+        generate_alterations = alteration_gen(base)
 
-            # Cover alterations and additions to base password
-            async for alteration in self.user.get_alterations():
-                async for altered in self.safe_yield(
-                        alteration_gen(password), alteration):
-                    yield self.yield_with(altered)
+        for alteration in self.alterations:
+            for altered in generate_alterations(alteration):
+                yield altered
 
-            async for num_alteration in self.user.get_numerics():
-                async for altered in self.safe_yield(
-                        numeric_gen(password), num_alteration):
-                    yield self.yield_with(altered)
+    def apply_base_numeric_alterations(self, base):
+        generate_numerics = numeric_gen(base)
 
-            async for custom_alteration in self.safe_yield(custom_gen(password)):
-                yield self.yield_with(custom_alteration)
+        for numeric in self.numerics:
+            for altered in generate_numerics(numeric):
+                yield altered
 
-                # Cover alterations and additions to custom altered passwords
-                async for alteration in self.user.get_alterations():
-                    async for altered in self.safe_yield(
-                            alteration_gen(custom_alteration), alteration):
-                        yield self.yield_with(altered)
+    def apply_custom_alterations(self, base):
+        generate_custom = custom_gen(base)
 
-                async for num_alteration in self.user.get_numerics():
-                    async for altered in self.safe_yield(
-                            numeric_gen(custom_alteration), num_alteration):
-                        yield self.yield_with(altered)
+        for altered in generate_custom():
+            yield altered
 
-        await log.info(f'Generated {len(self.generated)} Passwords')
-        if len(self.duplicates):
-            await log.error(f'There Were {len(self.duplicates)} Generated Duplicates')
+    def apply_combined_alterations(self, base):
 
-        await log.shutdown()
+        for numeric in self.numerics:
+            yield from self.apply_base_alterations(numeric)
 
-    def yield_with(self, value):
-        self.generated.append(value)
-        return value
+        for alteration in self.alterations:
+            yield from self.apply_base_numeric_alterations(alteration)
+
+    def __call__(self):
+        """
+        TODO
+        ----
+        Not sure if it makes sense to apply certain generators and not others.
+        combos = cls.all_combinations(cls.generators)
+
+        Definitely have to look over this logic and make sure we are not doing
+        anything completely unnecessary.
+        """
+        log = logger.get_async("Generating Passwords")
+
+        def base_generator():
+            for password in self.passwords:
+                yield password
+
+                for value in chain(
+                    self.apply_base_alterations(password),
+                    self.apply_base_numeric_alterations(password),
+                    self.apply_combined_alterations(password),
+                    self.apply_custom_alterations(password)
+                ):
+                    yield value
+                    yield from chain(
+                        self.apply_base_alterations(value),
+                        self.apply_base_numeric_alterations(value),
+                        self.apply_combined_alterations(value),
+                        self.apply_custom_alterations(value)
+                    )
+
+        yield from self.safe_yield(base_generator())
+
+        if len(self.duplicates) != 0:
+            log.error(f'There Were {len(self.duplicates)} Generated Duplicates')
 
     def safe_to_yield(self, val):
         if val in self.attempts:
@@ -179,7 +204,10 @@ class password_gen(object):
             return False
         return True
 
-    async def safe_yield(self, gen, *args):
-        async for value in gen(*args):
+    def safe_yield(self, gen):
+        for value in gen:
             if self.safe_to_yield(value):
+                if self.limit and len(self.generated) == self.limit:
+                    break
+                self.generated.append(value)
                 yield value

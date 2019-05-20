@@ -1,21 +1,20 @@
-from __future__ import absolute_import
-
-import asyncio
 from datetime import datetime
 
-from tortoise.exceptions import DoesNotExist
 from tortoise import fields
 from tortoise.models import Model
+from tortoise.exceptions import IntegrityError
 
 from instattack import logger
 from instattack.conf import settings
-from instattack.lib import stream_raw_data
+from instattack.lib import stream_raw_data, read_raw_data
 from instattack.src.users import constants
 
 from .exceptions import UserDirDoesNotExist, UserFileDoesNotExist
 from .generator import password_gen
 
-log = logger.get_sync('User')
+
+log = logger.get_async('User')
+log_sync = logger.get_sync('User')
 
 
 class UserAttempt(Model):
@@ -120,7 +119,7 @@ class User(Model):
                 # TODO: In rare care where the path is a directory, we may want
                 # to delete it.
                 e = UserFileDoesNotExist(filepath, self)
-                log.warning(e)
+                log_sync.warning(e)
                 self.create_file(filename)
 
     def streamed_data(self, filename, limit=None):
@@ -135,52 +134,51 @@ class User(Model):
 
         return stream_raw_data(filepath, limit=limit)
 
-    async def get_passwords(self, limit=None):
-        async for line in self.streamed_data(constants.PASSWORDS, limit=limit):
-            yield line
+    def read_data(self, filename, limit=None):
+        if filename not in self.FILES:
+            raise ValueError(f'Invalid filename {filename}.')
 
-    async def get_alterations(self, limit=None):
-        async for line in self.streamed_data(constants.ALTERATIONS, limit=limit):
-            yield line
+        try:
+            filepath = self.file_path(filename, strict=True)
+        except UserFileDoesNotExist as e:
+            log.warning(e)
+            filepath = self.create_file(filename)
 
-    async def get_numerics(self, limit=None):
-        async for line in self.streamed_data(constants.NUMERICS, limit=limit):
-            yield line
+        return read_raw_data(filepath, limit=limit)
+
+    def get_passwords(self, limit=None):
+        return self.read_data(constants.PASSWORDS, limit=limit)
+
+    def get_alterations(self, limit=None):
+        return self.read_data(constants.ALTERATIONS, limit=limit)
+
+    def get_numerics(self, limit=None):
+        return self.read_data(constants.NUMERICS, limit=limit)
 
     async def get_attempts(self, limit=None):
-        attempts = await self.fetch_related('attempts')
-        if not attempts:
-            return []
+        attempts = await UserAttempt.filter(user=self).all()
         if limit:
-            return attempts[:limit]
+            attempts = attempts[:limit]
         return attempts
 
-    async def write_attempts(self, queue):
+    async def write_attempt(self, attempt, success=False):
+        if success:
+            log.debug(f'Saving Successful Attempt {attempt} for {self.username}.')
+        else:
+            log.debug(f'Saving Unsuccessful Attempt {attempt} for {self.username}.')
 
-        async def write_attempt(password):
-            try:
-                attempt = await UserAttempt.get(
-                    password=password,
-                    user=self,
-                )
-            except DoesNotExist:
-                await UserAttempt.create(
-                    password=password,
-                    user=self,
-                    last_attempt=datetime.now(),
-                    success=False,  # HAVE TO FIX THIS NO WAY OF KNOWING SUCCESS
-                )
-            else:
-                attempt.last_attempt = datetime.now()
-                attempt.success = False   # HAVE TO FIX THIS NO WAY OF KNOWING SUCCESS
-                await attempt.save()
-
-        tasks = []
-        while not queue.empty():
-            password = queue.get_nowait()
-            tasks.append(asyncio.create_task(write_attempt(password)))
-
-        return asyncio.gather(*tasks)
+        # Since we are calling this from a scheduler, it does not seem to pick up
+        # on the exceptions that we would raise if the attempt already exists,
+        # which is okay for now - since it will not create a duplicate one.
+        try:
+            attempt = await UserAttempt.create(
+                password=attempt,
+                user=self,
+                success=success,
+                last_attempt=datetime.now(),
+            )
+        except IntegrityError:
+            log.warning(f'Cannot Save Duplicate Attempt {attempt}.')
 
     async def generate_attempts(self, loop, limit=None):
         """
@@ -188,10 +186,7 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        count = 0
-        generator = password_gen(loop, self)
-
-        async for password in generator():
-            if count < limit:
-                yield password
-                count += 1
+        current_attempts = await self.get_attempts()
+        generator = password_gen(loop, self, current_attempts, limit=limit)
+        for item in generator():
+            yield item

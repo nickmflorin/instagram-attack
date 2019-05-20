@@ -1,6 +1,5 @@
 import contextlib
 import traceback
-import inspect
 import os
 import sys
 
@@ -152,17 +151,19 @@ class LoggerMixin(object):
         exceptions with their traceback.  For now, this is a workaround that
         works similiarly.
         """
-        extra = {
-            'show_stack': True,
-            'frame_correction': 1,
-            'stack': inspect.stack(),
-        }
+        formatter = LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()
+        header = formatter("\n------------- Error -------------\n")
+        sys.stdout.write(header)
 
-        ex_traceback = ex.__traceback__
-        tb_lines = [
-            line.rstrip('\n') for line in
-            traceback.format_exception(ex.__class__, ex, ex_traceback)
-        ]
+        traceback.print_exception(ex.__class__, ex, ex.__traceback__,
+            limit=100, file=sys.stdout)
 
-        # We might have to add additional frame_correction.
-        self.error("\n".join(tb_lines), extra=extra)
+        sys.stdout.write(header)
+
+        traceback.print_last(ex.__class__, ex, ex.__traceback__,
+            limit=100, file=sys.stdout)
+
+        sys.stdout.write(header)
+
+        traceback.print_stack(ex.__class__, ex, ex.__traceback__,
+            limit=100, file=sys.stdout)

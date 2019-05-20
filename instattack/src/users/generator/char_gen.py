@@ -46,7 +46,7 @@ class char_gen(mutation_gen):
         'p': ('3', '@'),
     }
 
-    async def __call__(self):
+    def __call__(self):
         for char, new_chars in self.COMMON_CHAR_REPLACEMENTS.items():
             altered = self.replace_character(char, new_chars)
             for alteration in altered:
@@ -164,7 +164,7 @@ class char_gen(mutation_gen):
         return flat_replacement
 
     def apply_mutations(self, mutations):
-        word = self.word
+        word = self.base
         for mut in mutations:
             word = self.mutate_char_at_index(word, *mut)
         return word

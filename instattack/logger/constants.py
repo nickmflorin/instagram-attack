@@ -1,9 +1,24 @@
 from plumbum import colors
+from enum import Enum
 
-from .utils import FormattedEnum, Format
+from .format import Format
 
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
+
+
+class FormattedEnum(Enum):
+
+    def __init__(self, format):
+        if isinstance(format, dict):
+            self.format = format['base']
+            self.formats = format
+        else:
+            self.format = format
+            self.formats = {'base': format}
+
+    def __call__(self, text):
+        return self.format(text)
 
 
 class LoggingLevels(FormattedEnum):

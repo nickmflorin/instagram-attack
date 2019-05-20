@@ -278,7 +278,6 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
         self.confirmed = False
         self.num_failed_requests += 1
         if save:
-            log.debug('Saving Proxy with Error: %s' % err_name)
             await self.save()
 
     async def was_inconclusive(self, save=True):

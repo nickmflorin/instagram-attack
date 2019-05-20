@@ -1,6 +1,7 @@
 import asyncio
+from plumbum import cli
 
-from .proxies import BaseProxy
+from instattack.src.proxies.cli import BaseProxy
 from .base import EntryPoint, BaseApplication
 
 
@@ -37,20 +38,32 @@ class TestLogin(Test):
 
     __name__ = 'Test Login'
 
+    collect = cli.Flag("--collect", default=False)
+
     def main(self, username, password):
+
+        # Default Collect to False
+        self._config.update({'proxies': {'pool': {'collect': self.collect}}})
+
         loop = asyncio.get_event_loop()
 
         user = loop.run_until_complete(self.get_user(username))
         if not user:
             return
 
-        post_proxy_handler, password_handler = self.post_handlers(user)
+        proxy_handler, password_handler = self.post_handlers(user)
+
         try:
-            loop.run_until_complete(asyncio.gather(
+            results = loop.run_until_complete(asyncio.gather(
                 password_handler.attempt_single_login(loop, password),
-                post_proxy_handler.run(loop)
+                proxy_handler.run(loop)
             ))
         except Exception as e:
-            if not post_proxy_handler._stopped:
-                post_proxy_handler.broker.stop(loop)
+            loop.run_until_complete(proxy_handler.stop(loop))
             loop.call_exception_handler({'exception': e})
+        else:
+            if results[0].authorized:
+                self.log.success(results[0])
+            else:
+                self.log.error(results[0])
+            loop.run_until_complete(proxy_handler.stop(loop))

@@ -1,8 +1,6 @@
 import progressbar
 from plumbum import colors
 
-from instattack.logger.utils import Format
-
 
 def percentage(num1, num2):
     return f"{'{0:.2f}'.format((num1 / num2 * 100))} %"
@@ -20,6 +18,7 @@ class CustomProgressbar(progressbar.ProgressBar):
     ]
 
     def __init__(self, max_value, label=None):
+        from instattack.logger.utils import Format
 
         widgets = self.widgets[:]
         if label:

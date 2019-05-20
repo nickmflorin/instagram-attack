@@ -1,7 +1,5 @@
-import asyncio
-
 from instattack import logger
-from instattack.lib import starting
+from instattack.lib import starting, stopping
 from instattack.src.base import Handler
 
 from .broker import InstattackProxyBroker
@@ -37,6 +35,12 @@ class ProxyHandler(Handler):
             start_event=self.start_event,
         )
 
+    @stopping
+    async def stop(self, loop):
+        if self.pool.should_collect:
+            self.broker.stop(loop)
+        log.debug('Done Stopping Proxy Handler')
+
     @starting
     async def run(self, loop):
         """
@@ -57,6 +61,8 @@ class ProxyHandler(Handler):
             async with self.broker.session(loop):
                 await self.pool.collect(loop)
         else:
+            log.debug('Not Collecting Proxies...')
+
             if self.start_event.is_set():
                 raise RuntimeError('Start Event Already Set')
             self.start_event.set()

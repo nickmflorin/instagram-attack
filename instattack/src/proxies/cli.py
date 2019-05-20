@@ -4,11 +4,11 @@ from plumbum import cli
 from instattack.lib import CustomProgressbar
 from instattack.src.exceptions import ArgumentError
 
-from instattack.src.proxies import Proxy
-from instattack.src.proxies.broker import InstattackProxyBroker
-from instattack.src.proxies.utils import scrape_proxies, save_proxies
+from instattack.src.cli import EntryPoint, BaseApplication
 
-from .base import EntryPoint, BaseApplication
+from .models import Proxy
+from .broker import InstattackProxyBroker
+from .utils import scrape_proxies, save_proxies
 
 
 @EntryPoint.subcommand('proxies')

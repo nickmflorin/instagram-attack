@@ -3,8 +3,8 @@ from itertools import combinations
 
 class mutation_gen(object):
 
-    def __init__(self, word):
-        self.word = word
+    def __init__(self, base):
+        self.base = base
 
     def list_to_word(self, letters):
         return ''.join(letters)
@@ -45,14 +45,14 @@ class mutation_gen(object):
             return False
 
         # We might want to limit this to everything except the first char?
-        unique_chars = list(set(self.word))
+        unique_chars = list(set(self.base))
         if char in unique_chars:
-            where_present = [evaluate(c) for c in self.word]
+            where_present = [evaluate(c) for c in self.base]
             indices = [i for i, x in enumerate(where_present) if x]
         return indices
 
     def capitalize_at_indices(self, *indices):
-        word = self.word.lower()
+        word = self.base.lower()
         altered = list(word)
         for ind in indices:
             try:

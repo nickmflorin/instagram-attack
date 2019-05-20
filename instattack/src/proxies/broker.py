@@ -42,10 +42,12 @@ class InstattackProxyBroker(Broker, HandlerMixin):
 
     @contextlib.asynccontextmanager
     async def session(self, loop):
+        log.debug('Starting Proxy Broker Session')
         await self.start(loop)
         try:
             yield self
         finally:
+            log.debug('Stopping Proxy Broker Session')
             self.stop(loop)
 
     @starting
@@ -73,7 +75,8 @@ class InstattackProxyBroker(Broker, HandlerMixin):
         while True:
             proxy = await self._proxies.get()
             if proxy:
-                # Do not save instances now, we save at the end.
+                # Do not save instances now, we are saving in the pool as they
+                # are pulled out of the queue.
                 proxy = await Proxy.from_proxybroker(proxy)
                 if self.log_proxies:
                     log.debug('Broker Returned Proxy', {'proxy': proxy})
@@ -97,25 +100,16 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             raise RuntimeError('Proxy Broker Already Stopped')
 
         self._stopped = True
+        self._proxies.put_nowait(None)
 
         # We tried doing this in this manner so that all of the connections/tasks
         # will be closed for the broker when stop() is completed, so they are
         # not seen in the tasks cancelled at the end of the base loop.  It is not
         # working perfectly - some tasks are still remaining unclosed.
-        task = asyncio.ensure_future(self._override_done())
-        asyncio.wait_for(task, timeout=5)
+        # asyncio.create_task(self._override_done())
+        self._done()
 
         # This might be the cause of the leftover unfinished tasks.
         if self._server:
             self._server.stop()
             self._server = None
-
-    async def _override_done(self):
-        """
-        We cannot override _done() since it is called by other methods in the
-        Proxy Broker Broker class.  We do this in an attempt to await the
-        cancellation of remaining tasks, so that they were all cancelled after
-        the stop() method completes.
-        """
-        await cancel_remaining_tasks(futures=self._all_tasks)
-        self._push_to_result(None)

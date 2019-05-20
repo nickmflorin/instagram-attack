@@ -1,3 +1,5 @@
+import aiojobs
+
 from instattack import logger
 from instattack.lib import starting
 from instattack.src.base import HandlerMixin
@@ -26,6 +28,13 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
 
     async def save(self, loop):
         """
+        TODO
+        ----
+        This is not currently used since we are saving the proxies in background
+        tasks as they are pulled in, but we have no way of tracking whether or not
+        we are updating proxies, adding them or cannot add them (because of duplication)
+        since the background tasks suppress exceptions.
+
         Saves proxies in the pool to the database.  This includes both proxies
         that were prepopulated and proxies that were collected from the broker,
         because we may need to update stats of proxies that were prepopulated.
@@ -107,8 +116,14 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
         # self.log_async.debug(f'Number of Proxies to Collect: {collect_limit}.')
 
         added = []
+        scheduler = await aiojobs.create_scheduler(limit=None)
+
         # while len(added) < collect_limit:
         async for proxy in self.broker.collect():
+
+            # [!] Will suppress any errors of duplicate attempts
+            await scheduler.spawn(proxy.save())
+
             added_proxy = await self.put(proxy, source='Broker')
             if added_proxy:
                 added.append(added_proxy)

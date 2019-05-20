@@ -5,7 +5,7 @@ import os
 
 from instattack.conf import Configuration
 from instattack.conf.utils import validate_log_level
-from instattack.src import start
+from instattack.src import operator
 
 
 def main():
@@ -19,5 +19,7 @@ def main():
 
     loop = asyncio.get_event_loop()
     os.environ['LEVEL'] = args.level
-    start(loop, args.config, *unknown)
+
+    oper = operator(args.config)
+    oper.start(loop, *unknown)
     loop.close()

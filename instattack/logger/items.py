@@ -1,5 +1,5 @@
 import re
-
+from .utils import get_record_attribute
 
 __all__ = (
     'Item',
@@ -15,51 +15,6 @@ Learn how to use pyparsing, it can be extremely useful.
 from pyparsing import (
     Literal, Suppress, Combine, Optional, alphas, delimitedList, oneOf, nums)
 """
-
-
-def get_off_record_obj(obj, param):
-    """
-    Priorities overridden values explicitly provided in extra, and will
-    check record.extra['context'] if the value is not in 'extra'.
-
-    If tier_key is provided and item found is object based, it will try
-    to use the tier_key to get a non-object based value.
-    """
-    if "." in param:
-        parts = param.split(".")
-        if len(parts) > 1:
-            if hasattr(obj, parts[0]):
-                nested_obj = getattr(obj, parts[0])
-                return get_off_record_obj(nested_obj, '.'.join(parts[1:]))
-            else:
-                return None
-        else:
-            if hasattr(obj, parts[0]):
-                return getattr(obj, parts[0])
-    else:
-        if hasattr(obj, param):
-            return getattr(obj, param)
-        return None
-
-
-def get_value(record, params=None, getter=None):
-
-    def sort_priority(param):
-        return param.count(".")
-
-    if params:
-        if isinstance(params, str):
-            params = [params]
-        params = sorted(params, key=sort_priority)
-
-        # Here, each param can be something like "context.index", or "index"
-        # Higher priority is given to less deeply nested versions.
-        for param in params:
-            value = get_off_record_obj(record, param)
-            if value is not None:
-                return value
-    else:
-        return getter(record)
 
 
 class AbstractObj(object):
@@ -236,7 +191,7 @@ class Item(AbstractObj):
         return self.value(record) is not None
 
     def value(self, record):
-        value = get_value(record, params=self.params, getter=self.getter)
+        value = get_record_attribute(record, params=self.params, getter=self.getter)
         if value is not None:
             return self._format_component(
                 value,

@@ -1,56 +1,34 @@
 from datetime import datetime
-from enum import Enum
 from plumbum import colors
 
+from instattack.lib import (get_exception_message, get_exception_status_code,
+    get_exception_request_method, get_obj_attribute)
 
-class Format(object):
-    def __init__(self, *args, wrapper=None, format_with_wrapper=False):
-        self.colors = args
-        self.wrapper = wrapper
-        self.format_with_wrapper = format_with_wrapper
-
-    def __call__(self, text):
-
-        if self.wrapper and self.format_with_wrapper:
-            text = self.wrapper % text
-
-        c = colors.do_nothing
-        for i in range(len(self.colors)):
-            c = c & self.colors[i]
-
-        # Apply wrapper after styling so we don't style the wrapper.
-        text = (c | text)
-
-        if self.wrapper and not self.format_with_wrapper:
-            text = self.wrapper % text
-        return text
-
-    def without_text_decoration(self):
-        undecorated = [c for c in self.colors
-            if c not in [colors.underline, colors.bold]]
-        return Format(
-            *undecorated,
-            wrapper=self.wrapper,
-            format_with_wrapper=self.format_with_wrapper
-        )
+from .constants import DATE_FORMAT, RecordAttributes
+from .format import Format
 
 
-class FormattedEnum(Enum):
+def get_record_attribute(record, params=None, getter=None):
 
-    def __init__(self, format):
-        if isinstance(format, dict):
-            self.format = format['base']
-            self.formats = format
-        else:
-            self.format = format
-            self.formats = {'base': format}
+    def sort_priority(param):
+        return param.count(".")
 
-    def __call__(self, text):
-        return self.format(text)
+    if params:
+        if isinstance(params, str):
+            params = [params]
+        params = sorted(params, key=sort_priority)
+
+        # Here, each param can be something like "context.index", or "index"
+        # Higher priority is given to less deeply nested versions.
+        for param in params:
+            value = get_obj_attribute(record, param)
+            if value is not None:
+                return value
+    else:
+        return getter(record)
 
 
 def get_record_message(record):
-    from instattack.lib import get_exception_message
 
     if isinstance(record.msg, Exception):
         return get_exception_message(record.msg)
@@ -58,7 +36,6 @@ def get_record_message(record):
 
 
 def get_record_status_code(record):
-    from instattack.lib import get_exception_status_code
 
     status_code = None
     if isinstance(record.msg, Exception):
@@ -75,7 +52,6 @@ def get_record_response_reason(record):
 
 
 def get_record_request_method(record):
-    from instattack.lib import get_exception_request_method
 
     method = None
     if isinstance(record.msg, Exception):
@@ -87,7 +63,6 @@ def get_record_request_method(record):
 
 
 def get_record_time(record):
-    from .constants import DATE_FORMAT
     return datetime.now().strftime(DATE_FORMAT)
 
 
@@ -99,7 +74,7 @@ def get_level_formatter(record):
 
 
 def get_message_formatter(record):
-    from .constants import RecordAttributes
+
     if getattr(record, 'highlight', None):
         return RecordAttributes.SPECIAL_MESSAGE
     elif getattr(record, 'level_format', None):
