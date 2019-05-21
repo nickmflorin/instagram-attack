@@ -3,6 +3,7 @@ import logging
 from plumbum import colors
 import sys
 
+from instattack.conf.utils import relative_to_root
 from .constants import LoggingLevels
 
 
@@ -54,6 +55,8 @@ class HandlerMixin(object):
 
         if isinstance(record.msg, Exception):
             record.is_exception = True
+
+        record.pathname = relative_to_root(record.pathname)
 
         if record.color:
             if isinstance(record.color, str):

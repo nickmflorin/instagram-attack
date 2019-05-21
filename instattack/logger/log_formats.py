@@ -77,7 +77,7 @@ def proxy_lines(record, indent=None):
         ),
         Item(
             params=['proxy.humanized_state', 'context.proxy.humanized_state'],
-            formatter=RecordAttributes.PROXY,
+            formatter=RecordAttributes.PROXY_STATE,
         ),
         Item(
             label="Num Requests",
@@ -125,8 +125,8 @@ def traceback_line(record, indent=None):
     return Line(
         Separator('('),
         Item(
-            params="filename",
-            formatter=RecordAttributes.FILENAME
+            params="pathname",
+            formatter=RecordAttributes.PATHNAME
         ),
         Separator(', '),
         Item(

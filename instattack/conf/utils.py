@@ -14,6 +14,16 @@ def get_app_root():
     return root / APP_NAME
 
 
+def relative_to_root(path):
+    from .settings import APP_NAME
+    if not isinstance(path, LocalPath):
+        path = LocalPath(path)
+    ind = path.parts.index(APP_NAME)
+    parts = path.parts[ind:]
+    path = LocalPath(*parts)
+    return dir_str(path)
+
+
 def dir_str(path):
     return "%s/%s" % (path.dirname, path.name)
 

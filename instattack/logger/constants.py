@@ -57,15 +57,15 @@ class RecordAttributes(FormattedEnum):
     REASON = Format(colors.fg('Grey69'))
 
     # Context
-    TASK = Format(colors.fg('LightBlue'), wrapper="(%s)")
     PASSWORD = Format(colors.fg('Grey69'), colors.bold)
     NUM_REQUESTS = Format(colors.fg('DarkGray'), colors.bold)
     INDEX = Format(colors.fg('Grey69'), colors.bold)
     PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
+    PROXY_STATE = Format(colors.fg('DarkGray'), colors.bold)
     TOKEN = Format(colors.fg('Grey69'))
     LABEL = Format(colors.fg('DarkGray'), wrapper="%s: ")
 
     # Traceback
-    FILENAME = Format(colors.fg('LightGray'))
+    PATHNAME = Format(colors.fg('LightGray'))
     LINENO = Format(colors.fg('DarkGray'), colors.bold)
     FUNCNAME = Format(colors.fg('DarkGray'))
