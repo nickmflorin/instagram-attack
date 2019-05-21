@@ -29,6 +29,7 @@ class AbstractObj(object):
         label=None,
         line_index=None,
         indent=None,
+        line_index_formatter=None,
     ):
         from .constants import RecordAttributes
         self._formatter = formatter
@@ -37,7 +38,7 @@ class AbstractObj(object):
         self._label_formatter = RecordAttributes.LABEL
 
         self._line_index = line_index
-        self._line_index_formatter = RecordAttributes.LINE_INDEX
+        self._line_index_formatter = RecordAttributes.LINE_INDEX or line_index_formatter
 
         self._indent = indent
 
@@ -154,6 +155,14 @@ class AbstractGroup(AbstractObj):
             return header
 
     def value(self, record):
+        """
+        TODO
+        ----
+        It is inconsistent to have the .format() method of the children being
+        used with the .value() method of the parent.  We should make the format
+        and value methods one method, to make it more consistent, and make grouping
+        children easier.
+        """
         if self.valid:
             value = ""
             children = self.valid_children(record)
@@ -233,7 +242,7 @@ class Lines(AbstractGroup):
     spacer = "\n"
 
     def __init__(self, *children, **kwargs):
-        self.child_cls = (Line, Lines, Separator)
+        self.child_cls = (Line, Lines, Separator, List, )
         kwargs.setdefault('lines_above', 1)
         super(Lines, self).__init__(*children, **kwargs)
 
@@ -244,3 +253,56 @@ class Lines(AbstractGroup):
             self.indentation,
             self.value
         ]
+
+
+class ListItem(Item):
+
+    def __init__(self, value, **kwargs):
+        self._value = value
+        super(Item, self).__init__(**kwargs)
+
+    def value(self, record):
+        return self._value
+
+    @property
+    def components(self):
+        return [
+            self.indentation,
+            self.line_index,
+            self.value,
+        ]
+
+
+class List(Lines):
+    """
+    A mixture of AbstractGroup and AbstractItem.
+
+    Therefore, we have to manually handle the keyword arguments that are
+    traditionally meant for individual items, but can pass upstream the keyword
+    arguments that are meant for the `Lines` AbstractGroup.
+    """
+    child_cls = (ListItem, )
+
+    def __init__(self, params, indent=None, formatter=None, line_index_formatter=None, **kwargs):
+        self.params = params
+        self.formatter = formatter
+        self.indent = indent
+        self.line_index_formatter = line_index_formatter
+        super(List, self).__init__(**kwargs)
+
+    def value(self, record):
+        return self.spacer.join([child.format(record) for child in self.valid_children(record)])
+
+    def valid_children(self, record):
+        children = get_record_attribute(record, params=self.params)
+        if children:
+            return [
+                ListItem(
+                    it,
+                    line_index=i + 1,
+                    indent=self.indent,
+                    formatter=self.formatter,
+                    line_index_formatter=self.line_index_formatter
+                ) for i, it in enumerate(children)
+            ]
+        return []

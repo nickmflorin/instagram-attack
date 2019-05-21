@@ -5,6 +5,7 @@ from dacite import from_dict
 from plumbum import colors
 from typing import List, Any, Optional
 
+from instattack.logger.constants import LoggingLevels
 from instattack.src.login import constants
 from instattack.src.proxies import Proxy
 from instattack.src.base import TaskContext
@@ -20,10 +21,6 @@ class LoginContext(TaskContext):
     index: int = 0
 
     @property
-    def context_id(self):
-        return 'login'
-
-    @property
     def name(self):
         return f'Login Task'
 
@@ -35,10 +32,6 @@ class LoginAttemptContext(TaskContext):
     proxy: Proxy
     index: int = 0
     parent_index: int = 0
-
-    @property
-    def context_id(self):
-        return 'attempt'
 
     @property
     def name(self):
@@ -75,12 +68,12 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return (colors.green & colors.bold | string_rep)
+            return LoggingLevels.SUCCESS.format(string_rep)
         elif self.not_authorized:
-            return (colors.red & colors.bold | string_rep)
+            return LoggingLevels.ERROR.format(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
-            return (colors.fg('DarkGray') & colors.bold | string_rep)
+            return LoggingLevels.DEBUG.format(string_rep)
 
     @classmethod
     def from_dict(cls, data, context):

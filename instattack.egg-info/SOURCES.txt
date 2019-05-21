@@ -16,11 +16,11 @@ instattack/lib/__init__.py
 instattack/lib/coro.py
 instattack/lib/decoratives.py
 instattack/lib/decorators.py
-instattack/lib/err_handling.py
 instattack/lib/io.py
 instattack/lib/progress.py
 instattack/logger/__init__.py
 instattack/logger/constants.py
+instattack/logger/format.py
 instattack/logger/handler.py
 instattack/logger/handlers.py
 instattack/logger/items.py
@@ -34,11 +34,8 @@ instattack/src/base.py
 instattack/src/exceptions.py
 instattack/src/operator.py
 instattack/src/cli/__init__.py
-instattack/src/cli/attack.py
 instattack/src/cli/base.py
-instattack/src/cli/proxies.py
 instattack/src/cli/test.py
-instattack/src/cli/users.py
 instattack/src/cli/utils.py
 instattack/src/login/__init__.py
 instattack/src/login/constants.py
@@ -49,6 +46,7 @@ instattack/src/login/requests.py
 instattack/src/login/utils.py
 instattack/src/proxies/__init__.py
 instattack/src/proxies/broker.py
+instattack/src/proxies/cli.py
 instattack/src/proxies/exceptions.py
 instattack/src/proxies/handler.py
 instattack/src/proxies/models.py
@@ -56,6 +54,7 @@ instattack/src/proxies/pool.py
 instattack/src/proxies/queue.py
 instattack/src/proxies/utils.py
 instattack/src/users/__init__.py
+instattack/src/users/cli.py
 instattack/src/users/constants.py
 instattack/src/users/exceptions.py
 instattack/src/users/models.py

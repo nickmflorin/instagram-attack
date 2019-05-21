@@ -1,4 +1,4 @@
-from .items import Separator, Item, Line, Lines
+from .items import Separator, Item, Line, Lines, List
 from .constants import RecordAttributes
 from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
@@ -173,6 +173,14 @@ def LOG_FORMAT_STRING(record):
                 indent=2,
                 formatter=RecordAttributes.OTHER_MESSAGE
             ),
+        ),
+        List(
+            params="list",
+            indent=2,
+            formatter=RecordAttributes.OTHER_MESSAGE,
+            line_index_formatter=RecordAttributes.LINE_INDEX,
+            lines_above=0,
+            lines_below=0
         ),
         Lines(
             *context_lines(record, indent=2),

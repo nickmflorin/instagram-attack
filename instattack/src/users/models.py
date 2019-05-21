@@ -1,8 +1,9 @@
+import asyncio
 from datetime import datetime
 
 from tortoise import fields
 from tortoise.models import Model
-from tortoise.exceptions import IntegrityError
+from tortoise.exceptions import IntegrityError, OperationalError
 
 from instattack import logger
 from instattack.conf import settings
@@ -45,6 +46,8 @@ class User(Model):
     password = fields.CharField(max_length=100, null=True)
 
     FILES = constants.FILES
+    SLEEP = 5
+    MAX_SAVE_ATTEMPT_TRIES = 4
 
     class Meta:
         unique_together = ('id', 'username', )
@@ -161,12 +164,7 @@ class User(Model):
             attempts = attempts[:limit]
         return attempts
 
-    async def write_attempt(self, attempt, success=False):
-        if success:
-            log.debug(f'Saving Successful Attempt {attempt} for {self.username}.')
-        else:
-            log.debug(f'Saving Unsuccessful Attempt {attempt} for {self.username}.')
-
+    async def write_attempt(self, attempt, success=False, try_attempt=0):
         # Since we are calling this from a scheduler, it does not seem to pick up
         # on the exceptions that we would raise if the attempt already exists,
         # which is okay for now - since it will not create a duplicate one.
@@ -180,6 +178,32 @@ class User(Model):
         except IntegrityError:
             log.warning(f'Cannot Save Duplicate Attempt {attempt}.')
 
+        # We need to safeguard this somehow so that we can always save the attempts
+        # during operation even if the database is slightly overloaded with
+        # transactions...  We will worry about the root cause of this later, but
+        # just use this patch for now.
+        except OperationalError:
+            if try_attempt <= self.MAX_SAVE_ATTEMPT_TRIES:
+
+                log.warning('Unable to Access Database...', extra={
+                    'other': f'Sleeping for {self.SLEEP} Seconds.'
+                })
+                await asyncio.sleep(self.SLEEP)
+
+                await self.write_attempt(
+                    attempt,
+                    success=success,
+                    try_attempt=try_attempt + 1
+                )
+
+            # For now, we do not want to raise exceptions and disrupt the long
+            # running logic unless there is a chance we accidentally miss a
+            # confirmed password.
+            else:
+                if success:
+                    raise
+                log.critical(f'Unable to Successfully Save Attempt {attempt}.')
+
     async def generate_attempts(self, loop, limit=None):
         """
         For now, just returning current passwords for testing, but we will
@@ -187,6 +211,8 @@ class User(Model):
         password attempts.
         """
         current_attempts = await self.get_attempts()
+        current_attempts = [attempt.password for attempt in current_attempts]
+
         generator = password_gen(loop, self, current_attempts, limit=limit)
         for item in generator():
             yield item

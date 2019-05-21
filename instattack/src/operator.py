@@ -43,7 +43,7 @@ class operator(object):
 
         # It would be easier if there was a way to pass this through to the CLI
         # application directly, instead of storing as ENV variable.
-        self.config.store()
+        self.config.set()
 
         # with progressbar_wrap():
         try:
@@ -86,7 +86,7 @@ class operator(object):
         # exception handler, only from teh start() method.  Eventually we might
         # want to find a better way to do this.
         if config:
-            log.disable_on_true(config['log'].get('silent_shutdown'))
+            log.disable_on_true(config.get('silent_shutdown', False))
 
         log.start('Starting Shut Down')
 

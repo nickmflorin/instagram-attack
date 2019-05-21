@@ -1,32 +1,43 @@
-log:
-    attempts: False
-    login: True
-    silent_shutdown: False
+silent_shutdown: False
 
-password_limit: 10
-batch_size: 20
-attempt_batch_size: 10
+login:
+    limit: 10
+    batch_size: 20
+    log: True
+    remove_proxy_on_error: True
 
-connection:
-    limit_per_host: 0
-    timeout: 5
-    limit: 200
+    attempts:
+        log: True
+        batch_size: 15
+
+    connection:
+        limit_per_host: 0
+        timeout: 5
+        limit: 200
 
 proxies:
 
     pool:
-        max_resp_time: 6
-        max_error_rate: 0.5
-        min_req_proxy: 6
         timeout: 25
         prepopulate: True
         collect: True
-        # prepopulate_limit: 10000
         log: False
 
+        max_resp_time:
+            value: 4.0
+            strict: False
+
+        max_error_rate:
+            value: 0.5
+            strict: True
+
+        min_req_proxy:
+            value: 6
+            strict: False
+
     broker:
-        # limit: 2000
         max_conn: 200
         max_tries: 2
         timeout: 5
         log: False
+        # limit: 2000

@@ -20,6 +20,8 @@ def main():
     loop = asyncio.get_event_loop()
     os.environ['LEVEL'] = args.level
 
-    oper = operator(args.config)
+    config = Configuration(path=args.config)
+
+    oper = operator(config)
     oper.start(loop, *unknown)
     loop.close()

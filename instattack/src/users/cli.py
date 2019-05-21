@@ -1,7 +1,6 @@
 import asyncio
 from plumbum import cli
 
-from instattack.src.exceptions import ArgumentError
 from instattack.src.cli import EntryPoint, BaseApplication
 
 from .models import User
@@ -11,14 +10,14 @@ from .models import User
 class BaseUsers(BaseApplication):
 
     def main(self, *args):
-        self._config.update({'log': {'silent_shutdown': True}})
+        self._config.update({'silent_shutdown': True})
 
 
 @EntryPoint.subcommand('user')
 class BaseUser(BaseApplication):
 
     def main(self, *args):
-        self._config.update({'log': {'silent_shutdown': True}})
+        self._config.update({'silent_shutdown': True})
 
 
 @BaseUsers.subcommand('clean')

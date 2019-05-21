@@ -138,7 +138,7 @@ class ProxyModelMixin(ModelMixin):
         Counts the error_rate as 0.0 until there are a sufficient number of
         requests.
         """
-        if self.num_requests >= 5:
+        if self.num_requests >= settings.ERROR_RATE_HORIZON:
             return float(self.num_failed_requests) / self.num_requests
         return 0.0
 
@@ -218,40 +218,6 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
         priority.append(count)
         return tuple(priority)
 
-    def compare(self, other, return_difference=False):
-        if any([
-            other.identifier_values[i] != self.identifier_values[i]
-            for i in range(len(self.identifier_fields))
-        ]):
-            raise RuntimeError('Cannot compare these two proxies.')
-
-        if self.priority != other.priority:
-            if return_difference:
-                return ProxyDifferences(old_proxy=self, new_proxy=other)
-            return True
-        else:
-            if return_difference:
-                return None
-            return False
-
-    def evaluate(self, num_requests=None, error_rate=None, resp_time=None):
-        """
-        Determines if the proxy meets the provided standards.
-        """
-
-        # We might want to lower restrictions on num requests, since we can
-        # just put in the back of the pool.
-        if num_requests and self.num_requests >= num_requests:
-            return (False, 'Number of Requests Exceeds Limit')
-
-        elif error_rate and self.error_rate > error_rate:
-            return (False, 'Error Rate too Large')
-
-        elif resp_time and self.avg_resp_time > resp_time:
-            return (False, 'Avg. Response Time too Large')
-
-        return (True, None)
-
     def update_time(self):
         self.last_used = datetime.now()
 
@@ -284,6 +250,72 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
         self.update_time()
         if save:
             await self.save()
+
+    def __eq__(self, other):
+        if all([
+            other.identifier_values[i] == self.identifier_values[i]
+            for i in range(len(self.identifier_fields))
+        ]):
+            return True
+        return False
+
+    def different_from(self, other):
+        if any([
+            other.priority_values[i] != self.priority_values[i]
+                for i in range(len(self.priority_fields))
+        ]):
+            return True
+        return False
+
+    def compare(self, other, return_difference=False):
+        if self == other:
+            raise RuntimeError('Proxies must be different in order to compare.')
+
+        if self.different_from(other):
+            if return_difference:
+                return ProxyDifferences(old_proxy=self, new_proxy=other)
+            return True
+        else:
+            if return_difference:
+                return None
+            return False
+
+    def evaluate(self, max_error_rate=None, min_req_proxy=None, max_resp_time=None):
+        """
+        Determines if the proxy meets the provided standards.
+        """
+        evaluations = []
+        if (min_req_proxy and min_req_proxy.get('value') and
+                self.num_active_requests >= min_req_proxy['value']):
+
+            num_requests = min_req_proxy['value']
+            evaluations.append({
+                'strict': min_req_proxy['strict'],
+                'attr': 'min_req_proxy',
+                'reason': f'Num. Active Requests {self.num_active_requests} > {num_requests}'
+            })
+
+        if (max_error_rate and max_error_rate.get('value') and
+                self.flattened_error_rate >= max_error_rate['value']):
+
+            err_rate = max_error_rate['value']
+            evaluations.append({
+                'strict': max_error_rate['strict'],
+                'attr': 'max_error_rate',
+                'reason': f'Error Rate {self.error_rate} > {err_rate}.'
+            })
+
+        if (max_resp_time and max_resp_time.get('value') and
+                self.avg_resp_time >= max_resp_time['value']):
+
+            resp_time = max_resp_time['value']
+            evaluations.append({
+                'strict': max_resp_time['strict'],
+                'attr': 'max_resp_time',
+                'reason': f'Avg. Resp. Time {self.avg_resp_time} > {resp_time}.'
+            })
+
+        return evaluations
 
     async def update_from_differences(self, differences):
         for diff in differences.diff:

@@ -1,11 +1,35 @@
+import aiohttp
 from datetime import datetime
 from plumbum import colors
 
-from instattack.lib import (get_exception_message, get_exception_status_code,
-    get_exception_request_method, get_obj_attribute)
-
 from .constants import DATE_FORMAT, RecordAttributes
 from .format import Format
+
+
+def get_obj_attribute(obj, param):
+    """
+    Given an object, returns the parameter for that object if it exists.  The
+    parameter can be nested, by including "." to separate the nesting of objects.
+
+    For example, get_obj_attribute(test_obj, 'fruits.apple.name') would get
+    the 'fruits' object off of `test_obj`, then the 'apple' object and then
+    the 'name' attribute on the 'apple' object.
+    """
+    if "." in param:
+        parts = param.split(".")
+        if len(parts) > 1:
+            if hasattr(obj, parts[0]):
+                nested_obj = getattr(obj, parts[0])
+                return get_obj_attribute(nested_obj, '.'.join(parts[1:]))
+            else:
+                return None
+        else:
+            if hasattr(obj, parts[0]):
+                return getattr(obj, parts[0])
+    else:
+        if hasattr(obj, param):
+            return getattr(obj, param)
+        return None
 
 
 def get_record_attribute(record, params=None, getter=None):
@@ -29,17 +53,56 @@ def get_record_attribute(record, params=None, getter=None):
 
 
 def get_record_message(record):
-
     if isinstance(record.msg, Exception):
         return get_exception_message(record.msg)
     return record.msg
 
 
+def get_exception_message(exc):
+
+    error_message = exc.__class__.__name__
+
+    message = getattr(exc, 'message', None) or str(exc)
+    if message != "" and message is not None:
+        error_message = f"{exc.__class__.__name__}: {message}"
+    else:
+        if hasattr(exc, 'strerror'):
+            error_message = f"{exc.__class__.__name__}: {exc.strerror}"
+
+    err_no = get_exception_err_no(exc)
+    if err_no:
+        error_message += (f' (ErrNo: {err_no})')
+
+    return error_message
+
+
+def get_exception_err_no(exc):
+    if hasattr(exc, 'errno'):
+        return exc.errno
+    return None
+
+
+def get_exception_status_code(exc):
+
+    if hasattr(exc, 'status'):
+        return exc.status
+    elif hasattr(exc, 'status_code'):
+        return exc.status_code
+    else:
+        return None
+
+
+def get_exception_request_method(exc):
+
+    if hasattr(exc, 'request_info'):
+        if exc.request_info.method:
+            return exc.request_info.method
+    return None
+
+
 def get_record_status_code(record):
 
-    status_code = None
-    if isinstance(record.msg, Exception):
-        status_code = get_exception_status_code(record.msg)
+    status_code = get_exception_status_code(record.msg)
     if not status_code:
         if hasattr(record, 'response') and hasattr(record.response, 'status'):
             status_code = record.response.status
@@ -53,9 +116,7 @@ def get_record_response_reason(record):
 
 def get_record_request_method(record):
 
-    method = None
-    if isinstance(record.msg, Exception):
-        method = get_exception_request_method(record.msg)
+    method = get_exception_request_method(record.msg)
     if not method:
         if hasattr(record, 'response') and hasattr(record.response, 'method'):
             method = record.response.method

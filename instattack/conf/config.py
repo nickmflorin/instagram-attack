@@ -1,94 +1,130 @@
 from argparse import ArgumentTypeError
+import collections
 from copy import deepcopy
 import json
 import os
 import yaml
 
+from instattack import logger
+
 from .utils import validate_config_filepath
 
 
-class Configuration(dict):
+log = logger.get_sync('Configuration')
+
+
+class Configuration(collections.MutableMapping):
+    """A dictionary that applies an arbitrary key-altering
+       function before accessing the keys"""
 
     env_key = 'INSTATTACK_CONFIG'
 
-    def __init__(self, path=None, data=None):
-        super(Configuration, self).__init__({})
+    def __init__(self, *args, **kwargs):
 
-        self.path = path
+        self.store = dict()
+        self.path = kwargs.pop('path', None)
         if self.path:
             self.read()
+        self.update(dict(*args))
 
-        if data:
-            self.establish(data)
-        self.store()
+    def __getitem__(self, key):
+        item = self.store[self.__keytransform__(key)]
+        if isinstance(item, dict) and not isinstance(item, Configuration):
+            return Configuration(item)
+        return item
+
+    def __setitem__(self, key, value):
+        if isinstance(value, dict) and not isinstance(value, Configuration):
+            value = Configuration(value)
+        self.store[self.__keytransform__(key)] = value
+
+    def __delitem__(self, key):
+        del self.store[self.__keytransform__(key)]
+
+    def __iter__(self):
+        return iter(self.store)
+
+    def __len__(self):
+        return len(self.store)
+
+    def __keytransform__(self, key):
+        return key
+
+    @classmethod
+    def validate(cls, path):
+        return validate_config_filepath(path)
+
+    @classmethod
+    def load(cls):
+        log.info('Loading Configuration')
+        data = os.environ[cls.env_key]
+        data = json.loads(data)
+        return cls(data)
 
     def read(self):
-        self._validate()
+        log.info('Reading Configuration')
+        if not self.path:
+            raise RuntimeError('Configuration must be provided a path in order to validate.')
+
+        self.path = validate_config_filepath(self.path)
+
         with open(self.path, 'r') as ymlfile:
             try:
                 data = yaml.load(ymlfile)
             except (yaml.YAMLLoadWarning, yaml.scanner.ScannerError) as e:
                 raise ArgumentTypeError(str(e))
-        self.update(data)
 
-    def establish(self, data):
-        """
-        Similiar to regular dict update, in that nested dicts update for the
-        entire structure, but all dict structures are sub-nested as instances
-        of Configuration.
-        """
-        for key, val in data.items():
-            if isinstance(val, dict):
-                # Will recursively update the nested dict objects in the __init__
-                # method.
-                self[key] = Configuration(data=val)
+        # Cannot recursively update since the values are not present yet.
+        self.store.update(data)
+
+    def recursively_update(self, newval):
+        for k, v in newval.items():
+            if k not in self:
+                self[k] = v
             else:
-                self[key] = val
+                if isinstance(v, dict):
+                    self[k].recursively_update(v)
+                else:
+                    self[k] = v
+
+    def serialize(self):
+        serialized = {}
+        for k, v in self.store.items():
+            if isinstance(v, Configuration):
+                serialized[k] = v.serialize()
+            else:
+                serialized[k] = v
+        return serialized
 
     def update(self, data):
         """
         Similar to regular dict update, but will only update nested dict values
         for single keys, not the entire structures.
         """
-        def mutate_in_place(original, obj):
-            for key, val in obj.items():
-                if isinstance(val, dict):
-                    if key in original:
-                        mutate_in_place(original[key], val)
-                    else:
-                        original[key] = val
-                else:
-                    original[key] = val
+        if data:
+            self.recursively_update(data)
+        self.set()
 
-        mutate_in_place(self, data)
-        self.store()
-
-    def _validate(self):
+    def default(self, key, val):
         """
-        Validates if the default configuration file or the specified config
-        file is both present and valid, and then validates whether or not the
-        schema is correct.
+        Updates the current config object to have the default value (object/dict
+        or singleton) for the provided key, and then returns the keyed object.
+
+        If a dict is provided, only the values in the dict that are not already
+        set will be updated/defaulted.
+
+        NOTE:
+        ----
+        We have to manually call store on the main configuration object after
+        this is performed.
         """
-        if not self.path:
-            raise RuntimeError('Configuration must be provided a path in order to validate.')
-        self.path = validate_config_filepath(self.path)
+        self[key].update(val)
+        return self[key]
 
-    def store(self):
-        os.environ[self.env_key] = json.dumps(self)
-
-    @classmethod
-    def load(cls):
-        data = os.environ[cls.env_key]
-        data = json.loads(data)
-        return cls(data=data)
-
-    @classmethod
-    def validate(cls, path):
-        config = Configuration(path)
-        config._validate()
-        config.read()
-        return config
+    def set(self):
+        os.environ[self.env_key] = json.dumps(self.serialize())
 
     def override(self, **kwargs):
-        new_config = Configuration(self.path, data=deepcopy(self.data))
+        new_config = Configuration(deepcopy(self.store))
+        new_config.update(**kwargs)
         return new_config

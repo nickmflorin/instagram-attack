@@ -99,18 +99,6 @@ class AsyncCustomLevelMixin(object):
 
 class LoggerMixin(object):
 
-    def _init(self, name, subname=None):
-        self.subname = subname
-
-        self._conditional = None
-        self.line_index = 0
-        self.log_once_messages = []
-
-        # Environment variable might not be set for usages of AppLogger
-        # in __main__ module right away.
-        if os.environ.get('LEVEL'):
-            self.setLevel(os.environ['LEVEL'])
-
     def sublogger(self, subname):
         logger = self.__class__(self.name, subname=subname)
         return logger
@@ -153,17 +141,19 @@ class LoggerMixin(object):
         """
         formatter = LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()
         header = formatter("\n------------- Error -------------\n")
+
+        # Leave Multiple Outputs for Now Until We Can Figure Out Why Errors
+        # Being Hidden
         sys.stdout.write(header)
 
         traceback.print_exception(ex.__class__, ex, ex.__traceback__,
-            limit=100, file=sys.stdout)
+            limit=1000, file=sys.stdout)
 
         sys.stdout.write(header)
 
         traceback.print_last(ex.__class__, ex, ex.__traceback__,
-            limit=100, file=sys.stdout)
+            limit=1000, file=sys.stdout)
 
         sys.stdout.write(header)
-
         traceback.print_stack(ex.__class__, ex, ex.__traceback__,
-            limit=100, file=sys.stdout)
+            limit=1000, file=sys.stdout)

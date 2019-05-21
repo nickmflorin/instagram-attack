@@ -94,7 +94,7 @@ class BaseAttack(BaseApplication):
         """
         loop = asyncio.get_event_loop()
         if self.limit:
-            self.config.update({'password_limit': self.limit})
+            self._config.update({'login': {'limit': self.limit}})
 
         # Default Collect to False
         self._config.update({'proxies': {'pool': {'collect': self.collect}}})

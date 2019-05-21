@@ -52,12 +52,11 @@ class LoginHandler(RequestHandler):
     def __init__(self, config, proxy_handler, **kwargs):
         super(LoginHandler, self).__init__(config, proxy_handler, **kwargs)
 
-        self.limit = config['password_limit']
+        self.limit = config['limit']
         self.batch_size = config['batch_size']
-        self.attempt_batch_size = config['attempt_batch_size']
+        self.attempt_batch_size = config['attempts']['batch_size']
 
-        self.log_attempts = config['log']['attempts']
-        self.log_login = config['log']['login']
+        self.log_login = config['log']
 
         self.passwords = asyncio.Queue()
 
@@ -65,8 +64,6 @@ class LoginHandler(RequestHandler):
         self.login_index = 0  # Index for the current password and attempts per password.
         self.attempts_count = collections.Counter()  # Indexed by Password
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
-
-        self._all_tasks = []
 
     async def run(self, loop):
         await self.prepopulate(loop)
@@ -77,29 +74,20 @@ class LoginHandler(RequestHandler):
         return await self.attack(loop)
 
     async def attack(self, loop):
-        scheduler = await aiojobs.create_scheduler(limit=None)
+        scheduler = await aiojobs.create_scheduler(limit=100)
 
         result = await self.attempt_login(loop, scheduler)
         if not result:
             raise RuntimeError('Attempt login must return result.')
 
-        # If we return the result right away, the handler will be stopped and
-        # leftover tasks will be cancelled.  We have to make sure to save the
-        # proxies before doing that.
-        log.debug('Waiting for Background Tasks to Finish')
-
-        # [!] Will suppress any errors of duplicate attempts
-        await scheduler.close()
-
-        log.debug('Cleaning Up Remnant Tasks')
-        await self.cleanup(loop)
+        await self.cleanup(loop, scheduler)
         return result
 
     async def prepopulate(self, loop):
 
-        futures = []
-
         log.start(f'Generating {self.limit} Attempts for User {self.user.username}.')
+
+        futures = []
         async for password in self.user.generate_attempts(loop, limit=self.limit):
             futures.append(self.passwords.put(password))
 
@@ -109,30 +97,16 @@ class LoginHandler(RequestHandler):
 
         log.complete(f"Prepopulated {len(futures)} Password Attempts")
 
-    async def cleanup(self, loop):
+    async def cleanup(self, loop, scheduler):
         """
-        Cleans up the leftover remaining tasks that need to be completed before
-        the handler shuts down.  This currently just includes saving proxies
-        that were updated during individual attempts.
-
-        If we return the result right away, the handler will be stopped and
-        leftover tasks will be cancelled.  We have to make sure to save the
-        proxies before doing that.
+        Used to be used to wait for a global tasks object to finish for individual
+        saves before we used aiojobs for background tasks.  Might still have
+        some utility if there are things we need to cleanup.
         """
-        leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
-        if len(leftover) != 0:
-            log.start(f'Cleaning Up {len(leftover)} Proxy Saves...')
-            save_results = await asyncio.gather(*self._all_tasks, return_exceptions=True)
+        log.debug('Waiting for Background Tasks to Finish')
 
-            leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
-            log.complete(f'Done Cleaning Up {len(leftover)} Proxy Saves...')
-
-            for i, res in enumerate(save_results):
-                if isinstance(res, Exception):
-                    log.critical('Noticed Exception When Saving Proxy')
-
-        leftover = [tsk for tsk in self._all_tasks if not tsk.done()]
-        log.info(f'{len(leftover)} Leftover Incomplete Tasks.')
+        # [!] Will suppress any errors of duplicate attempts
+        await scheduler.close()
 
     async def attempt_login(self, loop, scheduler):
         """
@@ -221,7 +195,11 @@ class LoginHandler(RequestHandler):
         current fetches to the batch_size.  Will return when it finds the first
         request that returns a valid result.
         """
-        log = logger.get_async(self.__name__, subname="login_with_password")
+        log = logger.get_async(self.__name__, subname="attempt_with_password")
+
+        # TODO:  We should figure out a way to allow proxies to repopulate and wait
+        # on them for large number of password requests.  We don't want to bail when
+        # there are no more proxies because we might be using them all currently
 
         async def login_attempt_task_generator():
             """
@@ -260,12 +238,14 @@ class LoginHandler(RequestHandler):
         # requests with the proxies.
         await self.start_event.wait()
 
-        log.complete(f'Atempting Login with {context.password}')
+        log.start(f'Atempting Login with {context.password}')
 
         result = await limit_on_success(
             login_attempt_task_generator(),
             self.attempt_batch_size
         )
 
-        log.complete(f'Done Attempting Login with {context.password}', extra={'other': result})
+        log.complete(f'Done Attempting Login with {context.password}', extra={
+            'other': result
+        })
         return result

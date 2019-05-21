@@ -44,7 +44,7 @@ class LoggingLevels(FormattedEnum):
 
 class RecordAttributes(FormattedEnum):
 
-    LINE_INDEX = Format(colors.black, wrapper="[%s] ")
+    LINE_INDEX = Format(colors.black, colors.bold, wrapper="[%s] ")
     DATETIME = Format(colors.fg('LightYellow3'), wrapper="[%s] ")
     MESSAGE = Format(colors.fg('Grey7'))
     NAME = Format(colors.fg('DarkGray'))

@@ -11,13 +11,13 @@ def post_handlers(user, config):
     auth_result_found = asyncio.Event()
 
     proxy_handler = ProxyHandler(
-        config,
+        config['proxies'],
         lock=lock,
         start_event=start_event,
     )
 
     password_handler = LoginHandler(
-        config,
+        config['login'],
         proxy_handler,
         user=user,
         start_event=start_event,

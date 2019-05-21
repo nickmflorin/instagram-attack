@@ -22,7 +22,7 @@ class ProxyHandler(Handler):
         super(ProxyHandler, self).__init__(**kwargs)
 
         self.broker = InstattackProxyBroker(
-            config['proxies']['broker'],
+            config['broker'],
             **kwargs
         )
 
@@ -30,7 +30,7 @@ class ProxyHandler(Handler):
         # What would be really cool would be if we could pass in our custom pool
         # directly so that the broker popoulated that queue with the proxies.
         self.pool = InstattackProxyPool(
-            config['proxies']['pool'],
+            config['pool'],
             self.broker,
             start_event=self.start_event,
         )

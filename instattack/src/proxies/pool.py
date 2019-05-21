@@ -4,7 +4,7 @@ from instattack import logger
 from instattack.lib import starting
 from instattack.src.base import HandlerMixin
 
-from .utils import stream_proxies, update_or_create_proxies
+from .utils import stream_proxies
 from .queue import ProxyPriorityQueue
 
 
@@ -25,35 +25,6 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
         self.should_collect = config.get('collect', True)
         self.should_prepopulate = config.get('prepopulate', True)
         self.prepopulate_limit = config.get('prepopulate_limit')
-
-    async def save(self, loop):
-        """
-        TODO
-        ----
-        This is not currently used since we are saving the proxies in background
-        tasks as they are pulled in, but we have no way of tracking whether or not
-        we are updating proxies, adding them or cannot add them (because of duplication)
-        since the background tasks suppress exceptions.
-
-        Saves proxies in the pool to the database.  This includes both proxies
-        that were prepopulated and proxies that were collected from the broker,
-        because we may need to update stats of proxies that were prepopulated.
-        """
-        proxies = []
-        while not self.empty():
-            ret = await super(ProxyPriorityQueue, self).get()
-            proxy = ret[1]
-
-            # Should we Still Save Removed Proxies?
-            # mapped = self.proxy_finder[proxy.unique_id]
-            # if mapped is not self.REMOVED:
-            proxies.append(proxy)
-
-        if len(proxies) == 0:
-            log.error('No Proxies to Save')
-            return
-
-        await update_or_create_proxies(proxies)
 
     @starting('Proxy Prepopulation')
     async def prepopulate(self, loop):

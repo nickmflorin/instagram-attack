@@ -72,6 +72,9 @@ def HEADERS(token=None):
 PROXY_COUNTRIES = []
 PROXY_TYPES = ["HTTP"]
 
+# We might want to put this in CONFIG
+ERROR_RATE_HORIZON = 5
+
 # General
 LEVELS = [
     'INFO',

@@ -20,7 +20,8 @@ log = logger.get_async('Login Handler')
 """
 TODO:
 ----
-Look into asyncio.shield() for database transactions.
+Look into asyncio.shield() for database transactions.  This is not necessary
+with aiojobs however.
 
 ClientSession
 -------------
@@ -36,8 +37,61 @@ event loop to allow any open underlying connections to close.
 <https://docs.aiohttp.org/en/stable/client_advanced.html>
 """
 
+"""
+AioHTTP Client Exception Reference
+----------------------------------
+https://docs.aiohttp.org/en/stable/client_reference.html
+
+-- ClientError
+
+    -- ClientResponseError(ClientError): These exceptions could happen after we
+            get response from server.
+
+    -- ClientConnectionError(ClientError): These exceptions related to low-level
+            connection problems.
+
+        : Connection reset by peer
+
+        -- ServerConnectionError(ClientConnectionError)
+
+                -- ServerDisconnectError(ServerConnectionError)
+                -- ServerTimeoutError(ServerConnectionError, asyncio.TimeoutError)
+
+        -- ClientOSError(ClientConnectionError, OSError): Subset of connection
+                errors that are initiated by an OSError exception.
+
+            : OSError: Too many open files
+
+            -- ClientConnectorError(ClientOSError)
+
+                -- ClientProxyConnectionError(ClientConnectorError)
+                -- ClientSSLError(ClientConnectorError) -> Raise Exceptions Here
+
+                    -- ClientConnectorCertificateError(ClientSSLError, ssl.SSLError)
+                    -- ClientConnectorSSLError(ClientSSLError, ssl.CertificateError)
+
+                        :[SSL: WRONG_VERSION_NUMBER] wrong version number
+"""
+
 
 class RequestHandler(Handler):
+
+    SLEEP = 3
+
+    REQUEST_ERRORS = (
+        aiohttp.ClientProxyConnectionError,
+        # Not sure why we need the .client_exceptions version and the base version?
+        aiohttp.client_exceptions.ClientConnectorError,
+        aiohttp.ServerConnectionError,
+        # Not sure why we have to add these even though they should be
+        # covered by their parents...
+        aiohttp.ClientConnectorError,
+        aiohttp.ClientConnectorCertificateError,
+        aiohttp.ClientConnectorSSLError,
+        ConnectionResetError,
+        ConnectionRefusedError,
+        ssl.SSLError
+    )
 
     def __init__(self, config, proxy_handler, **kwargs):
         super(RequestHandler, self).__init__(**kwargs)
@@ -47,9 +101,13 @@ class RequestHandler(Handler):
         self._cookies = None
         self._token = None
 
+        self.log_attempts = config['attempts']['log']
+
         self.limit = config['connection']['limit']
         self.timeout = config['connection']['timeout']
         self.limit_per_host = config['connection']['limit_per_host']
+
+        self.remove_proxy_on_error = config.get('remove_proxy_on_error', False)
 
     @property
     def _connector(self):
@@ -145,88 +203,89 @@ class RequestHandler(Handler):
                 else:
                     return await self.parse_response_result(json, context)
 
+    async def handle_inconclusive_proxy(self, e, proxy, scheduler, extra=None):
+
+        log = logger.get_async('Handling Inconclusive Proxy', subname='handle_inconclusive_proxy')
+        log.disable_on_false(self.log_attempts)
+
+        extra = extra or {}
+        extra['proxy'] = proxy
+        log.error(e, extra=extra)
+
+        await proxy.was_inconclusive(save=False)
+        await self.proxy_handler.pool.put(proxy)
+        await scheduler.spawn(proxy.save())
+
+    async def handle_proxy_error(self, e, proxy, scheduler, extra=None):
+
+        log = logger.get_async('Handling Proxy Error', subname='handle_proxy_error')
+        log.disable_on_false(self.log_attempts)
+
+        extra = extra or {}
+        extra['proxy'] = proxy
+        log.error(e, extra=extra)
+
+        await proxy.was_error(e, save=False)
+        await self.proxy_handler.pool.put(proxy)
+        await scheduler.spawn(proxy.save())
+
+    async def handle_fatal_proxy(self, e, proxy, scheduler):
+
+        log = logger.get_async('Handling Fatal Proxy Error', subname='handle_fatal_proxy')
+        log.disable_on_false(self.log_attempts)
+
+        if self.remove_proxy_on_error:
+            log.error(e, extra={'other': 'Removing Proxy', 'proxy': proxy})
+            await scheduler.spawn(proxy.delete())
+        else:
+            await self.handle_proxy_error(e, proxy, scheduler, extra={'proxy': proxy})
+
     async def handle_request_error(self, e, proxy, context, log, scheduler):
         """
-        AioHTTP Client Exception Reference
-        https://docs.aiohttp.org/en/stable/client_reference.html
-
-        ClientError
-
-            These exceptions could happen after we get response from server.
-            - ClientResponseError(ClientError)
-
-            These exceptions related to low-level connection problems.
-            - ClientConnectionError(ClientError)
-
-                - ServerConnectionError(ClientConnectionError)
-
-                        - ServerDisconnectError(ServerConnectionError)
-                        - ServerTimeoutError(ServerConnectionError, asyncio.TimeoutError)
-
-                Subset of connection errors that are initiated by an OSError exception.
-                - ClientOSError(ClientConnectionError, OSError)
-
-                    - ClientConnectorError(ClientOSError)
-
-                        - ClientProxyConnectionError(ClientConnectorError)
-                        - ClientSSLError(ClientConnectorError) -> Raise Exceptions Here
-
-                            - ClientConnectorCertificateError(ClientSSLError, ssl.SSLError)
-                            - ClientConnectorSSLError(ClientSSLError, ssl.CertificateError)
+        For errors related to proxy connectivity issues, and the validity of
+        the proxy, we remove the proxy entirely and don't note the error/put
+        back in the pool.  For situations in which it is a client response
+        error, i.e. a response was returned, we just note the error and put
+        the proxy back in the pool.
         """
         if isinstance(e, RuntimeError):
             """
             RuntimeError: File descriptor 87 is used by transport
             <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
             """
-            log.error(e, extra={'context': context})
-            await context.proxy.was_inconclusive(save=False)
-            await self.proxy_handler.pool.put(context.proxy)
-            scheduler.spawn(context.proxy.save())
+            await self.handle_inconclusive_proxy(e, context.proxy, scheduler)
 
         elif isinstance(e, asyncio.CancelledError):
             # Don't want to mark as inconclusive because we don't want to note
             # the last time the proxy was used.
             pass
 
-        elif isinstance(e, (
-            aiohttp.ClientProxyConnectionError,
-            aiohttp.ServerConnectionError,
-            # Not sure why we have to add these even though they should be
-            # covered by their parents...
-            aiohttp.ClientConnectorError,
-            aiohttp.ClientConnectorCertificateError,
-            # Not sure why this isn't covered by the aiohttp exceptions but this
-            # was causing issues at higher password numbers.
-            ssl.SSLError,
-        )):
-            log.error(e, extra={'context': context})
-            await context.proxy.was_error(e, save=False)
-            await self.proxy_handler.pool.put(context.proxy)
-            scheduler.spawn(context.proxy.save())
+        elif isinstance(e, ClientResponseError):
+            await self.handle_proxy_error(e, context.proxy, scheduler)
 
-        elif isinstance(e, OSError):
-            # We have only seen this for the following:
-            # >>> OSError: [Errno 24] Too many open files -> Want to sleep
-            # >>> OSError: [Errno 54] Connection reset by peer
-            if e.errno == 54:
-                log.error(e, extra={'context': context})
-                # Not sure if we want to treat this as an error or what.
-                await context.proxy.was_error(e, save=False)
-                await self.proxy_handler.pool.put(context.proxy)
-                scheduler.spawn(context.proxy.save())
-
-            elif e.errno == 24:
-                log.error(e, extra={
-                    'context': context,
-                    'other': f'Sleeping for {3} seconds...'
-                })
-                # Not sure if we want to treat this as an error or what.
-                await context.proxy.was_error(e, save=False)
-                await self.proxy_handler.pool.put(context.proxy)
-                scheduler.spawn(context.proxy.save())
+        elif isinstance(e, self.REQUEST_ERRORS):
+            if isinstance(e, OSError):
+                # We have only seen this for the following:
+                # >>> OSError: [Errno 24] Too many open files -> Want to sleep
+                # >>> OSError: [Errno 54] Connection reset by peer
+                # >>> ClientProxyConnectionError [Errno 61] Cannot connect to host ... ssl:False
+                # Mark as Inconclusive for Now
+                if e.errno == 54:
+                    await self.handle_fatal_proxy(e, context.proxy, scheduler)
+                elif e.errno == 24:
+                    await self.handle_proxy_error(e, context.proxy, scheduler, extra={
+                        'other': f'Sleeping for {self.SLEEP} Seconds',
+                    })
+                    await asyncio.sleep(3.0)
+                elif e.errno == 61:
+                    await self.handle_fatal_proxy(e, context.proxy, scheduler)
+                else:
+                    # We would sometimes raise here to try to pickup on unnoticed exceptions.
+                    # We need to output though to get errno's and refine our request
+                    # exception handling.
+                    await self.handle_fatal_proxy(e, context.proxy, scheduler)
             else:
-                raise e
+                await self.handle_fatal_proxy(e, context.proxy, scheduler)
 
     async def login_request(self, loop, session, context, scheduler):
         """
@@ -252,59 +311,21 @@ class RequestHandler(Handler):
                 try:
                     result = await self.handle_client_response(response, context, log)
 
-                # Temporary to see if this is where errors coming from.
-                except ssl.SSLError as e:
-                    log.error(e, extra={
-                        'response': response,
-                        'context': context
-                    })
-
-                    await context.proxy.was_error(e, save=False)
-                    await self.proxy_handler.pool.put(context.proxy)
-                    scheduler.spawn(context.proxy.save())
-
-                # Not sure why we need to catch this both inside and outside of
-                # the sesssion, but we do (I think).
                 except ClientResponseError as e:
-                    log.error(e, extra={
-                        'response': response,
-                        'context': context
+                    await self.handle_proxy_error(e, context.proxy, scheduler, extra={
+                        'response': response
                     })
-
-                    await context.proxy.was_error(e, save=False)
-                    await self.proxy_handler.pool.put(context.proxy)
-                    scheduler.spawn(context.proxy.save())
 
                 else:
                     if not result:
-                        raise RuntimeError("Result should not be None here.")
+                        raise RuntimeError("Handling client response should "
+                            "not return null proxy.")
 
                     await context.proxy.was_success(save=False)
                     await self.proxy_handler.pool.put(context.proxy)
-                    scheduler.spawn(context.proxy.save())
+                    await scheduler.spawn(context.proxy.save())
 
                     return result
-
-        except ClientResponseError as e:
-            log.error(e, extra={
-                'response': response,
-                'context': context
-            })
-
-            await context.proxy.was_error(e, save=False)
-            await self.proxy_handler.pool.put(context.proxy)
-            scheduler.spawn(context.proxy.save())
-
-        # Temporary to see if this is where errors coming from.
-        except ssl.SSLError as e:
-            log.error(e, extra={
-                'response': response,
-                'context': context
-            })
-
-            await context.proxy.was_error(e, save=False)
-            await self.proxy_handler.pool.put(context.proxy)
-            scheduler.spawn(context.proxy.save())
 
         except Exception as e:
             await self.handle_request_error(e, context.proxy, context, log, scheduler)

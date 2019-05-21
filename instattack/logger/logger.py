@@ -1,5 +1,6 @@
 import aiologger
 import logging
+import os
 
 from .constants import LoggingLevels
 from .handlers import SYNC_HANDLERS, ASYNC_HANDLERS
@@ -14,14 +15,20 @@ for level in LoggingLevels:
 class SyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
 
     __handlers__ = SYNC_HANDLERS
-    adaptable = ('info', 'warning', 'debug', 'error', 'critical', )
 
     def __init__(self, name, subname=None):
-        super(SyncLogger, self).__init__(name)
+        logging.Logger.__init__(self, name)
 
-        self._init(name, subname=subname)
+        self.subname = subname
+        self._conditional = None
+        self.line_index = 0
+
         for handler in self.__handlers__:
             self.addHandler(handler)
+
+        if 'LEVEL' in os.environ:
+            level = LoggingLevels[os.environ['LEVEL']]
+            self.setLevel(level.num)
 
     def _log(self, *args, **kwargs):
         if not self.conditionally_disabled:  # Reason We Override
@@ -31,14 +38,20 @@ class SyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
 class AsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
 
     __handlers__ = ASYNC_HANDLERS
-    adaptable = ('info', 'warning', 'debug', 'error', 'critical', )
 
     def __init__(self, name, subname=None):
         aiologger.Logger.__init__(self, name=name)
 
-        self._init(name, subname=subname)
+        self.subname = subname
+        self._conditional = None
+        self.line_index = 0
+
         for handler in self.__handlers__:
             self.addHandler(handler)
+
+        if 'LEVEL' in os.environ:
+            level = LoggingLevels[os.environ['LEVEL']]
+            self.setLevel(level.num)
 
     async def _log(
         self,
@@ -79,5 +92,12 @@ class AsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
                 sinfo=sinfo,
                 extra=extra,
             )
+
+            # For whatever reason, when using our custom log levels, the arguments
+            # in extra are not assigned to the record.
+            if extra:
+                for key, val in extra.items():
+                    setattr(record, key, val)
+
             setattr(record, 'subname', self.subname)  # Reason We Override
             await self.handle(record)
