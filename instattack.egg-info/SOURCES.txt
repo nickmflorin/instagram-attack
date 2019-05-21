@@ -8,6 +8,7 @@ instattack.egg-info/entry_points.txt
 instattack.egg-info/not-zip-safe
 instattack.egg-info/requires.txt
 instattack.egg-info/top_level.txt
+instattack/artsylogger/__init__.py
 instattack/conf/__init__.py
 instattack/conf/config.py
 instattack/conf/settings.py
@@ -17,13 +18,13 @@ instattack/lib/coro.py
 instattack/lib/decoratives.py
 instattack/lib/decorators.py
 instattack/lib/io.py
+instattack/lib/iterables.py
 instattack/lib/progress.py
 instattack/logger/__init__.py
 instattack/logger/constants.py
 instattack/logger/format.py
 instattack/logger/handler.py
 instattack/logger/handlers.py
-instattack/logger/items.py
 instattack/logger/log_formats.py
 instattack/logger/logger.py
 instattack/logger/mixins.py

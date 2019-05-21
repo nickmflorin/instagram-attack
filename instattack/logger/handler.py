@@ -1,7 +1,8 @@
 import aiologger
 import logging
-from plumbum import colors
 import sys
+
+from instattack import artsylogger
 
 from instattack.conf.utils import relative_to_root
 from .constants import LoggingLevels
@@ -25,29 +26,10 @@ class TypeFilter(logging.Filter):
         return True
 
 
-class CustomFormatter(logging.Handler):
-
-    def __init__(self, format_string=None, **kwargs):
-        super(CustomFormatter, self).__init__(**kwargs)
-        self.format_string = format_string
-
-    def format(self, record):
-        format_string = self.format_string(record)
-        return format_string.format(record)
-
-
-class HandlerMixin(object):
-
-    def default(self, record, attr, default=None):
-        setattr(record, attr, getattr(record, attr, default))
+class CustomHandlerMixin(artsylogger.ArtsyHandlerMixin):
 
     def prepare_record(self, record):
 
-        self.default(record, 'level_format')
-        self.default(record, 'line_index')
-        self.default(record, 'show_level', default=True)
-        self.default(record, 'highlight', default=False)
-        self.default(record, 'color')
         self.default(record, 'is_exception', default=False)
 
         if not getattr(record, 'level', None):
@@ -58,30 +40,18 @@ class HandlerMixin(object):
 
         record.pathname = relative_to_root(record.pathname)
 
-        if record.color:
-            if isinstance(record.color, str):
-                setattr(record, 'color', colors.fg(record.color))
 
-
-class SyncHandler(logging.StreamHandler, HandlerMixin):
+class SyncHandler(logging.StreamHandler, CustomHandlerMixin):
 
     def __init__(self, filter=None, format_string=None):
-        super(SyncHandler, self).__init__(
-            stream=sys.stderr,
-        )
+        super(SyncHandler, self).__init__(stream=sys.stderr)
 
-        formatter = CustomFormatter(format_string=format_string)
-        self.setFormatter(formatter)
-
+        self.useArtsyFormatter(format_string=format_string)
         if filter:
             self.addFilter(filter)
 
-    def emit(self, record):
-        self.prepare_record(record)
-        super(SyncHandler, self).emit(record)
 
-
-class AsyncHandler(aiologger.handlers.AsyncStreamHandler, HandlerMixin):
+class AsyncHandler(aiologger.handlers.AsyncStreamHandler, CustomHandlerMixin):
 
     def __init__(self, filter=None, format_string=None):
         """
@@ -89,9 +59,9 @@ class AsyncHandler(aiologger.handlers.AsyncStreamHandler, HandlerMixin):
         """
         super(AsyncHandler, self).__init__(
             stream=sys.stderr,
-            formatter=CustomFormatter(format_string=format_string),
             filter=filter,
         )
+        self.useArtsyFormatter(format_string=format_string)
 
     async def emit(self, record):
         """
@@ -106,7 +76,7 @@ class AsyncHandler(aiologger.handlers.AsyncStreamHandler, HandlerMixin):
         the record to a dict or JSON string, or send a modified copy
         of the record while leaving the original intact.
         """
-        self.prepare_record(record)
+        CustomHandlerMixin.emit(self, record)
 
         if self.writer is None:
             self.writer = await self._init_writer()

@@ -1,10 +1,11 @@
 from collections import Counter
 
+from instattack.lib import join
+import sys
+
 from .base import mutation_gen, generator_mixin
 from .char_gen import char_gen
 from .case_gen import case_gen
-
-import sys
 
 
 """
@@ -28,96 +29,21 @@ There always seems to be an extra couple that are generated.
 """
 
 
-def join(val, *gens):
-    """
-    Chains generators together where the values of the next generator are
-    computed using the values of the first generator, and so on and so forth.
-
-    Usage
-    -----
-
-    def gen1(val):
-        for i in [1, 2]:
-            yield "%s%s" % (val, i)
-
-    def gen2(val):
-        for i in ['a', 'b']:
-            yield "%s%s" % (val, i)
-
-    for ans in join('blue', gen1, gen2):
-        print(ans)
-
-    >>> bluea
-    >>> bluea1
-    >>> bluea1a
-    >>> bluea1b
-    >>> bluea2
-    >>> bluea2a
-    >>> bluea2b
-    >>> blueb
-    >>> blueb1
-    >>> blueb1a
-    >>> blueb1b
-    >>> blueb2
-    >>> blueb2a
-    >>> blueb2b
-    >>> blue1
-    >>> blue1a
-    >>>  blue1b
-    >>> blue2
-    >>> blue2a
-    >>> blue2b
-    """
-    for i, gen in enumerate(gens):
-
-        def recursive_yield(index, val):
-            if index <= len(gens):
-                for element in gens[index - 1](val):
-                    yield element
-                    yield from recursive_yield(index + 1, element)
-
-        yield from recursive_yield(i, val)
-
-class base_combination_generator(mutation_gen):
-    """
-    TODO
-    ----
-
-    Implement.
-    This will not be using generators but will use the end product because
-    we will want to try to combine certain shorter passwords that we have
-    tried or are the originals.
-    """
-    pass
-
-
-class numeric_gen(mutation_gen):
+class alteration_gen(mutation_gen):
     """
     TODO:
     ----
+    We are currently using this for both numerics and general alpha numeric
+    alterations.
 
     We are eventually going to want to try additional variations of the
     numbers, which might require not using generators and combining numbers
     with previous number sequences.
     """
 
-    def __call__(self, numeric):
-        # Skipping for now to make faster
-        # yield self.numeric_before(word, numeric)
-        yield self.numeric_after(numeric)
-
-    def numeric_before(self, numeric):
-        return "%s%s" % (numeric, self.base)
-
-    def numeric_after(self, numeric):
-        return "%s%s" % (self.base, numeric)
-
-
-class alteration_gen(mutation_gen):
-
     def __call__(self, alteration):
         # Skipping for now to make faster
-        # yield self.alteration_before(word, numeric)
+        yield self.alteration_before(alteration)
         yield self.alteration_after(alteration)
 
     def alteration_before(self, alteration):
@@ -180,29 +106,17 @@ class password_gen(generator_mixin):
         generate_alterations = alteration_gen(base)
 
         for alteration in self.alterations:
-            for altered in generate_alterations(alteration):
-                yield altered
+            yield from generate_alterations(alteration)
 
     def apply_base_numeric_alterations(self, base):
-        generate_numerics = numeric_gen(base)
+        generate_numerics = alteration_gen(base)
 
         for numeric in self.numerics:
-            for altered in generate_numerics(numeric):
-                yield altered
+            yield from generate_numerics(numeric)
 
     def apply_custom_alterations(self, base):
         generate_custom = custom_gen(base)
-
-        for altered in generate_custom():
-            yield altered
-
-    def apply_combined_alterations(self, base):
-
-        for altered in self.apply_base_alterations(base):
-            yield from self.apply_base_numeric_alterations(altered)
-
-        for altered in self.apply_base_numeric_alterations(base):
-            yield from self.apply_base_alterations(altered)
+        yield from generate_custom()
 
     def __call__(self):
         """
@@ -213,43 +127,20 @@ class password_gen(generator_mixin):
 
         Definitely have to look over this logic and make sure we are not doing
         anything completely unnecessary.
+
+        IMPORTANT
+        --------
+        What we should really do is separatate the alterations into components
+        in an iterable, [Caitlin, 083801331, Blue], and then just apply the
+        custom alterations to the primary component, and use combinatorics to
+        generate passwords.
         """
         def base_generator():
             for password in self.passwords:
                 yield password
 
-                yield from join(
-                    password,
-                    self.apply_base_alterations,
-                )
-                sys.stdout.write('After Base Alterations\n')
-                sys.stdout.write("%s\n" % len(self.duplicates))
-
-                yield from join(
-                    password,
-                    self.apply_base_numeric_alterations,
-                )
-
-                sys.stdout.write('After Numeric Alterations\n')
-                sys.stdout.write("%s\n" % len(self.duplicates))
-
-                yield from join(
-                    password,
-                    self.apply_custom_alterations,
-                )
-
-                sys.stdout.write('After Custom Alterations\n')
-                sys.stdout.write("%s\n" % len(self.duplicates))
-
-                yield from join(
-                    password,
-                    self.apply_base_alterations,
-                    self.apply_base_numeric_alterations,
-                )
-
-                sys.stdout.write('After Base/Numeric Alterations\n')
-                sys.stdout.write("%s\n" % len(self.duplicates))
-
+                # Applies each generator on it's own and in tandem with previous
+                # generator,
                 yield from join(
                     password,
                     self.apply_base_alterations,
@@ -257,18 +148,28 @@ class password_gen(generator_mixin):
                     self.apply_custom_alterations,
                 )
 
-                sys.stdout.write('After Base/Numeric/Custom Alterations\n')
-                sys.stdout.write("%s\n" % len(self.duplicates))
+                # prev_duplicate_count = len(self.duplicates)
+                # prev_count = len(self.counter)
 
-                yield from join(
-                    password,
-                    self.apply_base_numeric_alterations,
-                    self.apply_base_alterations,
-                    self.apply_custom_alterations,
-                )
+                # sys.stdout.write('Duplicates After Base - Numeric - Custom Alterations\n')
+                # sys.stdout.write("%s\n" % prev_duplicate_count)
+                # sys.stdout.write('Total After Base - Numeric - Custom Alterations\n')
+                # sys.stdout.write("%s\n" % prev_count)
 
-                sys.stdout.write('After Numeric/Base/Custom Alterations\n')
-                sys.stdout.write("%s\n" % len(self.duplicates))
+                # This does not add anything extra to the pool!
+                # yield from join(
+                #     password,
+                #     self.apply_base_alterations,
+                #     self.apply_base_numeric_alterations,
+                # )
+
+                # prev_duplicate_count = len(self.duplicates) - prev_duplicate_count
+                # prev_count = len(self.counter) - prev_count
+
+                # sys.stdout.write('Duplicates After Base - Numeric Alterations\n')
+                # sys.stdout.write("%s\n" % prev_duplicate_count)
+                # sys.stdout.write('Total After Base - Numeric Alterations\n')
+                # sys.stdout.write("%s\n" % prev_count)
 
         yield from self.safe_yield(base_generator())
 

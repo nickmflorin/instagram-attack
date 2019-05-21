@@ -1,4 +1,6 @@
-from .items import Separator, Item, Line, Lines, List
+from instattack.artsylogger import (
+    Separator, Item, Line, Lines, List, LabeledItem, LabeledLines, LabeledLine)
+
 from .constants import RecordAttributes
 from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
@@ -6,8 +8,8 @@ from .utils import (
     get_record_response_reason)
 
 
-def message_items(record):
-    return [
+def message_line(record):
+    return Line(
         Item(
             formatter=RecordAttributes.METHOD,
             getter=get_record_request_method,
@@ -22,16 +24,17 @@ def message_items(record):
             formatter=get_message_formatter(record),
             getter=get_record_message,
             line_index=getattr(record, 'line_index', None),
+            line_index_formatter=RecordAttributes.LINE_INDEX,
         ),
         Item(
             formatter=RecordAttributes.STATUS_CODE,
             getter=get_record_status_code,
         ),
-    ]
+    )
 
 
-def primary_items(record):
-    return [
+def primary_line(record):
+    return Line(
         Item(
             formatter=RecordAttributes.DATETIME,
             getter=get_record_time,
@@ -50,75 +53,71 @@ def primary_items(record):
             params=["level.name"],
             formatter=get_level_formatter(record),
         )
-    ]
-
-
-def simple_lines(record, indent=None):
-    return [
-        Line(
-            *primary_items(record)
-        ),
-        Line(
-            *message_items(record),
-            indent=indent
-        )
-    ]
-
-
-def proxy_lines(record, indent=None):
-    return [
-        Item(
-            params=['proxy.method', 'context.proxy.method'],
-            formatter=RecordAttributes.METHOD,
-        ),
-        Item(
-            params=['proxy.url', 'context.proxy.url'],
-            formatter=RecordAttributes.PROXY
-        ),
-        Item(
-            params=['proxy.humanized_state', 'context.proxy.humanized_state'],
-            formatter=RecordAttributes.PROXY_STATE,
-        ),
-        Item(
-            label="Num Requests",
-            params=['proxy.num_requests', 'context.proxy.num_requests'],
-            formatter=RecordAttributes.NUM_REQUESTS,
-        )
-    ]
+    )
 
 
 def context_lines(record, indent=None):
-    return [
-        Line(
-            Item(
+    return Lines(
+        LabeledLines(
+            LabeledItem(
                 params=['index', 'context.index'],
                 label="Index",
-                formatter=RecordAttributes.INDEX,
-                indent=indent
-            )
-        ),
-        Line(
-            Item(
+            ),
+            LabeledItem(
                 params=['parent_index', 'context.parent_index'],
                 label="Parent Index",
-                formatter=RecordAttributes.INDEX,
-                indent=indent
-            )
-        ),
-        Line(
-            Item(
-                params=['password' 'context.password'],
+            ),
+            LabeledItem(
+                params=['password', 'context.password'],
                 label="Password",
-                formatter=RecordAttributes.PASSWORD,
-                indent=indent
-            )
+                formatter=RecordAttributes.PASSWORD,  # Override
+            ),
+            label_formatter=RecordAttributes.LABEL,
+            formatter=RecordAttributes.CONTEXT_ATTRIBUTE,
+            indent=indent
         ),
-        Line(
-            *proxy_lines(record),
-            label="Proxy",
-            indent=indent,
+        Lines(
+            LabeledLine(
+                Item(
+                    params=['proxy.method', 'context.proxy.method'],
+                    formatter=RecordAttributes.METHOD,
+                ),
+                Item(
+                    params=['proxy.url', 'context.proxy.url'],
+                    formatter=RecordAttributes.PROXY
+                ),
+                label="Proxy",
+                indent=indent,
+                label_formatter=RecordAttributes.LABEL,
+            ),
+            # Also formatter to be passed into group and be used for every item
+            # in the group, but can be overridden for individual items
+            # EXTERNALIZE PACKAGE AS ARTSY LOGGER
+            LabeledLines(
+                LabeledItem(
+                    params=['proxy.humanized_state', 'context.proxy.humanized_state'],
+                    label="State",
+                ),
+                LabeledItem(
+                    params=["proxy.flattened_error_rate", "context.proxy.flattened_error_rate"],
+                    label="Error Rate (Flat)",
+                ),
+                LabeledItem(
+                    params=["proxy.avg_res_time", "context.proxy.avg_res_time"],
+                    label="Avg. Resp Time",
+                ),
+                LabeledItem(
+                    params=["proxy.num_active_requests", "context.proxy.num_active_requests"],
+                    label="Num Requests",
+                ),
+                label_formatter=RecordAttributes.LABEL,
+            ),
+            indent=(indent + 2 if indent else None),
+            formatter=RecordAttributes.CONTEXT_ATTRIBUTE,
+            lines_above=0,
+            lines_below=1,
         )
-    ]
+    )
 
 
 def traceback_line(record, indent=None):
@@ -144,29 +143,22 @@ def traceback_line(record, indent=None):
 
 
 def BARE_FORMAT_STRING(record):
-    return Line(*message_items(record))
+    return message_line(record)
 
 
 def SIMPLE_FORMAT_STRING(record):
     return Lines(
-        *simple_lines(record, indent=2),
-        lines_above=1
-    )
-
-
-def TRACEBACK_FORMAT_STRING(record):
-    return Lines(
-        Line(*primary_items(record)),
-        Line(Item(
-            params=['msg'],
-            formatter=get_message_formatter(record),
-        ))
+        primary_line(record),
+        message_line(record, indent=2),
     )
 
 
 def LOG_FORMAT_STRING(record):
     return Lines(
-        *simple_lines(record, indent=2),
+        Lines(
+            primary_line(record),
+            message_line(record, indent=2),
+        ),
         Line(
             Item(
                 params="other",
@@ -182,16 +174,8 @@ def LOG_FORMAT_STRING(record):
             lines_above=0,
             lines_below=0
         ),
-        Lines(
-            *context_lines(record, indent=2),
-            lines_above=1,
-            lines_below=1,
-        ),
-        Lines(
-            traceback_line(record, indent=2),
-            lines_above=0,
-            lines_below=0
-        ),
+        context_lines(record, indent=2),
+        traceback_line(record, indent=2),
         lines_above=1,
         lines_below=0,
         header_char="-",

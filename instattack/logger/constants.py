@@ -57,13 +57,13 @@ class RecordAttributes(FormattedEnum):
     REASON = Format(colors.fg('Grey69'))
 
     # Context
+    CONTEXT_ATTRIBUTE = Format(colors.fg('Black'))
     PASSWORD = Format(colors.fg('Grey69'), colors.bold)
     NUM_REQUESTS = Format(colors.fg('DarkGray'), colors.bold)
     INDEX = Format(colors.fg('Grey69'), colors.bold)
     PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
-    PROXY_STATE = Format(colors.fg('DarkGray'), colors.bold)
     TOKEN = Format(colors.fg('Grey69'))
-    LABEL = Format(colors.fg('DarkGray'), wrapper="%s: ")
+    LABEL = Format(colors.fg('DarkGray'))
 
     # Traceback
     PATHNAME = Format(colors.fg('LightGray'))

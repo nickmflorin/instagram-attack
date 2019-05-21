@@ -105,6 +105,8 @@ class ProxyPriorityQueue(asyncio.PriorityQueue):
 
         # Only want to include proxy if it is fundamentally different
         # than proxies we have already.
+        #
+        # TODO: List out differences in the list format shown above
         differences = current.compare(proxy, return_difference=True)
         if differences:
             log.debug('Updating Proxy in Pool', extra={

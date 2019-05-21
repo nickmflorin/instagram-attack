@@ -52,7 +52,7 @@ class LoginHandler(RequestHandler):
     def __init__(self, config, proxy_handler, **kwargs):
         super(LoginHandler, self).__init__(config, proxy_handler, **kwargs)
 
-        self.limit = config['limit']
+        self.limit = config.get('limit')
         self.batch_size = config['batch_size']
         self.attempt_batch_size = config['attempts']['batch_size']
 
@@ -85,7 +85,10 @@ class LoginHandler(RequestHandler):
 
     async def prepopulate(self, loop):
 
-        log.start(f'Generating {self.limit} Attempts for User {self.user.username}.')
+        if self.limit:
+            log.start(f'Generating {self.limit} Attempts for User {self.user.username}.')
+        else:
+            log.start(f'Generating All Attempts for User {self.user.username}.')
 
         futures = []
         async for password in self.user.generate_attempts(loop, limit=self.limit):

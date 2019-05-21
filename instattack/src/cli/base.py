@@ -118,6 +118,6 @@ class BaseAttack(BaseApplication):
             result = results[0]
 
             if result.authorized:
-                self.log.info(f'Authenticated User!', extra={
+                self.log.success(f'Authenticated User!', extra={
                     'password': result.context.password
                 })
