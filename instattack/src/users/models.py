@@ -216,3 +216,8 @@ class User(Model):
         generator = password_gen(loop, self, current_attempts, limit=limit)
         for item in generator():
             yield item
+
+        if len(generator.duplicates) != 0:
+            log_sync.warning(
+                f'There Were {len(generator.duplicates)} '
+                'Duplicates Removed from Generated Passwords')

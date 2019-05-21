@@ -1,18 +1,7 @@
 from itertools import combinations
 
 
-class mutation_gen(object):
-
-    def __init__(self, base):
-        self.base = base
-
-    def list_to_word(self, letters):
-        return ''.join(letters)
-
-    def mutate_char_at_index(self, word, ind, char):
-        altered = list(word)
-        altered[ind] = char
-        return self.list_to_word(altered)
+class generator_mixin(object):
 
     def all_combinations(self, iterable, choose=None):
         """
@@ -29,6 +18,20 @@ class mutation_gen(object):
             combos = combinations(iterable, i + 1)
             all_combos.extend(combos)
         return all_combos
+
+
+class mutation_gen(generator_mixin):
+
+    def __init__(self, base):
+        self.base = base
+
+    def list_to_word(self, letters):
+        return ''.join(letters)
+
+    def mutate_char_at_index(self, word, ind, char):
+        altered = list(word)
+        altered[ind] = char
+        return self.list_to_word(altered)
 
     def find_indices_with_char(self, char):
         """

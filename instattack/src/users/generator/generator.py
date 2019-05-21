@@ -1,10 +1,10 @@
-from itertools import chain, islice
+from collections import Counter
 
-from instattack import logger
-
-from .base import mutation_gen
+from .base import mutation_gen, generator_mixin
 from .char_gen import char_gen
 from .case_gen import case_gen
+
+import sys
 
 
 """
@@ -27,6 +27,56 @@ to ensure that the limit is not consistent with how many passwords are generated
 There always seems to be an extra couple that are generated.
 """
 
+
+def join(val, *gens):
+    """
+    Chains generators together where the values of the next generator are
+    computed using the values of the first generator, and so on and so forth.
+
+    Usage
+    -----
+
+    def gen1(val):
+        for i in [1, 2]:
+            yield "%s%s" % (val, i)
+
+    def gen2(val):
+        for i in ['a', 'b']:
+            yield "%s%s" % (val, i)
+
+    for ans in join('blue', gen1, gen2):
+        print(ans)
+
+    >>> bluea
+    >>> bluea1
+    >>> bluea1a
+    >>> bluea1b
+    >>> bluea2
+    >>> bluea2a
+    >>> bluea2b
+    >>> blueb
+    >>> blueb1
+    >>> blueb1a
+    >>> blueb1b
+    >>> blueb2
+    >>> blueb2a
+    >>> blueb2b
+    >>> blue1
+    >>> blue1a
+    >>>  blue1b
+    >>> blue2
+    >>> blue2a
+    >>> blue2b
+    """
+    for i, gen in enumerate(gens):
+
+        def recursive_yield(index, val):
+            if index <= len(gens):
+                for element in gens[index - 1](val):
+                    yield element
+                    yield from recursive_yield(index + 1, element)
+
+        yield from recursive_yield(i, val)
 
 class base_combination_generator(mutation_gen):
     """
@@ -99,7 +149,7 @@ class custom_gen(mutation_gen):
                     yield item
 
 
-class password_gen(object):
+class password_gen(generator_mixin):
     """
     TODO
     ----
@@ -112,11 +162,6 @@ class password_gen(object):
     otherwise, we could be discarding password alterations that would not be
     in the previous attempts after additional alterations performed.
     """
-    generators = [
-        numeric_gen,
-        alteration_gen,
-        custom_gen,
-    ]
 
     def __init__(self, loop, user, attempts, limit=None):
 
@@ -128,8 +173,8 @@ class password_gen(object):
         self.numerics = user.get_numerics()
         self.attempts = attempts
 
-        self.generated = []
-        self.duplicates = []
+        self.num_generated = 0
+        self.counter = Counter()
 
     def apply_base_alterations(self, base):
         generate_alterations = alteration_gen(base)
@@ -153,11 +198,11 @@ class password_gen(object):
 
     def apply_combined_alterations(self, base):
 
-        for numeric in self.numerics:
-            yield from self.apply_base_alterations(numeric)
+        for altered in self.apply_base_alterations(base):
+            yield from self.apply_base_numeric_alterations(altered)
 
-        for alteration in self.alterations:
-            yield from self.apply_base_numeric_alterations(alteration)
+        for altered in self.apply_base_numeric_alterations(base):
+            yield from self.apply_base_alterations(altered)
 
     def __call__(self):
         """
@@ -169,45 +214,87 @@ class password_gen(object):
         Definitely have to look over this logic and make sure we are not doing
         anything completely unnecessary.
         """
-        log = logger.get_async("Generating Passwords")
-
         def base_generator():
             for password in self.passwords:
                 yield password
 
-                for value in chain(
-                    self.apply_base_alterations(password),
-                    self.apply_base_numeric_alterations(password),
-                    self.apply_combined_alterations(password),
-                    self.apply_custom_alterations(password)
-                ):
-                    yield value
-                    yield from chain(
-                        self.apply_base_alterations(value),
-                        self.apply_base_numeric_alterations(value),
-                        self.apply_combined_alterations(value),
-                        self.apply_custom_alterations(value)
-                    )
+                yield from join(
+                    password,
+                    self.apply_base_alterations,
+                )
+                sys.stdout.write('After Base Alterations\n')
+                sys.stdout.write("%s\n" % len(self.duplicates))
+
+                yield from join(
+                    password,
+                    self.apply_base_numeric_alterations,
+                )
+
+                sys.stdout.write('After Numeric Alterations\n')
+                sys.stdout.write("%s\n" % len(self.duplicates))
+
+                yield from join(
+                    password,
+                    self.apply_custom_alterations,
+                )
+
+                sys.stdout.write('After Custom Alterations\n')
+                sys.stdout.write("%s\n" % len(self.duplicates))
+
+                yield from join(
+                    password,
+                    self.apply_base_alterations,
+                    self.apply_base_numeric_alterations,
+                )
+
+                sys.stdout.write('After Base/Numeric Alterations\n')
+                sys.stdout.write("%s\n" % len(self.duplicates))
+
+                yield from join(
+                    password,
+                    self.apply_base_alterations,
+                    self.apply_base_numeric_alterations,
+                    self.apply_custom_alterations,
+                )
+
+                sys.stdout.write('After Base/Numeric/Custom Alterations\n')
+                sys.stdout.write("%s\n" % len(self.duplicates))
+
+                yield from join(
+                    password,
+                    self.apply_base_numeric_alterations,
+                    self.apply_base_alterations,
+                    self.apply_custom_alterations,
+                )
+
+                sys.stdout.write('After Numeric/Base/Custom Alterations\n')
+                sys.stdout.write("%s\n" % len(self.duplicates))
 
         yield from self.safe_yield(base_generator())
 
-        if len(self.duplicates) != 0:
-            log.error(f'There Were {len(self.duplicates)} Generated Duplicates')
+    @property
+    def duplicates(self):
+        duplicates = {}
+        for pw, count in self.counter.items():
+            if count > 1:
+                duplicates[pw] = count
+        return duplicates
 
-    def safe_to_yield(self, val):
+    def with_yield(self, val):
         if val in self.attempts:
             return False
-        elif val in self.generated:
-            # Don't log for each one, this is bound to happen a lot, but we want
-            # to know how often it is happening.
-            self.duplicates.append(val)
+
+        if val in self.counter:
+            self.counter[val] += 1
             return False
+
+        self.num_generated += 1
+        self.counter[val] += 1
         return True
 
     def safe_yield(self, gen):
         for value in gen:
-            if self.safe_to_yield(value):
-                if self.limit and len(self.generated) == self.limit:
+            if self.with_yield(value):
+                if self.limit and self.num_generated == self.limit:
                     break
-                self.generated.append(value)
                 yield value
