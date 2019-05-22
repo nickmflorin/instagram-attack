@@ -1,4 +1,5 @@
 setup.py
+artsylogger/__init__.py
 instattack/__init__.py
 instattack/__main__.py
 instattack.egg-info/PKG-INFO
@@ -8,7 +9,6 @@ instattack.egg-info/entry_points.txt
 instattack.egg-info/not-zip-safe
 instattack.egg-info/requires.txt
 instattack.egg-info/top_level.txt
-instattack/artsylogger/__init__.py
 instattack/conf/__init__.py
 instattack/conf/config.py
 instattack/conf/settings.py

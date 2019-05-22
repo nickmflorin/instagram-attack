@@ -2,7 +2,7 @@ import aiologger
 import logging
 import sys
 
-from instattack import artsylogger
+from artsylogger import ArtsyHandlerMixin
 
 from instattack.conf.utils import relative_to_root
 from .constants import LoggingLevels
@@ -26,9 +26,10 @@ class TypeFilter(logging.Filter):
         return True
 
 
-class CustomHandlerMixin(artsylogger.ArtsyHandlerMixin):
+class CustomHandlerMixin(ArtsyHandlerMixin):
 
     def prepare_record(self, record):
+        super(CustomHandlerMixin, self).prepare_record(record)
 
         self.default(record, 'is_exception', default=False)
 
@@ -49,6 +50,10 @@ class SyncHandler(logging.StreamHandler, CustomHandlerMixin):
         self.useArtsyFormatter(format_string=format_string)
         if filter:
             self.addFilter(filter)
+
+    def emit(self, record):
+        self.prepare_record(record)
+        super(SyncHandler, self).emit(record)
 
 
 class AsyncHandler(aiologger.handlers.AsyncStreamHandler, CustomHandlerMixin):
@@ -76,7 +81,7 @@ class AsyncHandler(aiologger.handlers.AsyncStreamHandler, CustomHandlerMixin):
         the record to a dict or JSON string, or send a modified copy
         of the record while leaving the original intact.
         """
-        CustomHandlerMixin.emit(self, record)
+        self.prepare_record(record)
 
         if self.writer is None:
             self.writer = await self._init_writer()

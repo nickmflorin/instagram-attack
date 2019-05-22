@@ -12,8 +12,7 @@ class ArtsyFormatter(logging.Formatter):
         self.format_string = format_string
 
     def format(self, record):
-        format_string = self.format_string(record)
-        return format_string.format(record)
+        return self.format_string(record)
 
 
 class ArtsyHandlerMixin(object):
@@ -34,7 +33,3 @@ class ArtsyHandlerMixin(object):
     def useArtsyFormatter(self, format_string=None):
         formatter = self.formatter_cls(format_string=format_string)
         self.setFormatter(formatter)
-
-    def emit(self, record):
-        self.prepare_record(record)
-        super(ArtsyHandlerMixin, self).emit(record)
