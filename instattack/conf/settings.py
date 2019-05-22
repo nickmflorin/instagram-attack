@@ -1,7 +1,7 @@
 from .utils import get_root, dir_str
 
 # Logging
-SIMPLE_LOGGER = True
+SIMPLE_LOGGER = False
 
 
 # Directory Configuration

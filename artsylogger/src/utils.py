@@ -84,6 +84,8 @@ def get_record_attribute(params, record):
 
 
 def is_record_callable(value):
+    # TODO: This does not work for lambda expressions, if we do not have the
+    # first argument being the record.
     if callable(value):
         argspec = inspect.getargspec(value)
         if len(argspec.args) == 1 and argspec.args[0] == 'record':

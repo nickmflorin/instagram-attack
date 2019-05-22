@@ -1,6 +1,6 @@
 from ..utils import humanize_list
 from .components import (
-    FormattableComponent, Indentation, Header, GroupFormattableComponent)
+    ItemValue, GroupValue, FormattableComponent, Indentation, Header)
 
 """
 TODO
@@ -54,12 +54,19 @@ class AbstractGroup(AbstractObj):
     but as an abstract class.
     """
 
-    def __init__(self, *children, formatter=None, header_char=None, lines_above=0, lines_below=0,
-            **kwargs):
+    def __init__(self, *children, formatter=None, header_char=None,
+            header_label=None, header_formatter=None, header_length=None,
+                lines_above=0, lines_below=0, **kwargs):
         super(AbstractGroup, self).__init__(**kwargs)
 
-        self.header = Header(self, char=header_char)
-        self.value = GroupFormattableComponent(self, formatter=formatter)
+        self.header = Header(
+            self,
+            char=header_char,
+            formatter=header_formatter,
+            label=header_label,
+            length=header_length,
+        )
+        self.value = GroupValue(self, formatter=formatter)
 
         self.children = children
         self.lines_above = lines_above

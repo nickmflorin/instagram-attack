@@ -2,7 +2,9 @@
 import argparse
 import asyncio
 import os
+from plumbum import colors
 
+from instattack.logger.format import Format
 from instattack.conf import Configuration
 from instattack.conf.utils import validate_log_level
 from instattack.src import operator
@@ -16,9 +18,11 @@ log2 = logger.get_async('Test')
 
 async def test(config):
 
-    config.set()
-    configuration = Configuration.load()
-    print(configuration.store)
+    ex = Exception('Test Error')
+    formatter = Format(colors.blue)
+
+    log.exception(ex, extra={'header_label': 'test', 'header_formatter': formatter})
+
 
 def main():
     # We have to retrieve the --level at the top level and then use it to set

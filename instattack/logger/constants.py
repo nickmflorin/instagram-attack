@@ -23,15 +23,24 @@ class FormattedEnum(Enum):
 
 class LoggingLevels(FormattedEnum):
 
-    CRITICAL = (Format(colors.fg('Red1'), colors.bold, wrapper="[!] %s", format_with_wrapper=True), 50)  # noqa
-    ERROR = (Format(colors.fg('Red1'), colors.bold, wrapper="[!] %s", format_with_wrapper=True), 40)
-    WARNING = (Format(colors.fg('Gold3A'), colors.bold), 30)
-    SUCCESS = (Format(colors.fg('SpringGreen3')), 24)
-    START = (Format(colors.fg('DarkOliveGreen3'), wrapper="[+] %s", format_with_wrapper=True), 23)
-    STOP = (Format(colors.fg('Red3'), wrapper="[x] %s", format_with_wrapper=True), 22)
-    COMPLETE = (Format(colors.fg('IndianRed'), wrapper="[-] %s", format_with_wrapper=True), 21)
-    INFO = (Format(colors.fg('DeepSkyBlue4B'), colors.bold), 20)
-    DEBUG = (Format(colors.fg('DarkGray'), colors.bold), 10)
+    CRITICAL = (Format(colors.fg('Red1'), colors.bold,
+        wrapper="[!] %s", format_with_wrapper=True), 50)  # noqa
+    ERROR = (Format(colors.fg('Red1'), colors.bold,
+        wrapper="[!] %s", format_with_wrapper=True), 40)
+    WARNING = (Format(colors.fg('Gold3A'), colors.bold,
+        wrapper="[!] %s", format_with_wrapper=True), 30)
+    SUCCESS = (Format(colors.fg('SpringGreen3'),
+        wrapper="[o] %s", format_with_wrapper=True), 24)
+    START = (Format(colors.fg('DarkOliveGreen3'),
+        wrapper="[+] %s", format_with_wrapper=True), 23)
+    STOP = (Format(colors.fg('Red3'),
+        wrapper="[x] %s", format_with_wrapper=True), 22)
+    COMPLETE = (Format(colors.fg('IndianRed'),
+        wrapper="[-] %s", format_with_wrapper=True), 21)
+    INFO = (Format(colors.fg('DeepSkyBlue4B'), colors.bold,
+        wrapper="[i] %s", format_with_wrapper=True), 20)
+    DEBUG = (Format(colors.fg('DarkGray'), colors.bold,
+        wrapper="[ ] %s", format_with_wrapper=True), 10)
 
     def __init__(self, format, num):
         self.format = format

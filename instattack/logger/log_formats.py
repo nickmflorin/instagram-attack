@@ -1,6 +1,7 @@
 import logging
 from artsylogger import (
-    Separator, Item, Line, Lines, List, LabeledItem, LabeledLines, LabeledLine)
+    Separator, Item, Line, Lines, List, LabeledItem, LabeledLines, LabeledLine,
+    Header)
 
 from .constants import RecordAttributes
 from .utils import (
@@ -54,11 +55,6 @@ PRIMARY_LINE = Line(
         value="subname",
         formatter=RecordAttributes.SUBNAME
     ),
-    Separator('  '),
-    Item(
-        value=["level.name"],
-        formatter=get_level_formatter,
-    )
 )
 
 
@@ -177,5 +173,14 @@ LOG_FORMAT_STRING = Lines(
     TRACEBACK_LINE,
     lines_above=1,
     lines_below=0,
+    # header=Header(
+    #     char="-",
+    #     length=100,
+    #     label=['level.name'],
+    #     formatter=get_level_formatter,
+    # )
     header_char="-",
+    header_label=['level.name'],
+    header_formatter=get_level_formatter,
+    header_length=25,
 )

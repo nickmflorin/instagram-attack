@@ -48,12 +48,16 @@ class FormattableComponent(Component):
         return value
 
 
+class ItemValue(FormattableComponent):
+    pass
+
+
 class GroupComponent(Component):
     """
     Abstract Class
     --------------
     Cannot be used alone since it does not define an overriden value method,
-    and the group components do not have a _value.
+    and the group components do not have a value method..
     """
 
     def __init__(self, group):
@@ -66,22 +70,13 @@ class GroupComponent(Component):
         return self.group.valid(record)
 
 
-class Header(GroupComponent):
-
-    def __init__(self, group, char=None):
-        super(Header, self).__init__(group)
-        self.char = char
-
-    def value(self, record):
-        if self.char and self.group.valid(record):
-            string = self.group.valid_children(record)[0](record)
-            string = escape_ansi_string(string)
-            return self.char * len(string) + "\n"
-        else:
-            return ""
-
-
 class GroupFormattableComponent(GroupComponent):
+    """
+    Abstract Class
+    --------------
+    Cannot be used alone since it does not define an overriden value method,
+    and the group components do not have a value method.
+    """
 
     def __init__(self, group, formatter=None):
         super(GroupFormattableComponent, self).__init__(group)
@@ -91,6 +86,69 @@ class GroupFormattableComponent(GroupComponent):
         return self.formatted(record)
 
     def formatted(self, record):
+        if not self.valid(record):
+            return ""
+
+        value = self.value(record)
+        formatter = get_formatter_value(self._formatter, record)
+
+        # Will Format Over Children Components
+        # TODO:  Make it so it overrides the child formats, not formats over.
+        if value and formatter:
+            return formatter("%s" % value)
+        return value
+
+
+class Header(GroupFormattableComponent):
+
+    def __init__(self, group, char=None, formatter=None, label=None, length=None):
+        super(Header, self).__init__(group, formatter=formatter)
+        self._char = char
+        self._label = label
+        self._length = length
+
+    def length(self, record):
+        if self._length:
+            return self._length
+        string = self.group.valid_children(record)[0](record)
+        escaped = escape_ansi_string(string)
+
+        line_length = len(escaped)
+        label = self.label(record)
+        if label:
+            line_length = int(0.5 * (line_length - 2 - len(label)))
+
+        return line_length
+
+    def label(self, record):
+        label = get_log_value(self._label, record)
+        if not label:
+            return self._label
+        return label
+
+    def line(self, record):
+        if self.valid(record):
+            return self._char * self.length(record)
+        return ""
+
+    def valid(self, record):
+        return self._char and self.group.valid(record)
+
+    def value(self, record):
+        if not self.valid(record):
+            return ""
+
+        line = self.line(record)
+
+        label = self.label(record)
+        if label:
+            return f"{line} {label} {line}\n"
+        return f"{line}\n"
+
+
+class GroupValue(GroupFormattableComponent):
+
+    def value(self, record):
 
         from .items import Separator
 
@@ -108,4 +166,3 @@ class GroupFormattableComponent(GroupComponent):
                 else:
                     value += child(record)
         return value
-

@@ -18,9 +18,14 @@ def relative_to_root(path):
     from .settings import APP_NAME
     if not isinstance(path, LocalPath):
         path = LocalPath(path)
-    ind = path.parts.index(APP_NAME)
-    parts = path.parts[ind:]
-    path = LocalPath(*parts)
+
+    # This only happens for the test.py file...  We should remove this conditional
+    # when we do not need that functionality anymore.
+    if APP_NAME in path.parts:
+        ind = path.parts.index(APP_NAME)
+        parts = path.parts[ind:]
+        path = LocalPath(*parts)
+
     return dir_str(path)
 
 
@@ -113,70 +118,4 @@ def validate_config_schema(config):
 
     http://docs.python-cerberus.org/en/stable/schemas.html
     """
-    schema_text = '''
-    log:
-        proxies: True
-
-    token
-        timeout = 10
-        batch_size = 10
-        max_tries = 20
-
-        connection:
-            limit_per_host: 0
-            force_close: False
-            timeout: 5
-            limit: 50
-
-        proxies
-            prepopulate: True
-            collect: False
-
-            pool
-                max_resp_time: 8
-                max_error_rate: 0.5
-                min_req_proxy: 6
-                timeout: 25
-                limit: 50
-                prepopulate_limit: 50
-
-            broker
-                max_conn: 50
-                max_tries: 2
-                timeout: 5
-
-
-    login
-        pwlimit:
-            type: int
-            min: 0
-        batch_size:
-            type: int
-            min: 0
-        attempt_batch_size:
-            type: int
-            min: 0
-
-        connection:
-            limit_per_host: 0
-            force_close: False
-            timeout: 5
-            limit: 200
-
-        proxies
-            prepopulate: True
-            collect: False
-
-            pool:
-                max_resp_time: 6
-                max_error_rate: 0.5
-                min_req_proxy: 6
-                timeout: 25
-                limit: 200
-                prepopulate_limit: 200
-
-            broker:
-                max_conn: 200
-                max_tries: 2
-                timeout: 5
-    '''
+    pass

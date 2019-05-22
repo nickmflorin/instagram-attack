@@ -140,12 +140,10 @@ class LoggerMixin(object):
         works similiarly.
         """
         formatter = LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()
-        header = formatter("\n------------- Error -------------\n")
-
-        # Leave Multiple Outputs for Now Until We Can Figure Out Why Errors
-        # Being Hidden
-        sys.stdout.write(header)
-        self.exception(ex)
-
+        self.exception(ex, extra={
+            'header_label': "Error",
+            'header_formatter': formatter
+        })
+        sys.stderr.write("\n")
         traceback.print_exception(ex.__class__, ex, ex.__traceback__,
-            limit=1000, file=sys.stdout)
+            limit=None, file=sys.stderr)
