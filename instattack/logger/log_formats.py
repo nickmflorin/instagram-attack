@@ -1,7 +1,6 @@
 import logging
 from artsylogger import (
-    Separator, Item, Line, Lines, List, LabeledItem, LabeledLines, LabeledLine,
-    Header)
+    Separator, Item, Line, Lines, Header, Label, LineIndex)
 
 from .constants import RecordAttributes
 from .utils import (
@@ -15,30 +14,30 @@ SIMPLE_FORMATTER = logging.Formatter(
 )
 
 
-def MESSAGE_LINE(indent=None):
-    return Line(
-        Item(
-            value=get_record_request_method,
-            formatter=RecordAttributes.METHOD,
-        ),
-        Separator(': '),
-        Item(
-            value=get_record_response_reason,
-            formatter=RecordAttributes.REASON,
-        ),
-        Separator(' - '),
-        Item(
-            value=get_record_message,
-            formatter=get_message_formatter,
-            line_index=lambda record: getattr(record, 'line_index', None),
-            line_index_formatter=RecordAttributes.LINE_INDEX,
-        ),
-        Item(
-            value=get_record_status_code,
-            formatter=RecordAttributes.STATUS_CODE,
-        ),
-        indent=indent,
-    )
+MESSAGE_LINE = Line(
+    Item(
+        value=get_record_request_method,
+        formatter=RecordAttributes.METHOD,
+    ),
+    Separator(': '),
+    Item(
+        value=get_record_response_reason,
+        formatter=RecordAttributes.REASON,
+    ),
+    Separator(' - '),
+    Item(
+        value=get_record_message,
+        formatter=get_message_formatter,
+        line_index=LineIndex(
+            value=lambda record: getattr(record, 'line_index', None),
+            formatter=RecordAttributes.LINE_INDEX
+        )
+    ),
+    Item(
+        value=get_record_status_code,
+        formatter=RecordAttributes.STATUS_CODE,
+    ),
+)
 
 
 PRIMARY_LINE = Line(
@@ -59,26 +58,38 @@ PRIMARY_LINE = Line(
 
 
 CONTEXT_LINES = Lines(
-    LabeledLines(
-        LabeledItem(
+    Lines(
+        Item(
             value=['index', 'context.index'],
-            label="Index",
+            label=Label(
+                constant="Index",
+                delimiter=":",
+                formatter=RecordAttributes.LABEL,
+            )
         ),
-        LabeledItem(
+        Item(
             value=['parent_index', 'context.parent_index'],
-            label="Parent Index",
+            label=Label(
+                constant="Parent Index",
+                delimiter=":",
+                formatter=RecordAttributes.LABEL,
+            )
         ),
-        LabeledItem(
+        Item(
             value=['password', 'context.password'],
-            label="Password",
             formatter=RecordAttributes.PASSWORD,  # Override
+            label=Label(
+                constant="Password",
+                delimiter=":",
+                formatter=RecordAttributes.LABEL,
+            )
         ),
-        label_formatter=RecordAttributes.LABEL,
+        # TODO: Need this to pass through.
         formatter=RecordAttributes.CONTEXT_ATTRIBUTE,
         indent=2
     ),
     Lines(
-        LabeledLine(
+        Line(
             Item(
                 value=['proxy.method', 'context.proxy.method'],
                 formatter=RecordAttributes.METHOD,
@@ -87,36 +98,48 @@ CONTEXT_LINES = Lines(
                 value=['proxy.url', 'context.proxy.url'],
                 formatter=RecordAttributes.PROXY
             ),
-            label="Proxy",
+            label=Label(
+                constant="Proxy",
+                delimiter=":",
+                formatter=RecordAttributes.LABEL,
+            ),
             indent=2,
-            label_formatter=RecordAttributes.LABEL,
         ),
-        # Also formatter to be passed into group and be used for every item
-        # in the group, but can be overridden for individual items
-        # EXTERNALIZE PACKAGE AS ARTSY LOGGER
-        LabeledLines(
-            LabeledItem(
+        Lines(
+            Item(
                 value=['proxy.humanized_state', 'context.proxy.humanized_state'],
-                label="State",
+                label=Label(
+                    constant="State",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL,
+                ),
             ),
-            LabeledItem(
+            Item(
                 value=["proxy.flattened_error_rate", "context.proxy.flattened_error_rate"],
-                label="Error Rate (Flat)",
+                label=Label(
+                    constant="Error Rate (Flat)",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL,
+                ),
             ),
-            LabeledItem(
+            Item(
                 value=["proxy.avg_res_time", "context.proxy.avg_res_time"],
-                label="Avg. Resp Time",
+                label=Label(
+                    constant="Avg. Resp Time",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL,
+                ),
             ),
-            LabeledItem(
+            Item(
                 value=["proxy.num_active_requests", "context.proxy.num_active_requests"],
-                label="Num Requests",
+                label=Label(
+                    constant="Num. Requests",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL,
+                ),
             ),
-            label_formatter=RecordAttributes.LABEL,
         ),
-        indent=2 + 2,
         formatter=RecordAttributes.CONTEXT_ATTRIBUTE,
-        lines_above=0,
-        lines_below=1,
     )
 )
 
@@ -138,49 +161,43 @@ TRACEBACK_LINE = Line(
         formatter=RecordAttributes.LINENO
     ),
     Separator(')'),
-    indent=2,
 )
 
 
-BARE_FORMAT_STRING = MESSAGE_LINE(indent=None)
-
-
-SIMPLE_FORMAT_STRING = Lines(
-    PRIMARY_LINE,
-    MESSAGE_LINE(indent=2)
-)
+BARE_FORMAT_STRING = MESSAGE_LINE
+SIMPLE_FORMAT_STRING = PRIMARY_LINE
 
 
 LOG_FORMAT_STRING = Lines(
     PRIMARY_LINE,
-    MESSAGE_LINE(indent=2),
-    Line(
-        Item(
-            value="other",
-            indent=2,
-            formatter=RecordAttributes.OTHER_MESSAGE
+    Lines(
+        MESSAGE_LINE,
+        Line(
+            Item(
+                value="other",
+                indent=2,
+                formatter=RecordAttributes.OTHER_MESSAGE
+            ),
         ),
+        CONTEXT_LINES,
+        TRACEBACK_LINE,
+        indent=2
     ),
-    List(
-        value="list",
-        indent=2,
-        formatter=RecordAttributes.OTHER_MESSAGE,
-        line_index_formatter=RecordAttributes.LINE_INDEX,
-        lines_above=0,
-        lines_below=0
-    ),
-    CONTEXT_LINES,
-    TRACEBACK_LINE,
+    # List(
+    #     value="list",
+    #     indent=2,
+    #     formatter=RecordAttributes.OTHER_MESSAGE,
+    #     line_index_formatter=RecordAttributes.LINE_INDEX,
+    #     lines_above=0,
+    #     lines_below=0
+    # ),
     lines_above=1,
     lines_below=0,
-    # header=Header(
-    #     char="-",
-    #     length=100,
-    #     label=['level.name'],
-    #     formatter=get_level_formatter,
-    # )
-    header_char="-",
-    header_label=['level.name'],
-    header_formatter=get_level_formatter,
-    header_length=25,
+    indent=2,
+    header=Header(
+        char="-",
+        length=25,
+        label=['level.name'],
+        formatter=get_level_formatter,
+    )
 )

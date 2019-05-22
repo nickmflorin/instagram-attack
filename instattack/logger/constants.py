@@ -48,7 +48,7 @@ class LoggingLevels(FormattedEnum):
 
     @property
     def message_formatter(self):
-        return self.format.without_text_decoration()
+        return self.format.without_text_decoration().without_wrapping()
 
 
 class RecordAttributes(FormattedEnum):
