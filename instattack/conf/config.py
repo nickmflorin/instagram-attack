@@ -5,12 +5,7 @@ import json
 import os
 import yaml
 
-from instattack import logger
-
 from .utils import validate_config_filepath
-
-
-log = logger.get_sync('Configuration')
 
 
 class Configuration(collections.MutableMapping):
@@ -56,13 +51,11 @@ class Configuration(collections.MutableMapping):
 
     @classmethod
     def load(cls):
-        log.info('Loading Configuration')
         data = os.environ[cls.env_key]
         data = json.loads(data)
         return cls(data)
 
     def read(self):
-        log.info('Reading Configuration')
         if not self.path:
             raise RuntimeError('Configuration must be provided a path in order to validate.')
 

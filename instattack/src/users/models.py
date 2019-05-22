@@ -164,25 +164,28 @@ class User(Model):
             attempts = attempts[:limit]
         return attempts
 
-    async def write_attempt(self, attempt, success=False, try_attempt=0):
-        # Since we are calling this from a scheduler, it does not seem to pick up
-        # on the exceptions that we would raise if the attempt already exists,
-        # which is okay for now - since it will not create a duplicate one.
+    async def create_or_update_attempt(self, attempt, success=False, try_attempt=0):
+
+        log.info('Writing/Updating User Attempt')
+
         try:
-            attempt = await UserAttempt.create(
+            attempt, created = await UserAttempt.get_or_create(
+                defaults={
+                    'success': success,
+                },
                 password=attempt,
                 user=self,
-                success=success,
-                last_attempt=datetime.now(),
             )
-        except IntegrityError:
-            log.warning(f'Cannot Save Duplicate Attempt {attempt}.')
+            if not created:
+                if attempt.success != success:
+                    attempt.success = success
+                    attempt.save()
+                    log.warning(f'Updated User Attempt Success -> {success}.')
+                else:
+                    log.warning('User Attempt Already Exists...')
 
-        # We need to safeguard this somehow so that we can always save the attempts
-        # during operation even if the database is slightly overloaded with
-        # transactions...  We will worry about the root cause of this later, but
-        # just use this patch for now.
         except OperationalError:
+            raise
             if try_attempt <= self.MAX_SAVE_ATTEMPT_TRIES:
 
                 log.warning('Unable to Access Database...', extra={
@@ -190,7 +193,7 @@ class User(Model):
                 })
                 await asyncio.sleep(self.SLEEP)
 
-                await self.write_attempt(
+                await self.create_or_update_attempt(
                     attempt,
                     success=success,
                     try_attempt=try_attempt + 1

@@ -8,6 +8,11 @@ async def coro_exc_wrapper(coro, loop):
         loop.call_exception_handler({'message': str(e), 'exception': e})
 
 
+def get_remaining_tasks():
+    tasks = asyncio.Task.all_tasks()
+    return list(tasks)
+
+
 async def cancel_remaining_tasks(futures=None):
     if not futures:
         futures = asyncio.Task.all_tasks()
@@ -16,5 +21,6 @@ async def cancel_remaining_tasks(futures=None):
          asyncio.tasks.Task.current_task()]
 
     list(map(lambda task: task.cancel(), tasks))
+
     await asyncio.gather(*tasks, return_exceptions=True)
     return tasks

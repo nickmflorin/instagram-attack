@@ -4,6 +4,7 @@ import asyncio
 import aiohttp
 import aiojobs
 import collections
+from tortoise.exceptions import IntegrityError
 
 from instattack import logger
 from instattack.lib import percentage
@@ -69,18 +70,18 @@ class LoginHandler(RequestHandler):
         await self.prepopulate(loop)
         return await self.attack(loop)
 
-    async def attempt_single_login(self, loop, password):
+    async def attempt_single_login(self, loop, scheduler, password):
         await self.passwords.put(password)
-        return await self.attack(loop)
+        return await self.attack(loop, scheduler)
 
-    async def attack(self, loop):
-        scheduler = await aiojobs.create_scheduler(limit=100)
+    async def attack(self, loop, scheduler):
+        def handle_exceptions(context):
+            log.critical('NOTICED EXCEPTION')
 
         result = await self.attempt_login(loop, scheduler)
         if not result:
             raise RuntimeError('Attempt login must return result.')
 
-        await self.cleanup(loop, scheduler)
         return result
 
     async def prepopulate(self, loop):
@@ -99,17 +100,6 @@ class LoginHandler(RequestHandler):
             raise NoPasswordsError()
 
         log.complete(f"Prepopulated {len(futures)} Password Attempts")
-
-    async def cleanup(self, loop, scheduler):
-        """
-        Used to be used to wait for a global tasks object to finish for individual
-        saves before we used aiojobs for background tasks.  Might still have
-        some utility if there are things we need to cleanup.
-        """
-        log.debug('Waiting for Background Tasks to Finish')
-
-        # [!] Will suppress any errors of duplicate attempts
-        await scheduler.close()
 
     async def attempt_login(self, loop, scheduler):
         """
@@ -174,17 +164,25 @@ class LoginHandler(RequestHandler):
                     f'Percent Done: {percentage(self.num_completed, self.login_index)}')
 
                 if result.authorized:
+                    log.error('Result Authorized')
                     # [!] Will suppress any errors of duplicate attempts
-                    await scheduler.spawn(self.user.write_attempt(
-                        result.context.password, success=True))
+                    # await scheduler.spawn(self.user.write_attempt(
+                    #     result.context.password, success=True))
+                    # This awaits on the retry which could take some time, we should
+                    # eventually move this back to the scheduler.
+                    await self.user.create_or_update_attempt(result.context.password, success=True)
                     break
                 else:
                     if not result.not_authorized:
                         raise RuntimeError('Result should not be authorized.')
 
+                    log.error('Result Not Authorized')
                     # [!] Will suppress any errors of duplicate attempts
-                    await scheduler.spawn(self.user.write_attempt(
-                        result.context.password, success=False))
+                    # await scheduler.spawn(self.user.write_attempt(
+                    #     result.context.password, success=False))
+                    # This awaits on the retry which could take some time, we should
+                    # eventually move this back to the scheduler.
+                    await self.user.create_or_update_attempt(result.context.password, success=False)
 
         log.complete('Closing Session')
         await asyncio.sleep(0)

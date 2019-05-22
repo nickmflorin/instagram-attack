@@ -11,7 +11,7 @@ from instattack import logger
 from instattack.conf import Configuration
 from instattack.logger import (
     SyncLogger, AsyncLogger, disable_external_loggers, progressbar_wrap)
-from instattack.lib import cancel_remaining_tasks
+from instattack.lib import cancel_remaining_tasks, get_remaining_tasks
 
 from instattack.conf.settings import USER_DIR, DB_CONFIG
 from instattack.conf.utils import dir_str, get_app_root
@@ -116,19 +116,22 @@ class operator(object):
         self.shutdown(loop)
 
     def shutdown_outstanding_tasks(self, loop, log):
-        log.start('Cancelling Tasks')
 
-        cancelled = loop.run_until_complete(cancel_remaining_tasks())
-        if len(cancelled) != 0:
+        to_cancel = get_remaining_tasks()
+
+        if len(to_cancel) != 0:
+            log.complete(f'{len(to_cancel)} Leftover Tasks')
 
             log.before_lines()
-            for task in cancelled[:20]:
+            for task in to_cancel[:20]:
                 log.line(task._coro.__name__)
 
-            if len(cancelled) > 20:
+            if len(to_cancel) > 20:
                 log.line('...')
 
-            log.complete(f'Cancelled {len(cancelled)} Tasks')
+            log.start('Cancelling Tasks')
+            # Not sure if we still want to do this...
+            # loop.run_until_complete(cancel_remaining_tasks(futures=to_cancel))
         else:
             log.complete('No Leftover Tasks to Cancel')
 

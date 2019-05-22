@@ -145,15 +145,7 @@ class LoggerMixin(object):
         # Leave Multiple Outputs for Now Until We Can Figure Out Why Errors
         # Being Hidden
         sys.stdout.write(header)
+        self.exception(ex)
 
         traceback.print_exception(ex.__class__, ex, ex.__traceback__,
-            limit=1000, file=sys.stdout)
-
-        sys.stdout.write(header)
-
-        traceback.print_last(ex.__class__, ex, ex.__traceback__,
-            limit=1000, file=sys.stdout)
-
-        sys.stdout.write(header)
-        traceback.print_stack(ex.__class__, ex, ex.__traceback__,
             limit=1000, file=sys.stdout)
