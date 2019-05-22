@@ -3,7 +3,8 @@ import logging
 import os
 
 from .constants import LoggingLevels
-from .handlers import SYNC_HANDLERS, ASYNC_HANDLERS
+from .handlers import (
+    SIMPLE_SYNC_HANDLERS, SYNC_HANDLERS, SIMPLE_ASYNC_HANDLERS, ASYNC_HANDLERS)
 from .mixins import SyncCustomLevelMixin, AsyncCustomLevelMixin, LoggerMixin
 
 
@@ -12,14 +13,13 @@ for level in LoggingLevels:
         logging.addLevelName(level.num, level.name)
 
 
-class SyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
+class SimpleSyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
 
-    __handlers__ = SYNC_HANDLERS
+    __handlers__ = SIMPLE_SYNC_HANDLERS
 
-    def __init__(self, name, subname=None):
+    def __init__(self, name):
         logging.Logger.__init__(self, name)
 
-        self.subname = subname
         self._conditional = None
         self.line_index = 0
 
@@ -32,17 +32,25 @@ class SyncLogger(logging.Logger, LoggerMixin, SyncCustomLevelMixin):
 
     def _log(self, *args, **kwargs):
         if not self.conditionally_disabled:  # Reason We Override
-            super(SyncLogger, self)._log(*args, **kwargs)
+            super(SimpleSyncLogger, self)._log(*args, **kwargs)
 
 
-class AsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
+class SyncLogger(SimpleSyncLogger):
 
-    __handlers__ = ASYNC_HANDLERS
+    __handlers__ = SYNC_HANDLERS
 
     def __init__(self, name, subname=None):
+        super(SyncLogger, self).__init__(name)
+        self.subname = subname
+
+
+class SimpleAsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
+
+    __handlers__ = SIMPLE_ASYNC_HANDLERS
+
+    def __init__(self, name):
         aiologger.Logger.__init__(self, name=name)
 
-        self.subname = subname
         self._conditional = None
         self.line_index = 0
 
@@ -52,6 +60,55 @@ class AsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
         if 'LEVEL' in os.environ:
             level = LoggingLevels[os.environ['LEVEL']]
             self.setLevel(level.num)
+
+    async def _log(
+        self,
+        level,
+        msg,
+        args,
+        exc_info=None,
+        extra=None,
+        stack_info=False,
+        caller=None,
+    ):
+        if not self.conditionally_disabled:  # Reason We Override
+            sinfo = None
+            if logging._srcfile and caller is None:  # type: ignore
+                # IronPython doesn't track Python frames, so findCaller raises an
+                # exception on some versions of IronPython. We trap it here so that
+                # IronPython can use logging.
+                try:
+                    fn, lno, func, sinfo = self.findCaller(stack_info)
+                except ValueError:  # pragma: no cover
+                    fn, lno, func = "(unknown file)", 0, "(unknown function)"
+            elif caller:
+                fn, lno, func, sinfo = caller
+            else:  # pragma: no cover
+                fn, lno, func = "(unknown file)", 0, "(unknown function)"
+            if exc_info and isinstance(exc_info, BaseException):
+                exc_info = (type(exc_info), exc_info, exc_info.__traceback__)
+
+            return logging.LogRecord(
+                name=self.name,
+                level=level,
+                pathname=fn,
+                lineno=lno,
+                msg=msg,
+                args=args,
+                exc_info=exc_info,
+                func=func,
+                sinfo=sinfo,
+                extra=extra,
+            )
+
+
+class AsyncLogger(SimpleAsyncLogger):
+
+    __handlers__ = ASYNC_HANDLERS
+
+    def __init__(self, name, subname=None):
+        super(AsyncLogger, self).__init__(name)
+        self.subname = subname
 
     async def _log(
         self,

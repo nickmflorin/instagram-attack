@@ -1,5 +1,9 @@
 from .utils import get_root, dir_str
 
+# Logging
+SIMPLE_LOGGER = True
+
+
 # Directory Configuration
 APP_NAME = 'instattack'
 DB_NAME = APP_NAME

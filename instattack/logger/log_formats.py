@@ -1,3 +1,4 @@
+import logging
 from artsylogger import (
     Separator, Item, Line, Lines, List, LabeledItem, LabeledLines, LabeledLine)
 
@@ -6,6 +7,11 @@ from .utils import (
     get_record_request_method, get_record_time, get_record_status_code,
     get_record_message, get_level_formatter, get_message_formatter,
     get_record_response_reason)
+
+
+SIMPLE_FORMATTER = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 
 def MESSAGE_LINE(indent=None):

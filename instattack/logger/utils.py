@@ -1,4 +1,3 @@
-import aiohttp
 from datetime import datetime
 from plumbum import colors
 

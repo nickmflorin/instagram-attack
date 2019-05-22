@@ -8,24 +8,6 @@ from instattack.conf.utils import relative_to_root
 from .constants import LoggingLevels
 
 
-class TypeFilter(logging.Filter):
-
-    def __init__(self, require=None, disallow=None, *args, **kwargs):
-        super(TypeFilter, self).__init__(*args, **kwargs)
-        self.require = require
-        self.disallow = disallow
-
-    def filter(self, record):
-        if self.require:
-            if not all([x in record.__dict__ for x in self.require]):
-                return False
-
-        if self.disallow:
-            if any([x in record.__dict__ for x in self.disallow]):
-                return False
-        return True
-
-
 class CustomHandlerMixin(ArtsyHandlerMixin):
 
     def prepare_record(self, record):
@@ -42,30 +24,45 @@ class CustomHandlerMixin(ArtsyHandlerMixin):
         record.pathname = relative_to_root(record.pathname)
 
 
-class SyncHandler(logging.StreamHandler, CustomHandlerMixin):
+class SimpleSyncHandler(logging.StreamHandler):
 
-    def __init__(self, filter=None, format_string=None):
-        super(SyncHandler, self).__init__(stream=sys.stderr)
+    def __init__(self, filter=None, formatter=None):
+        super(SimpleSyncHandler, self).__init__(stream=sys.stderr)
 
-        self.useArtsyFormatter(format_string=format_string)
+        if formatter:
+            self.setFormatter(formatter)
         if filter:
             self.addFilter(filter)
+
+
+class SimpleAsyncHandler(aiologger.handlers.AsyncStreamHandler):
+    def __init__(self, filter=None, formatter=None):
+        super(SimpleAsyncHandler, self).__init__(
+            stream=sys.stderr,
+            filter=filter,
+        )
+        if formatter:
+            self.setFormatter(formatter)
+
+
+class SyncHandler(SimpleSyncHandler, CustomHandlerMixin):
+
+    def __init__(self, filter=None, format_string=None):
+        super(SyncHandler, self).__init__(filter=filter)
+        self.useArtsyFormatter(format_string=format_string)
 
     def emit(self, record):
         self.prepare_record(record)
         super(SyncHandler, self).emit(record)
 
 
-class AsyncHandler(aiologger.handlers.AsyncStreamHandler, CustomHandlerMixin):
+class AsyncHandler(SimpleAsyncHandler, CustomHandlerMixin):
 
     def __init__(self, filter=None, format_string=None):
         """
         Initialise an instance, using the passed queue.
         """
-        super(AsyncHandler, self).__init__(
-            stream=sys.stderr,
-            filter=filter,
-        )
+        super(AsyncHandler, self).__init__(filter=filter)
         self.useArtsyFormatter(format_string=format_string)
 
     async def emit(self, record):
