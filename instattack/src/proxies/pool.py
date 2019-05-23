@@ -1,7 +1,6 @@
 import aiojobs
 
 from instattack import logger
-from instattack.src.utils import starting
 from instattack.src.base import HandlerMixin
 
 from .utils import stream_proxies
@@ -26,7 +25,6 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
         self.should_prepopulate = config.get('prepopulate', True)
         self.prepopulate_limit = config.get('prepopulate_limit')
 
-    @starting('Proxy Prepopulation')
     async def prepopulate(self, loop):
         """
         When initially starting, it sometimes takes awhile for the proxies with
@@ -52,6 +50,9 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
         # Instead of doing:
         # >>> max_limit = len(await Proxy.filter(method=self.__method__).all())
 
+        log = logger.get_async(self.__name__, subname='prepopulate')
+        log.start('Prepopulating Proxies')
+
         async for proxy in stream_proxies():
             if self.prepopulate_limit:
                 if not self.qsize() < self.prepopulate_limit:
@@ -67,7 +68,6 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
 
         log.complete(f"Prepopulated {self.qsize()} Proxies")
 
-    @starting('Proxy Collection')
     async def collect(self, loop):
         """
         Retrieves proxies from the broker and converts them to our Proxy model.
@@ -85,6 +85,9 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
         #     return
 
         # self.log_async.debug(f'Number of Proxies to Collect: {collect_limit}.')
+
+        log = logger.get_async(self.__name__, subname='collect')
+        log.start('Collecting Proxies')
 
         added = []
         scheduler = await aiojobs.create_scheduler(limit=None)

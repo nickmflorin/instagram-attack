@@ -8,9 +8,7 @@ from .models import User
 
 @EntryPoint.subcommand('users')
 class UsersEntryPoint(BaseApplication):
-
-    def main(self, *args):
-        self._config.update({'silent_shutdown': True})
+    pass
 
 
 class UsersApplication(BaseApplication):
@@ -23,6 +21,7 @@ class CleanUsers(UsersApplication):
     def main(self):
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self.clean())
+        return 1
 
     async def clean(self):
         async for user in User.all():
@@ -46,9 +45,7 @@ class ShowUsers(UsersApplication):
 
 @EntryPoint.subcommand('user')
 class UserEntryPoint(BaseApplication):
-
-    def main(self, *args):
-        self._config.update({'silent_shutdown': True})
+    pass
 
 
 class UserApplication(BaseApplication):

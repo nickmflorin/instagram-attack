@@ -57,14 +57,12 @@ class SyncCustomLevelMixin(object):
     def before_lines(self):
         # TODO: Make Header Log Component
         sys.stdout.write('\n')
-        sys.stdout.write("-------------------------------------\n")
         self.line_index = 0
         sys.stdout.write('\n')
 
     def after_lines(self):
         # TODO: Make Header Log Component
         sys.stdout.write('\n')
-        sys.stdout.write("-------------------------------------\n")
         self.line_index = 0
         sys.stdout.write('\n')
 
@@ -81,7 +79,7 @@ class SyncCustomLevelMixin(object):
                 self.line(line, color=color, numbered=numbered)
 
 
-class AsyncCustomLevelMixin(object):
+class AsyncCustomLevelMixin(SyncCustomLevelMixin):
 
     def success(self, msg, *args, **kwargs):
         return self._make_log_task(LoggingLevels.SUCCESS.num, msg, args, **kwargs)

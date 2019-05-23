@@ -133,3 +133,24 @@ class InstagramResult:
             if self.error_type == constants.GENERIC_REQUEST_ERROR:
                 return True
         return False
+
+
+@dataclass
+class InstagramResults:
+
+    results: List[InstagramResult]
+
+    @property
+    def num_results(self):
+        return len(self.results)
+
+    @property
+    def has_authenticated(self):
+        return len([res for res in self.results if res.authorized]) != 0
+
+    @property
+    def authenticated_result(self):
+        return [res for res in self.results if res.authorized][0]
+
+    def add(self, result):
+        self.results.append(result)

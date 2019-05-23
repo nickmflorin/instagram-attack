@@ -1,12 +1,8 @@
 from instattack import logger
-from instattack.src.utils import starting, stopping
 from instattack.src.base import Handler
 
 from .broker import InstattackProxyBroker
 from .pool import InstattackProxyPool
-
-
-log = logger.get_async('Proxy Handler')
 
 
 class ProxyHandler(Handler):
@@ -35,13 +31,14 @@ class ProxyHandler(Handler):
             start_event=self.start_event,
         )
 
-    @stopping
     async def stop(self, loop):
+        log = logger.get_async(self.__name__, subname='stop')
+        log.stop('Stopping')
+
         if self.pool.should_collect:
             self.broker.stop(loop)
         log.debug('Done Stopping Proxy Handler')
 
-    @starting
     async def run(self, loop):
         """
         Retrieves proxies from the queue that is populated from the Broker and
@@ -50,6 +47,9 @@ class ProxyHandler(Handler):
         Prepopulates proxies if the flag is set to put proxies that we previously
         saved into the pool.
         """
+        log = logger.get_async(self.__name__, subname='start')
+        log.start('Starting')
+
         if self.pool.should_prepopulate:
             try:
                 log.debug('Prepopulating Pool...')

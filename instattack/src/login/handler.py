@@ -4,12 +4,11 @@ import asyncio
 import aiohttp
 import aiojobs
 import collections
-from tortoise.exceptions import IntegrityError
 
 from instattack import logger
 from instattack.src.utils import percentage
 
-from .models import LoginAttemptContext, LoginContext
+from .models import LoginAttemptContext, LoginContext, InstagramResults
 from .exceptions import NoPasswordsError
 from .requests import RequestHandler
 from .utils import limit_on_success, limit_as_completed
@@ -75,20 +74,16 @@ class LoginHandler(RequestHandler):
         log.start('Starting Single Login')
 
         await self.passwords.put(password)
-        return await self.attack(loop)
+        results = await self.attack(loop)
+        return results.results[0]
 
     async def attack(self, loop):
         log = logger.get_async(self.__name__, subname='attack')
         log.start('Starting Attack')
 
-        scheduler = await aiojobs.create_scheduler(limit=100)
-
-        result = await self.attempt_login(loop, scheduler)
-        if not result:
-            raise RuntimeError('Attempt login must return result.')
-
-        await scheduler.close()
-        return result
+        scheduler = await aiojobs.create_scheduler(limit=100, exception_handler=None)
+        results = await self.attempt_login(loop, scheduler)
+        return results
 
     async def prepopulate(self, loop):
         log = logger.get_async(self.__name__, subname='prepopulate')
@@ -120,10 +115,7 @@ class LoginHandler(RequestHandler):
         log = logger.get_async(self.__name__, subname='attempt_login')
         log.disable_on_false(self.log_login)
 
-        def stop_on(result):
-            if result.authorized or not result.not_authorized:
-                return True
-            return False
+        results = InstagramResults(results=[])
 
         async def login_task_generator(session):
             """
@@ -160,7 +152,7 @@ class LoginHandler(RequestHandler):
 
             gen = login_task_generator(session)
 
-            async for result in limit_as_completed(gen, self.batch_size, stop_on=stop_on):
+            async for result in limit_as_completed(gen, self.batch_size):
                 await log.debug('Generator Returned Result')
 
                 # Generator Does Not Yield None on No More Coroutines
@@ -174,18 +166,22 @@ class LoginHandler(RequestHandler):
                 if result.authorized:
                     await scheduler.spawn(self.user.create_or_update_attempt(
                         result.context.password, success=True))
+                    results.add(result)
+                    break
+
                 else:
                     if not result.not_authorized:
                         raise RuntimeError('Result should not be authorized.')
 
+                    results.add(result)
                     await scheduler.spawn(self.user.create_or_update_attempt(
                         result.context.password, success=False))
 
-                return result
-
         await log.complete('Closing Session')
         await asyncio.sleep(0)
-        return None
+
+        await scheduler.close()
+        return results
 
     async def attempt_with_password(self, loop, session, context, scheduler):
         """

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from argparse import ArgumentTypeError
+import asyncio
 import inspect
 import logging
 import os
@@ -38,41 +39,7 @@ def exception_hook(exc_type, exc_value, exc_traceback):
 sys.excepthook = exception_hook
 
 
-class operator(object):
-
-    def __init__(self, config):
-        if 'LEVEL' not in os.environ:
-            raise RuntimeError('Level must be set.')
-        self.config = config
-        self._shutdown = False
-
-    def start(self, loop, *a):
-        log = logger.get_sync(__name__, subname='start')
-
-        self.setup(loop)
-
-        cli_args = sys.argv
-        cli_args = [ag for ag in cli_args if '--level' not in ag and '--config' not in ag]
-
-        # It would be easier if there was a way to pass this through to the CLI
-        # application directly, instead of storing as ENV variable.
-        self.config.set()
-
-        # with progressbar_wrap():
-        try:
-            EntryPoint.run(argv=cli_args)
-        except (ArgumentTypeError, ArgumentError) as e:
-            log.error(e)
-        # Using finally here instead of else might cause race conditions with
-        # shutdown, but we issue a warning if the shutdown was already performed.
-        # If we don't use finally, than we cannot stop the program.
-        finally:
-            self.shutdown(loop)
-
-    def setup(self, loop):
-        self.setup_directories(loop)
-        self.setup_logger(loop)
-        self.setup_loop(loop)
+class shutdown_mixin(object):
 
     def shutdown(self, loop, signal=None):
         """
@@ -103,45 +70,16 @@ class operator(object):
 
         log.start('Starting Shut Down')
 
-        self.shutdown_async_loggers(loop, log)
-        self.shutdown_outstanding_tasks(loop, log)
-        self.shutdown_database(loop, log)
+        loop.run_until_complete(asyncio.gather(
+            self.shutdown_async_loggers(loop),
+            self.shutdown_database(loop)
+        ))
+        loop.run_until_complete(self.shutdown_outstanding_tasks(loop))
 
         loop.stop()
         log.complete('Shutdown Complete')
 
-    def handle_exception(self, loop, context):
-        """
-        We are having trouble using log.exception() with exc_info=True and seeing
-        the stack trace, so we have a custom log.traceback() method for now.
-
-        >>> self.log.exception(exc, exc_info=True, extra=extra)
-
-        Not sure if we will keep it or not, since it might add some extra
-        customization availabilities, but it works right now.
-        """
-        log = logger.get_sync(__name__, subname='handle_exception')
-
-        # Unfortunately, the step will only work for exceptions that are caught
-        # at the immediate next stack.  It might make more sense to take the step
-        # out.
-        stack = inspect.stack()
-        frame = get_app_stack_at(stack, step=1)
-
-        # The only benefit including the frame has is that the filename
-        # will not be in the logger, it will be in the last place before the
-        # logger and this statement.
-        log.traceback(
-            context['exception'].__class__,
-            context['exception'],
-            context['exception'].__traceback__,
-            extra={'frame': frame}
-        )
-
-        log.debug('Shutting Down in Exception Handler')
-        self.shutdown(loop)
-
-    def shutdown_outstanding_tasks(self, loop, log):
+    async def shutdown_outstanding_tasks(self, loop):
         log = logger.get_sync(__name__, subname='shutdown_outstanding_tasks')
 
         to_cancel = get_remaining_tasks()
@@ -149,40 +87,79 @@ class operator(object):
         if len(to_cancel) != 0:
             log.complete(f'{len(to_cancel)} Leftover Tasks')
 
-            log.before_lines()
-            for task in to_cancel[:20]:
-                log.line(task._coro.__name__)
+            with log.logging_lines():
+                log_tasks = to_cancel[:20]
+                for task in log_tasks:
+                    log.line(task._coro.__name__)
 
-            if len(to_cancel) > 20:
-                log.line('...')
+                if len(to_cancel) > 20:
+                    log.line('...')
 
             log.start('Cancelling Tasks')
             # Not sure if we still want to do this...
-            loop.run_until_complete(cancel_remaining_tasks(futures=to_cancel))
+            await cancel_remaining_tasks(futures=to_cancel)
         else:
             log.complete('No Leftover Tasks to Cancel')
 
-    def shutdown_async_loggers(self, loop, log):
+    async def shutdown_async_loggers(self, loop):
         from instattack.logger import AsyncLogger
+        log = logger.get_async(__name__, subname='shutdown_async_loggers')
 
-        log = logger.get_sync(__name__, subname='shutdown_async_loggers')
-
+        await log.complete('Shutting Down Async Loggers')
         loggers = [logging.getLogger(name)
             for name in logging.root.manager.loggerDict]
 
         for lgr in loggers:
             if isinstance(lgr, AsyncLogger):
                 log.start('Shutting Down Logger...')
-                loop.run_until_complete(lgr.shutdown())
+                await lgr.shutdown()
 
-        log.complete('Async Loggers Shutdown')
+        await log.complete('Async Loggers Shutdown')
 
-    def shutdown_database(self, loop, log):
-        log = logger.get_sync(__name__, subname='shutdown_database')
+    async def shutdown_database(self, loop):
+        log = logger.get_async(__name__, subname='shutdown_database')
+        await log.start('Shutting Down Database')
+        await tortoise.Tortoise.close_connections()
+        await log.complete('Database Shutdown')
 
-        log.start('Shutting Down Database')
-        loop.run_until_complete(tortoise.Tortoise.close_connections())
-        log.complete('Database Shutdown')
+
+class operator(shutdown_mixin):
+
+    def __init__(self, config):
+        if 'LEVEL' not in os.environ:
+            raise RuntimeError('Level must be set.')
+        self.config = config
+        self._shutdown = False
+
+    def start(self, loop, *a):
+        log = logger.get_sync(__name__, subname='start')
+
+        self.setup(loop)
+
+        cli_args = sys.argv
+        cli_args = [ag for ag in cli_args if '--level' not in ag and '--config' not in ag]
+
+        # It would be easier if there was a way to pass this through to the CLI
+        # application directly, instead of storing as ENV variable.
+        self.config.set()
+
+        # with progressbar_wrap():
+        try:
+            EntryPoint.run(argv=cli_args)
+        except (ArgumentTypeError, ArgumentError) as e:
+            log.error(e)
+        finally:
+            # Using finally here instead of else might cause race conditions with
+            # shutdown, but we issue a warning if the shutdown was already performed.
+            # If we don't use finally, than we cannot stop the program.
+            if not self._shutdown:
+                log.debug('Shutting Down in Start Method')
+                self.shutdown(loop)
+
+    def setup(self, loop):
+        self.setup_directories(loop)
+        self.setup_logger(loop)
+        self.setup_loop(loop)
 
     def setup_loop(self, loop):
         loop.set_exception_handler(self.handle_exception)
@@ -214,3 +191,35 @@ class operator(object):
     async def setup_database(self, loop):
         await tortoise.Tortoise.init(config=DB_CONFIG)
         await tortoise.Tortoise.generate_schemas()
+
+    def handle_exception(self, loop, context):
+        """
+        We are having trouble using log.exception() with exc_info=True and seeing
+        the stack trace, so we have a custom log.traceback() method for now.
+
+        >>> self.log.exception(exc, exc_info=True, extra=extra)
+
+        Not sure if we will keep it or not, since it might add some extra
+        customization availabilities, but it works right now.
+        """
+        log = logger.get_sync(__name__, subname='handle_exception')
+        log.debug('Handling Exception')
+
+        # Unfortunately, the step will only work for exceptions that are caught
+        # at the immediate next stack.  It might make more sense to take the step
+        # out.
+        stack = inspect.stack()
+        frame = get_app_stack_at(stack, step=1)
+
+        # The only benefit including the frame has is that the filename
+        # will not be in the logger, it will be in the last place before the
+        # logger and this statement.
+        log.traceback(
+            context['exception'].__class__,
+            context['exception'],
+            context['exception'].__traceback__,
+            extra={'frame': frame}
+        )
+
+        log.debug('Shutting Down in Exception Handler')
+        self.shutdown(loop)

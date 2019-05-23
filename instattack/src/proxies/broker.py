@@ -4,7 +4,6 @@ from proxybroker import Broker
 
 from instattack import logger
 from instattack import settings
-from instattack.src.utils import starting, stopping, cancel_remaining_tasks
 from instattack.src.base import HandlerMixin
 
 from .models import Proxy
@@ -50,8 +49,10 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             log.debug('Stopping Proxy Broker Session')
             self.stop(loop)
 
-    @starting
     async def start(self, loop):
+        log = logger.get_async(self.__name__, subname='start')
+        log.start('Starting')
+
         self._started = True
 
         log.start(f'Starting Broker with Limit = {self.limit}')
@@ -85,7 +86,6 @@ class InstattackProxyBroker(Broker, HandlerMixin):
                 log.warning('Null Proxy Returned from Broker... Stopping')
                 break
 
-    @stopping
     def stop(self, loop):
         """
         Stop all tasks, and the local proxy server if it's running.
@@ -96,6 +96,9 @@ class InstattackProxyBroker(Broker, HandlerMixin):
         We still use the logic in the original Proxy Broker stop method so we do
         not need to call super().
         """
+        log = logger.get_async(self.__name__, subname='stop')
+        log.stop('Stopping')
+
         if self._stopped:
             raise RuntimeError('Proxy Broker Already Stopped')
 

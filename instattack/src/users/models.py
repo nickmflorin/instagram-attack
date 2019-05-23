@@ -24,6 +24,7 @@ class UserAttempt(Model):
     user = fields.ForeignKeyField('models.User', related_name='attempts')
     last_attempt = fields.DatetimeField(null=True, auto_now=True)
     success = fields.BooleanField(default=False)
+    num_attempts = fields.IntField(default=1)
 
     class Meta:
         unique_together = ('password', 'user')
@@ -164,7 +165,8 @@ class User(Model):
         return attempts
 
     async def create_or_update_attempt(self, attempt, success=False, try_attempt=0):
-        raise RuntimeError('Blah')
+
+        log = logger.get_async(__name__, subname='create_or_update_attempt')
         log.info('Writing/Updating User Attempt')
 
         try:
@@ -176,22 +178,16 @@ class User(Model):
                 user=self,
             )
             if not created:
-                if attempt.success != success:
-                    attempt.success = success
-                    attempt.save()
-                    log.warning(f'Updated User Attempt Success -> {success}.')
-                else:
-                    log.warning('User Attempt Already Exists...')
+                attempt.success = success
+                attempt.num_attempts += 1
+                await attempt.save()
 
         except OperationalError:
-            raise
             if try_attempt <= self.MAX_SAVE_ATTEMPT_TRIES:
-
                 log.warning('Unable to Access Database...', extra={
                     'other': f'Sleeping for {self.SLEEP} Seconds.'
                 })
                 await asyncio.sleep(self.SLEEP)
-
                 await self.create_or_update_attempt(
                     attempt,
                     success=success,

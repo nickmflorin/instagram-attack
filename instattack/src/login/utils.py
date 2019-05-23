@@ -73,7 +73,7 @@ async def limit_on_success(coros, batch_size, max_tries=None):
                                 futures.append(asyncio.create_task(newc))
 
 
-async def limit_as_completed(coros, batch_size, stop_on=None):
+async def limit_as_completed(coros, batch_size):
     """
     Takes a generator yielding coroutines and runs the coroutines concurrently,
     similarly to asyncio.as_completed(tasks), except that it limits the number
@@ -105,16 +105,5 @@ async def limit_as_completed(coros, batch_size, stop_on=None):
                     except StopAsyncIteration as e:
                         pass
                     res = f.result()
-                    if stop_on and stop_on(res):
+                    if res.conclusive:
                         yield res
-                        break
-                    else:
-                        yield res
-
-    # We run into issues in the shutdown method when trying
-    # to cancel tasks if we don't await this.  This only happens
-    # for low numbers of passwords, since the tasks might not all
-    # be completed here by the time the shutdown() method is
-    # reached.
-    #   >> asyncio.create_task(cancel_remaining_tasks(futures))
-    await cancel_remaining_tasks(futures=futures)
