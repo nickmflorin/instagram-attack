@@ -1,7 +1,7 @@
 import asyncio
 from plumbum import cli
 
-from instattack.lib import CustomProgressbar
+from instattack.src.utils import CustomProgressbar
 from instattack.src.exceptions import ArgumentError
 
 from instattack.src.cli import EntryPoint, BaseApplication

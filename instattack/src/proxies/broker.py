@@ -3,8 +3,8 @@ import contextlib
 from proxybroker import Broker
 
 from instattack import logger
-from instattack.conf import settings
-from instattack.lib import starting, stopping, cancel_remaining_tasks
+from instattack import settings
+from instattack.src.utils import starting, stopping, cancel_remaining_tasks
 from instattack.src.base import HandlerMixin
 
 from .models import Proxy

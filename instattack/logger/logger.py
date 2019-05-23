@@ -1,6 +1,8 @@
 import aiologger
 import logging
 import os
+import sys
+import traceback
 
 from .constants import LoggingLevels
 from .handlers import (
@@ -43,6 +45,23 @@ class SyncLogger(SimpleSyncLogger):
         super(SyncLogger, self).__init__(name)
         self.subname = subname
 
+    def traceback(self, *exc_info, extra=None):
+        """
+        We are having problems with logbook and asyncio in terms of logging
+        exceptions with their traceback.  For now, this is a workaround that
+        works similiarly.
+        """
+        extra = extra or {}
+        extra.update({
+            'header_label': "Error",
+            'header_formatter': (
+                LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()),
+        })
+        self.error(exc_info[1], extra=extra)
+
+        sys.stderr.write("\n")
+        traceback.print_exception(*exc_info, limit=None, file=sys.stderr)
+
 
 class SimpleAsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
 
@@ -71,6 +90,12 @@ class SimpleAsyncLogger(aiologger.Logger, LoggerMixin, AsyncCustomLevelMixin):
         stack_info=False,
         caller=None,
     ):
+
+        # Until we come up with a better way of ensuring ths LEVEL in os.environ
+        # before loggers are imported - this will at least make sure the level
+        # is always right.
+        self.updateLevel()
+
         if not self.conditionally_disabled:  # Reason We Override
             sinfo = None
             if logging._srcfile and caller is None:  # type: ignore
@@ -120,6 +145,12 @@ class AsyncLogger(SimpleAsyncLogger):
         stack_info=False,
         caller=None,
     ):
+
+        # Until we come up with a better way of ensuring ths LEVEL in os.environ
+        # before loggers are imported - this will at least make sure the level
+        # is always right.
+        self.updateLevel()
+
         if not self.conditionally_disabled:  # Reason We Override
             sinfo = None
             if logging._srcfile and caller is None:  # type: ignore

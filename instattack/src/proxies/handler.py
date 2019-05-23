@@ -1,5 +1,5 @@
 from instattack import logger
-from instattack.lib import starting, stopping
+from instattack.src.utils import starting, stopping
 from instattack.src.base import Handler
 
 from .broker import InstattackProxyBroker

@@ -5,8 +5,8 @@ import os
 from plumbum import colors
 
 from instattack.logger.format import Format
-from instattack.conf import Configuration
-from instattack.conf.utils import validate_log_level
+from instattack.config import Configuration
+from instattack.utils import validate_log_level
 from instattack.src import operator
 
 from instattack import logger
@@ -17,12 +17,20 @@ log2 = logger.get_async('Test')
 
 
 async def test(config):
+    import sys
 
-    ex = Exception('Test Error')
-    formatter = Format(colors.blue)
+    def test_raise():
+        raise Exception('Blah')
 
-    log.exception(ex, extra={'header_label': 'test', 'header_formatter': formatter})
+    try:
+        test_raise()
+    except Exception as ex:
+        import inspect
+        stack = inspect.stack()
 
+        log.error('test', extra={
+            'stack': stack
+        })
 
 def main():
     # We have to retrieve the --level at the top level and then use it to set

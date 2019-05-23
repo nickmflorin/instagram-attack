@@ -2,24 +2,11 @@ from ..utils import get_log_value, get_formatter_value, escape_ansi_string
 
 
 __all__ = (
-    'Separator',
     'Item',
     'Label',
     'LineIndex',
     'Header',
 )
-
-
-class Separator(object):
-
-    def __init__(self, string):
-        self.string = string
-
-    def __call__(self, record):
-        return self.string
-
-    def valid(self, record):
-        return True
 
 
 class Part(object):
@@ -59,20 +46,49 @@ class Indentation(Part):
 
 class FormattablePart(Part):
 
-    def __init__(self, formatter=None, **kwargs):
+    def __init__(
+        self,
+        formatter=None,
+        prefix=None,
+        suffix=None,
+        wrapper=None,
+        **kwargs
+    ):
         super(FormattablePart, self).__init__(**kwargs)
         self._formatter = formatter
+        self._prefix = prefix
+        self._suffix = suffix
+        self._wrapper = wrapper
 
     def __call__(self, record):
         return self.formatted(record)
 
+    def _wrap(self, val):
+        if self._wrapper:
+            return self._wrapper % val
+        return val
+
+    def _apply_prefix_suffix(self, val):
+        """
+        TODO
+        ----
+        Start passing in group and determine if the next item is valid before
+        applying the suffix (like we used to with the Separator object).
+        """
+        prefix = self._prefix or ""
+        suffix = self._suffix or ""
+        return "%s%s%s" % (prefix, val, suffix)
+
     def formatted(self, record):
         if self.valid(record):
-            value = self.base_value(record)
+            formatted = self.base_value(record)
+
             formatter = get_formatter_value(self._formatter, record)
             if formatter:
-                return formatter("%s" % value)
-            return value
+                formatted = formatter("%s" % formatted)
+
+            formatted = self._wrap(formatted)
+            return self._apply_prefix_suffix(formatted)
 
 
 class Label(FormattablePart):
@@ -138,8 +154,8 @@ class Header(FormattablePart):
             line = self.line(record)
             label = self.label(record)
             if label:
-                return f"{line} {label} {line}"
-            return f"{line}"
+                return f"{line} {label} {line}\n"
+            return f"{line}\n"
 
 
 class AbstractObj(object):
@@ -172,7 +188,7 @@ class AbstractObj(object):
         return self.base_part.valid(record)
 
     def _deliminate_parts(self, parts):
-        return self.separator.join(["%s" % part for part in parts])
+        return "".join(["%s" % part for part in parts])
 
     @property
     def parts(self):
@@ -186,10 +202,22 @@ class AbstractObj(object):
 
 class Item(AbstractObj):
 
-    def __init__(self, value=None, constant=None, formatter=None, **kwargs):
+    def __init__(
+        self,
+        value=None,
+        constant=None,
+        formatter=None,
+        prefix=None,
+        suffix=None,
+        wrapper=None,
+        **kwargs
+    ):
         super(Item, self).__init__(**kwargs)
         self.base_part = FormattablePart(
             value=value,
             constant=constant,
-            formatter=formatter
+            formatter=formatter,
+            prefix=prefix,
+            suffix=suffix,
+            wrapper=wrapper,
         )

@@ -1,6 +1,6 @@
 from collections import Counter
 
-from instattack.lib import join
+from instattack.src.utils import join
 import sys
 
 from .base import mutation_gen, generator_mixin

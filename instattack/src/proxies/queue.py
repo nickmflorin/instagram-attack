@@ -72,8 +72,7 @@ class ProxyPriorityQueue(asyncio.PriorityQueue):
                 if current != self.REMOVED:
                     log.warning('Have to Remove Invalid Proxy from Pool', extra={
                         'proxy': proxy,
-                        'other': f"Pool Size: {self.qsize()}",
-                        'list': [evalu['reason'] for evalu in evaluations]
+                        'other': [evalu['reason'] for evalu in evaluations],
                     })
                     await self._remove_proxy(proxy)
             else:
@@ -85,8 +84,7 @@ class ProxyPriorityQueue(asyncio.PriorityQueue):
                 # This is sort of what the `strict` parameter is doing right now.
                 log.warning('Cannot Add Proxy to Pool', extra={
                     'proxy': proxy,
-                    'other': f"Pool Size: {self.qsize()}",
-                    'list': [evalu['reason'] for evalu in evaluations]
+                    'other': [evalu['reason'] for evalu in evaluations]
                 })
                 pass
             return None

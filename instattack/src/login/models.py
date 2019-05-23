@@ -68,9 +68,9 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return LoggingLevels.SUCCESS.format(string_rep)
+            return LoggingLevels.SUCCESS.message_formatter(string_rep)
         elif self.not_authorized:
-            return LoggingLevels.ERROR.format(string_rep)
+            return LoggingLevels.ERROR.message_formatter(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
             return LoggingLevels.DEBUG.format(string_rep)

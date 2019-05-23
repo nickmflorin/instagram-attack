@@ -3,12 +3,15 @@ import argparse
 import asyncio
 import os
 
-from instattack.conf import Configuration
-from instattack.conf.utils import validate_log_level
-from instattack.src import operator
+
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def main():
+    from instattack.config import Configuration
+    from instattack.utils import validate_log_level
+
     # We have to retrieve the --level at the top level and then use it to set
     # the environment variable - which is in turn used to configure the loggers.
     parser = argparse.ArgumentParser()
@@ -22,6 +25,9 @@ def main():
 
     config = Configuration(path=args.config)
 
+    # Wait to import from src directory until LEVEL set in os.environ so that
+    # loggers are all created with correct level.
+    from instattack.src import operator
     oper = operator(config)
     oper.start(loop, *unknown)
     loop.close()

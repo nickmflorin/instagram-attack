@@ -50,13 +50,18 @@ def get_obj_attribute(obj, param):
     if "." in param:
         parts = param.split(".")
         if len(parts) > 1:
+            if isinstance(obj, dict) and parts[0] in obj:
+                return get_obj_attribute(obj[parts[0]], '.'.join(parts[1:]))
+
             if hasattr(obj, parts[0]):
                 nested_obj = getattr(obj, parts[0])
                 return get_obj_attribute(nested_obj, '.'.join(parts[1:]))
             else:
                 return None
         else:
-            if hasattr(obj, parts[0]):
+            if isinstance(obj, dict) and parts[0] in obj:
+                return obj[parts[0]]
+            elif hasattr(obj, parts[0]):
                 return getattr(obj, parts[0])
     else:
         if hasattr(obj, param):
@@ -66,13 +71,9 @@ def get_obj_attribute(obj, param):
 
 def get_record_attribute(params, record):
 
-    def sort_priority(param):
-        return param.count(".")
-
     # TODO: Need to catch more singletons here.
     params = ensure_list(params)
     params = ["%s" % param for param in params]
-    params = sorted(params, key=sort_priority)
 
     # Here, each param can be something like "context.index", or "index"
     # Higher priority is given to less deeply nested versions.

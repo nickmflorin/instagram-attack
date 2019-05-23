@@ -30,7 +30,7 @@ class LoggingLevels(FormattedEnum):
     WARNING = (Format(colors.fg('Gold3A'), colors.bold,
         wrapper="[!] %s", format_with_wrapper=True), 30)
     SUCCESS = (Format(colors.fg('SpringGreen3'),
-        wrapper="[o] %s", format_with_wrapper=True), 24)
+        wrapper="[$] %s", format_with_wrapper=True), 24)
     START = (Format(colors.fg('DarkOliveGreen3'),
         wrapper="[+] %s", format_with_wrapper=True), 23)
     STOP = (Format(colors.fg('Red3'),
@@ -53,15 +53,15 @@ class LoggingLevels(FormattedEnum):
 
 class RecordAttributes(FormattedEnum):
 
-    LINE_INDEX = Format(colors.black, colors.bold, wrapper="[%s] ")
-    DATETIME = Format(colors.fg('LightYellow3'), wrapper="[%s] ")
+    LINE_INDEX = Format(colors.black, colors.bold)
+    DATETIME = Format(colors.fg('LightYellow3'))
     MESSAGE = Format(colors.fg('Grey7'))
     NAME = Format(colors.fg('DarkGray'))
     SUBNAME = Format(colors.black)
     OTHER_MESSAGE = Format(colors.fg('DarkGray'))
 
     # Exception Messages
-    STATUS_CODE = Format(colors.fg('DarkGray'), wrapper="[%s]")
+    STATUS_CODE = Format(colors.fg('DarkGray'))
     METHOD = Format(colors.fg('DarkGray'), colors.bold)
     REASON = Format(colors.fg('Grey69'))
 
@@ -70,7 +70,7 @@ class RecordAttributes(FormattedEnum):
     PASSWORD = Format(colors.fg('Grey69'), colors.bold)
     NUM_REQUESTS = Format(colors.fg('DarkGray'), colors.bold)
     INDEX = Format(colors.fg('Grey69'), colors.bold)
-    PROXY = Format(colors.fg('CadetBlueA'), wrapper="<%s>")
+    PROXY = Format(colors.fg('CadetBlueA'))
     TOKEN = Format(colors.fg('Grey69'))
     LABEL = Format(colors.fg('DarkGray'))
 

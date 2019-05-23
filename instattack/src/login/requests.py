@@ -3,7 +3,7 @@ import asyncio
 import ssl
 
 from instattack import logger
-from instattack.conf import settings
+from instattack import settings
 
 from instattack.src.exceptions import ClientResponseError
 from instattack.src.base import Handler
@@ -12,9 +12,6 @@ from instattack.src.login import constants
 from .exceptions import InvalidResponseJson, InstagramResultError
 from .models import InstagramResult
 from .utils import get_token
-
-
-log = logger.get_async('Login Handler')
 
 
 """
@@ -169,7 +166,7 @@ class RequestHandler(Handler):
                 raise InstagramResultError("Inconslusive result.")
             return result
 
-    async def handle_client_response(self, response, context, log):
+    async def handle_client_response(self, response, context):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
         InstagramResult object.
@@ -181,6 +178,9 @@ class RequestHandler(Handler):
         via a `checkpoint_required` value, we cannot raise_for_status until after
         we try to first get the response json.
         """
+        log = logger.get_async(self.__name__, subname='handle_request_error')
+        log.disable_on_false(self.log_attempts)
+
         if response.status == 400:
             try:
                 json = await response.json()
@@ -205,7 +205,7 @@ class RequestHandler(Handler):
 
     async def handle_inconclusive_proxy(self, e, proxy, scheduler, extra=None):
 
-        log = logger.get_async('Handling Inconclusive Proxy', subname='handle_inconclusive_proxy')
+        log = logger.get_async(self.__name__, subname='handle_inconclusive_proxy')
         log.disable_on_false(self.log_attempts)
 
         extra = extra or {}
@@ -218,7 +218,7 @@ class RequestHandler(Handler):
 
     async def handle_proxy_error(self, e, proxy, scheduler, extra=None):
 
-        log = logger.get_async('Handling Proxy Error', subname='handle_proxy_error')
+        log = logger.get_async(self.__name__, subname='handle_proxy_error')
         log.disable_on_false(self.log_attempts)
 
         extra = extra or {}
@@ -231,7 +231,7 @@ class RequestHandler(Handler):
 
     async def handle_fatal_proxy(self, e, proxy, scheduler):
 
-        log = logger.get_async('Handling Fatal Proxy Error', subname='handle_fatal_proxy')
+        log = logger.get_async(self.__name__, subname='handle_fatal_proxy')
         log.disable_on_false(self.log_attempts)
 
         if self.remove_proxy_on_error:
@@ -240,7 +240,7 @@ class RequestHandler(Handler):
         else:
             await self.handle_proxy_error(e, proxy, scheduler, extra={'proxy': proxy})
 
-    async def handle_request_error(self, e, proxy, context, log, scheduler):
+    async def handle_request_error(self, e, proxy, context, scheduler):
         """
         For errors related to proxy connectivity issues, and the validity of
         the proxy, we remove the proxy entirely and don't note the error/put
@@ -248,6 +248,9 @@ class RequestHandler(Handler):
         error, i.e. a response was returned, we just note the error and put
         the proxy back in the pool.
         """
+        log = logger.get_async(self.__name__, subname='handle_request_error')
+        log.disable_on_false(self.log_attempts)
+
         if isinstance(e, RuntimeError):
             """
             RuntimeError: File descriptor 87 is used by transport
@@ -293,14 +296,10 @@ class RequestHandler(Handler):
         a different proxy, until a result is found that authenticates or dis-
         authenticates the given password.
         """
-        log = logger.get_async('Requesting Login', subname='login_request')
+        log = logger.get_async(self.__name__, subname='login_request')
         log.disable_on_false(self.log_attempts)
 
         try:
-            # Temporarary to make sure things are working properly.
-            if not self.headers:
-                raise RuntimeError('Headers should be set.')
-
             async with session.post(
                 settings.INSTAGRAM_LOGIN_URL,
                 headers=self.headers,
@@ -309,7 +308,7 @@ class RequestHandler(Handler):
                 proxy=context.proxy.url  # Only Http Proxies Are Supported by AioHTTP
             ) as response:
                 try:
-                    result = await self.handle_client_response(response, context, log)
+                    result = await self.handle_client_response(response, context)
 
                 except ClientResponseError as e:
                     await self.handle_proxy_error(e, context.proxy, scheduler, extra={
@@ -324,8 +323,7 @@ class RequestHandler(Handler):
                     await context.proxy.was_success(save=False)
                     await self.proxy_handler.pool.put(context.proxy)
                     await scheduler.spawn(context.proxy.save())
-
                     return result
 
         except Exception as e:
-            await self.handle_request_error(e, context.proxy, context, log, scheduler)
+            await self.handle_request_error(e, context.proxy, context, scheduler)

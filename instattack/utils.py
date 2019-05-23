@@ -14,6 +14,12 @@ def get_app_root():
     return root / APP_NAME
 
 
+def get_app_stack_at(stack, step=1):
+    root = dir_str(get_app_root())
+    frames = [frame for frame in stack if frame.filename.startswith(root)]
+    return frames[step]
+
+
 def relative_to_root(path):
     from .settings import APP_NAME
     if not isinstance(path, LocalPath):

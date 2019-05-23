@@ -1,13 +1,12 @@
 import asyncio
-from datetime import datetime
 
 from tortoise import fields
 from tortoise.models import Model
-from tortoise.exceptions import IntegrityError, OperationalError
+from tortoise.exceptions import OperationalError
 
 from instattack import logger
-from instattack.conf import settings
-from instattack.lib import stream_raw_data, read_raw_data
+from instattack import settings
+from instattack.src.utils import stream_raw_data, read_raw_data
 from instattack.src.users import constants
 
 from .exceptions import UserDirDoesNotExist, UserFileDoesNotExist
@@ -165,7 +164,7 @@ class User(Model):
         return attempts
 
     async def create_or_update_attempt(self, attempt, success=False, try_attempt=0):
-
+        raise RuntimeError('Blah')
         log.info('Writing/Updating User Attempt')
 
         try:

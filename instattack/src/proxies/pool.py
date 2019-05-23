@@ -1,7 +1,7 @@
 import aiojobs
 
 from instattack import logger
-from instattack.lib import starting
+from instattack.src.utils import starting
 from instattack.src.base import HandlerMixin
 
 from .utils import stream_proxies

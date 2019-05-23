@@ -2,8 +2,8 @@ import asyncio
 
 import re
 
-from instattack.conf import settings
-from instattack.lib import cancel_remaining_tasks
+from instattack import settings
+from instattack.src.utils import cancel_remaining_tasks
 
 
 """
@@ -105,13 +105,16 @@ async def limit_as_completed(coros, batch_size, stop_on=None):
                     except StopAsyncIteration as e:
                         pass
                     res = f.result()
-                    if stop_on:
-                        if stop_on(res):
-                            # We run into issues in the shutdown method when trying
-                            # to cancel tasks if we don't await this.  This only happens
-                            # for low numbers of passwords, since the tasks might not all
-                            # be completed here by the time the shutdown() method is
-                            # reached.
-                            #   >> asyncio.create_task(cancel_remaining_tasks(futures))
-                            await cancel_remaining_tasks(futures=futures)
-                    yield res
+                    if stop_on and stop_on(res):
+                        yield res
+                        break
+                    else:
+                        yield res
+
+    # We run into issues in the shutdown method when trying
+    # to cancel tasks if we don't await this.  This only happens
+    # for low numbers of passwords, since the tasks might not all
+    # be completed here by the time the shutdown() method is
+    # reached.
+    #   >> asyncio.create_task(cancel_remaining_tasks(futures))
+    await cancel_remaining_tasks(futures=futures)

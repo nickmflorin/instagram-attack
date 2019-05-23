@@ -12,7 +12,7 @@ from tortoise import fields
 from tortoise.models import Model
 
 from instattack import logger
-from instattack.conf import settings
+from instattack import settings
 from instattack.src.base import ModelMixin
 
 

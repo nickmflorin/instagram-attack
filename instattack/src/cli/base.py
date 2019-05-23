@@ -5,7 +5,7 @@ from plumbum import cli
 import tortoise
 
 from instattack import logger
-from instattack.conf import Configuration
+from instattack.config import Configuration
 from instattack.src.users import User
 
 from .utils import post_handlers
@@ -19,15 +19,10 @@ class BaseApplication(cli.Application):
     log = logger.get_sync('Application')
     _config = None
 
-    @classmethod
-    def run(cls, *args, **kwargs):
-        # TODO: Validate just the structure of the configuration object
-        # here, but not the path.
-        cls._config = Configuration.load()
-        return super(BaseApplication, cls).run(*args, **kwargs)
-
     @property
     def config(self):
+        if not self._config:
+            self._config = Configuration.load()
         return self._config
 
     async def get_user(self, username):

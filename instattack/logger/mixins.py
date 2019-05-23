@@ -1,5 +1,4 @@
 import contextlib
-import traceback
 import os
 import sys
 
@@ -129,21 +128,8 @@ class LoggerMixin(object):
     def updateLevel(self):
         # Environment variable might not be set for usages of AppLogger
         # in __main__ module right away.
-        if not os.environ.get('LEVEL'):
-            raise RuntimeError('Level is not in the environment variables.')
-        self.setLevel(os.environ['LEVEL'])
+        if 'LEVEL' in os.environ and not self.level:
+            level = LoggingLevels[os.environ['LEVEL']]
 
-    def traceback(self, ex, raw=False):
-        """
-        We are having problems with logbook and asyncio in terms of logging
-        exceptions with their traceback.  For now, this is a workaround that
-        works similiarly.
-        """
-        formatter = LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()
-        self.exception(ex, extra={
-            'header_label': "Error",
-            'header_formatter': formatter
-        })
-        sys.stderr.write("\n")
-        traceback.print_exception(ex.__class__, ex, ex.__traceback__,
-            limit=None, file=sys.stderr)
+            self.warning(f'Setting {self.name} Logger Level After Import...')
+            self.setLevel(level.num)

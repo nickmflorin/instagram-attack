@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 from argparse import ArgumentTypeError
+import inspect
 import logging
+import os
 import pathlib
 import signal
 import sys
 import tortoise
-from tortoise import Tortoise
 
+# Need to figure out how to delay import of this module totally until LEVEL set
+# in os.environ, or finding a better way of setting LEVEL with CLI.
 from instattack import logger
-from instattack.conf import Configuration
-from instattack.logger import (
-    SyncLogger, AsyncLogger, disable_external_loggers, progressbar_wrap)
-from instattack.lib import cancel_remaining_tasks, get_remaining_tasks
+from instattack.utils import get_app_stack_at
+from instattack.config import Configuration
+from instattack.src.utils import cancel_remaining_tasks, get_remaining_tasks
 
-from instattack.conf.settings import USER_DIR, DB_CONFIG
-from instattack.conf.utils import dir_str, get_app_root
+from instattack.settings import USER_DIR, DB_CONFIG
+from instattack.utils import dir_str, get_app_root
 
 from .exceptions import ArgumentError
 from .cli import EntryPoint
@@ -26,17 +28,28 @@ used, but could probably be expanded upon.
 SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 
+# You can log all uncaught exceptions on the main thread by assigning a handler
+# to sys.excepthook.
+def exception_hook(exc_type, exc_value, exc_traceback):
+    log = logger.get_sync(__name__)
+    log.traceback(exc_type, exc_value, exc_traceback)
+
+
+sys.excepthook = exception_hook
+
+
 class operator(object):
 
     def __init__(self, config):
+        if 'LEVEL' not in os.environ:
+            raise RuntimeError('Level must be set.')
         self.config = config
         self._shutdown = False
 
     def start(self, loop, *a):
-        log = SyncLogger(f"{__name__}:start")
+        log = logger.get_sync(__name__, subname='start')
 
         self.setup(loop)
-        log.updateLevel()
 
         cli_args = sys.argv
         cli_args = [ag for ag in cli_args if '--level' not in ag and '--config' not in ag]
@@ -66,9 +79,9 @@ class operator(object):
         For signal handlers, the shutdown() method requires the loop argument.
         For all shutdown related methods, we will require the loop method to be
         explicitly provided even though they could have access to self.loop if we
-        initialized operator that way.
+        initialized operator that way. x
         """
-        log = logger.get_sync('Shutdown')
+        log = logger.get_sync('__name__', subname='shutdown')
 
         if self._shutdown:
             log.warning('Instattack Already Shutdown...')
@@ -107,15 +120,29 @@ class operator(object):
         Not sure if we will keep it or not, since it might add some extra
         customization availabilities, but it works right now.
         """
-        log = SyncLogger(f"{__name__}:handle_exception")
+        log = logger.get_sync(__name__, subname='handle_exception')
 
-        exc = context['exception']
-        log.traceback(exc)
+        # Unfortunately, the step will only work for exceptions that are caught
+        # at the immediate next stack.  It might make more sense to take the step
+        # out.
+        stack = inspect.stack()
+        frame = get_app_stack_at(stack, step=1)
+
+        # The only benefit including the frame has is that the filename
+        # will not be in the logger, it will be in the last place before the
+        # logger and this statement.
+        log.traceback(
+            context['exception'].__class__,
+            context['exception'],
+            context['exception'].__traceback__,
+            extra={'frame': frame}
+        )
 
         log.debug('Shutting Down in Exception Handler')
         self.shutdown(loop)
 
     def shutdown_outstanding_tasks(self, loop, log):
+        log = logger.get_sync(__name__, subname='shutdown_outstanding_tasks')
 
         to_cancel = get_remaining_tasks()
 
@@ -131,12 +158,14 @@ class operator(object):
 
             log.start('Cancelling Tasks')
             # Not sure if we still want to do this...
-            # loop.run_until_complete(cancel_remaining_tasks(futures=to_cancel))
+            loop.run_until_complete(cancel_remaining_tasks(futures=to_cancel))
         else:
             log.complete('No Leftover Tasks to Cancel')
 
     def shutdown_async_loggers(self, loop, log):
-        log.start('Shutting Down Async Loggers')
+        from instattack.logger import AsyncLogger
+
+        log = logger.get_sync(__name__, subname='shutdown_async_loggers')
 
         loggers = [logging.getLogger(name)
             for name in logging.root.manager.loggerDict]
@@ -149,6 +178,8 @@ class operator(object):
         log.complete('Async Loggers Shutdown')
 
     def shutdown_database(self, loop, log):
+        log = logger.get_sync(__name__, subname='shutdown_database')
+
         log.start('Shutting Down Database')
         loop.run_until_complete(tortoise.Tortoise.close_connections())
         log.complete('Database Shutdown')
@@ -170,6 +201,8 @@ class operator(object):
         [p.rmdir() for p in pathlib.Path(dir_str(root)).rglob('__pycache__')]
 
     def setup_logger(self, loop):
+        from instattack.logger import disable_external_loggers
+
         disable_external_loggers(
             'proxybroker',
             'aiosqlite',
@@ -179,5 +212,5 @@ class operator(object):
         )
 
     async def setup_database(self, loop):
-        await Tortoise.init(config=DB_CONFIG)
-        await Tortoise.generate_schemas()
+        await tortoise.Tortoise.init(config=DB_CONFIG)
+        await tortoise.Tortoise.generate_schemas()

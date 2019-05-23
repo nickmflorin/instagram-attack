@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass
 
-from instattack.lib import Identifier
+from instattack.src.utils import Identifier
 
 
 class ModelMixin(object):
