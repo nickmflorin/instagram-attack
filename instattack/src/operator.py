@@ -12,10 +12,11 @@ import tortoise
 # Need to figure out how to delay import of this module totally until LEVEL set
 # in os.environ, or finding a better way of setting LEVEL with CLI.
 from instattack import logger
+from instattack.logger import AsyncLogger
 from instattack import settings
 
 from instattack.config import Configuration
-from instattack.utils import get_app_stack_at
+from instattack.utils import get_app_stack_at, task_is_third_party
 
 from .utils import cancel_remaining_tasks, get_remaining_tasks
 from .exceptions import ArgumentError
@@ -97,7 +98,10 @@ class shutdown_mixin(object):
             with log.logging_lines():
                 log_tasks = to_cancel[:20]
                 for task in log_tasks:
-                    log.line(task._coro.__name__)
+                    if task_is_third_party(task):
+                        log.line(f"{task._coro.__name__} (Third Party)")
+                    else:
+                        log.line(task._coro.__name__)
 
                 if len(to_cancel) > 20:
                     log.line('...')
@@ -109,7 +113,7 @@ class shutdown_mixin(object):
             log.complete('No Leftover Tasks to Cancel')
 
     async def shutdown_async_loggers(self, loop):
-        from instattack.logger import AsyncLogger
+
         log = logger.get_async(__name__, subname='shutdown_async_loggers')
 
         await log.complete('Shutting Down Async Loggers')

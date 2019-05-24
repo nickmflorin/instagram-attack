@@ -19,9 +19,6 @@ from instattack.src.base import ModelMixin
 __all__ = ('Proxy', )
 
 
-log = logger.get_async('Proxy Model')
-
-
 class ProxyBrokerMixin(object):
 
     @classmethod
@@ -75,6 +72,7 @@ class ProxyBrokerMixin(object):
         Figure out a way to translate proxybroker errors to our error system so
         they can be reconciled.
         """
+        log = logger.get_async(__name__, subname='update_or_create_from_proxybroker')
 
         # Figure out how to translate this to our system.
         broker_errors = broker_proxy.stat['errors']
@@ -90,6 +88,7 @@ class ProxyBrokerMixin(object):
             # overwrite it.
             proxy.avg_resp_time = broker_proxy.avg_resp_time
             if save:
+                await log.debug('Saving Proxy')
                 await proxy.save()
             return proxy, False
         else:
@@ -101,6 +100,7 @@ class ProxyBrokerMixin(object):
                 num_requests=broker_proxy.stat['requests'],
             )
             if save:
+                await log.debug('Saving Proxy')
                 await proxy.save()
             return proxy, True
 
@@ -202,6 +202,7 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
 
     errors = fields.JSONField(default={})
     num_requests = fields.IntField(default=0)
+    num_active_requests = fields.IntField(default=0)
 
     # Used to determine if the proxy is fundamentally different in database.
     priority_fields = (

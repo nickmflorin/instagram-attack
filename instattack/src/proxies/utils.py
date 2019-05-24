@@ -63,7 +63,7 @@ async def find_proxy(proxy):
     return saved
 
 
-async def save_proxies(proxies, concurrent=False):
+async def save_proxies(proxies, concurrent=False, update=False):
     """
     Saves a series of proxies if they do not exist in the database, but DOES NOT
     update the proxies if new proxies are in the database with different values.
@@ -93,14 +93,11 @@ async def save_proxies(proxies, concurrent=False):
         return tasks
 
     async def save_proxies_concurrently(proxy_iterable):
-        log.start('Saving Concurrently...')
 
         num_saved = 0
         tasks = await create_tasks(proxy_iterable)
 
-        log.debug(f'Waiting on Results from {len(tasks)} Save Tasks...')
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        log.debug('Received Results from Saves')
 
         for result in results:
             if not isinstance(result, Exception):
@@ -108,24 +105,21 @@ async def save_proxies(proxies, concurrent=False):
         return num_saved
 
     async def save_proxies_iteratively(proxy_iterable):
-        log.start('Saving Iteratively...')
 
         num_saved = 0
         async for proxy in proxy_generator(proxy_iterable):
             try:
                 await proxy.save()
-            except IntegrityError:
-                pass
+            except IntegrityError as e:
+                log.error(e)
             else:
                 num_saved += 1
         return num_saved
 
     if concurrent:
-        num_saved = await save_proxies_concurrently(proxies)
+        await save_proxies_concurrently(proxies)
     else:
-        num_saved = await save_proxies_iteratively(proxies)
-
-    log.complete(f'Saved {num_saved} Proxies')
+        await save_proxies_iteratively(proxies)
 
 
 async def update_or_create_proxy(proxy):

@@ -78,6 +78,7 @@ class ProxyCollect(BaseProxy):
             limit=self.limit,
         )
 
+        log.start('Collecting Proxies...')
         async with broker.session(loop):
             updated = []
             created = []
@@ -87,7 +88,8 @@ class ProxyCollect(BaseProxy):
                 else:
                     updated.append(proxy)
 
-        await log.success(f'Collected {len(created)} New Proxies')
-        await log.success(f'Updated {len(updated)} Collected Proxies')
+        await log.complete(f'Creating {len(created)} New Proxies')
+        await save_proxies(created, concurrent=self.concurrent)
 
-        # await save_proxies(broker.collect(), concurrent=self.concurrent)
+        await log.success(f'Saving {len(updated)} Updated Proxies')
+        await save_proxies(updated, concurrent=self.concurrent)

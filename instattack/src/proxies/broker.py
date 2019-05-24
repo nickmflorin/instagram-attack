@@ -78,15 +78,12 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             while True:
                 proxy = await broker._proxies.get()
                 if proxy:
+                    # TODO: Eventually maybe spawn off save into scheduler, although
+                    # scheduler is acting weirdly now and swallowing exceptions.
                     proxy, created = await Proxy.update_or_create_from_proxybroker(
                         proxy,
-                        save=False
+                        save=save
                     )
-
-                    # TODO: Eventually maybe spawn off into scheduler, although
-                    # scheduler is acting weirdly now and swallowing exceptions.
-                    if save:
-                        await proxy.save()
                     yield proxy, created
                 else:
                     log.warning('Null Proxy Returned from Broker... Stopping')

@@ -27,8 +27,11 @@ async def cancel_remaining_tasks(futures=None, silence_exceptions=False, log_exc
     if not futures:
         log.debug('Collecting Default Tasks')
         futures = asyncio.Task.all_tasks()
-        futures = [task for task in futures if task is not
-            asyncio.tasks.Task.current_task()]
+
+    futures = [
+        task for task in futures
+        if task is not asyncio.tasks.Task.current_task()
+    ]
 
     def cancel_task(task):
         if not task.cancelled():
