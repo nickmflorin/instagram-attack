@@ -3,9 +3,7 @@ import asyncio
 from weakref import WeakKeyDictionary
 
 from instattack import logger
-from instattack import settings
 from instattack.utils import task_is_third_party
-
 
 
 async def coro_exc_wrapper(coro, loop):
