@@ -39,6 +39,10 @@ def dir_str(path):
     return "%s/%s" % (path.dirname, path.name)
 
 
+def percentage(num1, num2):
+    return f"{'{0:.2f}'.format((num1 / num2 * 100))} %"
+
+
 def is_numeric(value):
     try:
         float(value)

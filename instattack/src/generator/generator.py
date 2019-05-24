@@ -1,7 +1,6 @@
 from collections import Counter
 
 from instattack.src.utils import join
-import sys
 
 from .base import mutation_gen, generator_mixin
 from .char_gen import char_gen
@@ -89,9 +88,7 @@ class password_gen(generator_mixin):
     in the previous attempts after additional alterations performed.
     """
 
-    def __init__(self, loop, user, attempts, limit=None):
-
-        self.loop = loop
+    def __init__(self, user, attempts, limit=None):
         self.limit = limit
 
         self.passwords = user.get_passwords()
@@ -196,6 +193,6 @@ class password_gen(generator_mixin):
     def safe_yield(self, gen):
         for value in gen:
             if self.with_yield(value):
+                yield value
                 if self.limit and self.num_generated == self.limit:
                     break
-                yield value

@@ -12,13 +12,11 @@ import tortoise
 # Need to figure out how to delay import of this module totally until LEVEL set
 # in os.environ, or finding a better way of setting LEVEL with CLI.
 from instattack import logger
-from instattack.utils import get_app_stack_at
 from instattack.config import Configuration
-from instattack.src.utils import cancel_remaining_tasks, get_remaining_tasks
-
 from instattack.settings import USER_DIR, DB_CONFIG
-from instattack.utils import dir_str, get_app_root
+from instattack.utils import dir_str, get_app_root, get_app_stack_at
 
+from .utils import cancel_remaining_tasks, get_remaining_tasks
 from .exceptions import ArgumentError
 from .cli import EntryPoint
 
@@ -69,15 +67,23 @@ class shutdown_mixin(object):
             log.disable_on_true(config.get('silent_shutdown', False))
 
         log.start('Starting Shut Down')
-
-        loop.run_until_complete(asyncio.gather(
-            self.shutdown_async_loggers(loop),
-            self.shutdown_database(loop)
-        ))
-        loop.run_until_complete(self.shutdown_outstanding_tasks(loop))
+        loop.run_until_complete(self.shutdown_async(loop))
+        # loop.run_until_complete(asyncio.gather(
+        #     self.shutdown_async_loggers(loop),
+        #     self.shutdown_database(loop)
+        # ))
+        # loop.run_until_complete(self.shutdown_outstanding_tasks(loop))
 
         loop.stop()
         log.complete('Shutdown Complete')
+
+    async def shutdown_async(self, loop):
+        await asyncio.sleep(0)
+        await self.shutdown_async_loggers(loop)
+        await self.shutdown_database(loop)
+
+        await asyncio.sleep(0)
+        await self.shutdown_outstanding_tasks(loop)
 
     async def shutdown_outstanding_tasks(self, loop):
         log = logger.get_sync(__name__, subname='shutdown_outstanding_tasks')
@@ -211,6 +217,8 @@ class operator(shutdown_mixin):
         stack = inspect.stack()
         frame = get_app_stack_at(stack, step=1)
 
+        tb = context['tb']
+        import ipdb; ipdb.set_trace()
         # The only benefit including the frame has is that the filename
         # will not be in the logger, it will be in the last place before the
         # logger and this statement.

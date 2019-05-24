@@ -295,6 +295,12 @@ class RequestHandler(Handler):
         For a given password, makes a series of concurrent requests, each using
         a different proxy, until a result is found that authenticates or dis-
         authenticates the given password.
+
+        TODO
+        ----
+
+        Only remove proxy if the error has occured a certain number of times, we
+        should allow proxies to occasionally throw a single error.
         """
         log = logger.get_async(self.__name__, subname='login_request')
         log.disable_on_false(self.log_attempts)

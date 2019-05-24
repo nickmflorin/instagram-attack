@@ -1,9 +1,8 @@
 import asyncio
 from plumbum import cli
 
-from instattack.src.utils import CustomProgressbar
-from instattack.src.exceptions import ArgumentError
-
+from instattack import logger
+from instattack.lib import CustomProgressbar
 from instattack.src.cli import EntryPoint, BaseApplication
 
 from .models import Proxy
@@ -12,26 +11,26 @@ from .utils import scrape_proxies, save_proxies
 
 
 @EntryPoint.subcommand('proxies')
+class ProxyEntryPoint(BaseApplication):
+    pass
+
+
 class BaseProxy(BaseApplication):
 
     __group__ = 'Proxy Pool'
 
+    def main(self):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.operation())
 
-@BaseProxy.subcommand('clean')
+
+@ProxyEntryPoint.subcommand('clean')
 class ProxyClean(BaseProxy):
     """
     Will be used to remove duplicate proxies that are saved.  Potentially also
     be used to update metrics if we get that far in this project.
     """
-
-    def main(self, arg):
-        loop = asyncio.get_event_loop()
-        if arg == 'errors':
-            loop.run_until_complete(self.clean_errors())
-        else:
-            raise ArgumentError(f'Invalid argument {arg}.')
-
-    async def clean_errors(self):
+    async def operation(self):
         progress = CustomProgressbar(Proxy.count_all(), label='Cleaning Errors')
         progress.start()
         async for proxy in Proxy.all():
@@ -42,40 +41,35 @@ class ProxyClean(BaseProxy):
         progress.finish()
 
 
-@BaseProxy.subcommand('scrape')
+@ProxyEntryPoint.subcommand('scrape')
 class ProxyScrape(BaseProxy):
 
     limit = cli.SwitchAttr("--limit", int, mandatory=False,
         help="Limit the number of proxies to collect.")
     concurrent = cli.Flag("--concurrent", default=False)
 
-    def main(self):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.scrape())
+    async def operation(self):
+        log = logger.get_sync(__name__, subname='operation')
 
-    async def scrape(self):
+        message = 'Scraping Proxies...'
         if self.limit:
-            self.log.start(f'Scraping Proxies w Limit = {self.limit}')
-        else:
-            self.log.start('Scraping Proxies...')
+            message = f'Scraping Proxies w Limit = {self.limit}'
+        log.start(message)
+
         proxies = scrape_proxies(limit=self.limit)
-        self.log.complete(f'Scraped {len(proxies)} Proxies')
+        log.complete(f'Scraped {len(proxies)} Proxies')
 
         await save_proxies(proxies, concurrent=self.concurrent)
 
 
-@BaseProxy.subcommand('collect')
+@ProxyEntryPoint.subcommand('collect')
 class ProxyCollect(BaseProxy):
 
     limit = cli.SwitchAttr("--limit", int, mandatory=True,
         help="Limit the number of proxies to collect.")
     concurrent = cli.Flag("--concurrent", default=False)
 
-    def main(self):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.collect(loop))
-
-    async def collect(self, loop):
+    async def operation(self, loop):
         broker = InstattackProxyBroker(
             self.config['proxies']['broker'],
             limit=self.limit,

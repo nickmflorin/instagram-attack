@@ -6,11 +6,11 @@ from tortoise.exceptions import OperationalError
 
 from instattack import logger
 from instattack import settings
+from instattack.src.generator import password_gen
 from instattack.src.utils import stream_raw_data, read_raw_data
 from instattack.src.users import constants
 
 from .exceptions import UserDirDoesNotExist, UserFileDoesNotExist
-from .generator import password_gen
 
 
 log = logger.get_async('User')
@@ -125,7 +125,7 @@ class User(Model):
                 log_sync.warning(e)
                 self.create_file(filename)
 
-    def streamed_data(self, filename, limit=None):
+    async def stream_data(self, filename, limit=None):
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
@@ -135,7 +135,8 @@ class User(Model):
             log.warning(e)
             filepath = self.create_file(filename)
 
-        return stream_raw_data(filepath, limit=limit)
+        async for item in stream_raw_data(filepath, limit=limit):
+            yield item
 
     def read_data(self, filename, limit=None):
         if filename not in self.FILES:
@@ -152,17 +153,37 @@ class User(Model):
     def get_passwords(self, limit=None):
         return self.read_data(constants.PASSWORDS, limit=limit)
 
+    async def stream_passwords(self, limit=None):
+        async for item in self.stream_data(constants.PASSWORDS, limit=limit):
+            yield item
+
     def get_alterations(self, limit=None):
         return self.read_data(constants.ALTERATIONS, limit=limit)
 
+    async def stream_alterations(self, limit=None):
+        async for item in self.stream_data(constants.ALTERATIONS, limit=limit):
+            yield item
+
     def get_numerics(self, limit=None):
         return self.read_data(constants.NUMERICS, limit=limit)
+
+    async def stream_numerics(self, limit=None):
+        async for item in self.stream_data(constants.NUMERICS, limit=limit):
+            yield item
 
     async def get_attempts(self, limit=None):
         attempts = await UserAttempt.filter(user=self).all()
         if limit:
             attempts = attempts[:limit]
         return attempts
+
+    async def stream_attempts(self, limit=None):
+        count = 0
+        async for attempt in UserAttempt.filter(user=self).all():
+            if limit and count == limit:
+                break
+            yield attempt
+            count += 1
 
     async def create_or_update_attempt(self, attempt, success=False, try_attempt=0):
 
@@ -202,7 +223,7 @@ class User(Model):
                     raise
                 log.critical(f'Unable to Successfully Save Attempt {attempt}.')
 
-    async def generate_attempts(self, loop, limit=None):
+    async def get_new_attempts(self, loop, limit=None):
         """
         For now, just returning current passwords for testing, but we will
         eventually want to generate alterations and compare to existing
@@ -211,7 +232,28 @@ class User(Model):
         current_attempts = await self.get_attempts()
         current_attempts = [attempt.password for attempt in current_attempts]
 
-        generator = password_gen(loop, self, current_attempts, limit=limit)
+        generated = []
+        generator = password_gen(self, current_attempts, limit=limit)
+        for item in generator():
+            generated.append(item)
+
+        if len(generator.duplicates) != 0:
+            log_sync.warning(
+                f'There Were {len(generator.duplicates)} '
+                'Duplicates Removed from Generated Passwords')
+
+        return generated
+
+    async def stream_new_attempts(self, loop, limit=None):
+        """
+        For now, just returning current passwords for testing, but we will
+        eventually want to generate alterations and compare to existing
+        password attempts.
+        """
+        current_attempts = await self.get_attempts()
+        current_attempts = [attempt.password for attempt in current_attempts]
+
+        generator = password_gen(self, current_attempts, limit=limit)
         for item in generator():
             yield item
 

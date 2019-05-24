@@ -38,24 +38,25 @@ class BaseApplication(cli.Application):
     Used so that we can easily extend Instattack without having to worry about
     overriding the main method.
     """
-    log = logger.get_sync('Application')
-    _config = None
 
-    @property
     def config(self):
-        if not self._config:
-            self._config = Configuration.load()
-        return self._config
+        return Configuration.load()
 
-    async def get_user(self, username):
-        try:
-            user = await User.get(username=username)
-        except tortoise.exceptions.DoesNotExist:
-            self.log.error(f'User {username} does not exist.')
-            return None
-        else:
-            user.setup()
-            return user
+    def get_user(self, loop, username):
+
+        async def _get_user(username):
+            log = logger.get_async(__name__, subname='get_user')
+
+            try:
+                user = await User.get(username=username)
+            except tortoise.exceptions.DoesNotExist:
+                await log.error(f'User {username} does not exist.')
+                return None
+            else:
+                user.setup()
+                return user
+
+        return loop.run_until_complete(_get_user(username))
 
     async def check_if_user_exists(self, username):
         try:
@@ -94,23 +95,25 @@ class TestLogin(BaseApplication):
         log = logger.get_sync(__name__, subname='main')
 
         # Default Collect to False
-        self.config
-        self._config.update({'proxies': {'pool': {'collect': self.collect}}})
+        config = self.config()
+        config.update({'proxies': {'pool': {'collect': self.collect}}})
 
         loop = asyncio.get_event_loop()
 
-        user = loop.run_until_complete(self.get_user(username))
+        user = self.get_user(loop, username)
         if not user:
             return
 
-        result = loop.run_until_complete(self.test_login(loop, user, password))
+        result = loop.run_until_complete(self.test_login(
+            loop, user, password, config
+        ))
         log.complete(str(result))
         return 1
 
-    async def test_login(self, loop, user, password):
+    async def test_login(self, loop, user, password, config):
         log = logger.get_async(__name__, subname='test_login')
 
-        proxy_handler, password_handler = post_handlers(user, self.config)
+        proxy_handler, password_handler = post_handlers(user, config)
 
         results = await asyncio.gather(
             password_handler.attempt_single_login(loop, password),
@@ -132,9 +135,11 @@ class BaseAttack(BaseApplication):
 
     # Overrides Password Limit Set in Configuration File
     limit = cli.SwitchAttr("--limit", int, mandatory=False,
-        help="Limit the number of proxies to collect.")
+        help="Limit the number of passwords to perform the attack with.")
 
-    collect = cli.Flag("--collect", default=False)
+    # Overrides Collect Flag Set in Configuration File
+    collect = cli.Flag("--collect", default=False,
+        help="Enable simultaneous proxy collection with Proxy Broker package.")
 
     def main(self, username):
         """
@@ -151,38 +156,44 @@ class BaseAttack(BaseApplication):
         log = logger.get_sync(__name__, subname='main')
 
         # Default Collect to False
-        self.config
-        self._config.update({'proxies': {'pool': {'collect': self.collect}}})
+        config = self.config()
+        config.update({'proxies': {'pool': {'collect': self.collect}}})
+
+        # Override Password Limit if Set
         if self.limit:
-            self._config.update({'login': {'limit': self.limit}})
+            config.update({'login': {'limit': self.limit}})
 
         loop = asyncio.get_event_loop()
 
-        user = loop.run_until_complete(self.get_user(username))
+        user = self.get_user(loop, username)
         if not user:
             return
 
         # Result will only return if it is authorized.
-        results = loop.run_until_complete(self.attack(loop, user))
+        results = self.attack(loop, user, config)
         if results.has_authenticated:
             log.success(f'Authenticated User!', extra={
                 'password': results.authenticated_result.context.password
             })
         return 1
 
-    async def attack(self, loop, user):
-        log = logger.get_async(__name__, subname='test_login')
+    def attack(self, loop, user, config):
 
-        proxy_handler, password_handler = post_handlers(user, self.config)
+        async def _attack(loop, user, config):
+            log = logger.get_async(__name__, subname='test_login')
 
-        results = await asyncio.gather(
-            password_handler.run(loop),
-            proxy_handler.run(loop),
-        )
+            proxy_handler, password_handler = post_handlers(user, config)
 
-        # We might not need to stop proxy handler.
-        await log.debug('Stopping Proxy Handler...')
-        await proxy_handler.stop(loop)
+            results = await asyncio.gather(
+                password_handler.run(loop),
+                proxy_handler.run(loop),
+            )
 
-        await log.debug('Returning Result')
-        return results[0]
+            # We might not need to stop proxy handler.
+            await log.debug('Stopping Proxy Handler...')
+            await proxy_handler.stop(loop)
+
+            await log.debug('Returning Result')
+            return results[0]
+
+        return loop.run_until_complete(_attack(loop, user, config))

@@ -30,21 +30,18 @@ class SyncCustomLevelMixin(object):
         if self.isEnabledFor(LoggingLevels.COMPLETE.num):
             self._log(LoggingLevels.COMPLETE.num, msg, args, **kwargs)
 
-    def simple(self, msg, color=None, extra=None, *args, **kwargs):
-        extra = extra or {}
-        extra.update({
+    def simple(self, msg, color=None, *args, **kwargs):
+        kwargs.setdefault('extra', {})
+        kwargs['extra'].update({
             'color': color,
             'simple': True,
         })
-        self._log(LoggingLevels.INFO.num, msg, args, extra=extra, **kwargs)
+        self._log(LoggingLevels.INFO.num, msg, args, **kwargs)
 
-    def bare(self, msg, color='darkgray', extra=None, *args, **kwargs):
-        extra = extra or {}
-        extra.update({
-            'color': color,
-            'bare': True,
-        })
-        self._log(LoggingLevels.INFO.num, msg, args, extra=extra, **kwargs)
+    def bare(self, msg, color='darkgray', *args, **kwargs):
+        kwargs.setdefault('extra', {})
+        kwargs['extra'].update({'color': color, 'bare': True})
+        self._log(LoggingLevels.INFO.num, msg, args, **kwargs)
 
     @contextlib.contextmanager
     def logging_lines(self):
@@ -92,6 +89,43 @@ class AsyncCustomLevelMixin(SyncCustomLevelMixin):
 
     def complete(self, msg, *args, **kwargs):
         return self._make_log_task(LoggingLevels.COMPLETE.num, msg, args, **kwargs)
+
+    def bare(self, msg, color='darkgray', *args, **kwargs):
+        kwargs.setdefault('extra', {})
+        kwargs['extra'].update({'color': color, 'bare': True})
+        return self._make_log_task(LoggingLevels.INFO.num, msg, args, **kwargs)
+
+    @contextlib.asynccontextmanager
+    async def logging_lines(self):
+        try:
+            await self.before_lines()
+            yield self
+        finally:
+            await self.after_lines()
+
+    async def before_lines(self):
+        # TODO: Make Header Log Component
+        sys.stdout.write('\n')
+        self.line_index = 0
+        sys.stdout.write('\n')
+
+    async def after_lines(self):
+        # TODO: Make Header Log Component
+        sys.stdout.write('\n')
+        self.line_index = 0
+        sys.stdout.write('\n')
+
+    async def line(self, item, color='darkgray', numbered=True):
+        extra = {}
+        if numbered:
+            extra = {'line_index': self.line_index + 1}
+            self.line_index += 1
+        self.bare(item, color=color, extra=extra)
+
+    async def line_by_line(self, lines, color='darkgray', numbered=True):
+        async with self.logging_lines():
+            for line in lines:
+                await self.line(line, color=color, numbered=numbered)
 
 
 class LoggerMixin(object):

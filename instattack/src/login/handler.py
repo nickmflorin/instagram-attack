@@ -6,7 +6,7 @@ import aiojobs
 import collections
 
 from instattack import logger
-from instattack.src.utils import percentage
+from instattack.utils import percentage
 
 from .models import LoginAttemptContext, LoginContext, InstagramResults
 from .exceptions import NoPasswordsError
@@ -88,13 +88,13 @@ class LoginHandler(RequestHandler):
     async def prepopulate(self, loop):
         log = logger.get_async(self.__name__, subname='prepopulate')
 
+        message = f'Generating All Attempts for User {self.user.username}.'
         if self.limit:
-            log.start(f'Generating {self.limit} Attempts for User {self.user.username}.')
-        else:
-            log.start(f'Generating All Attempts for User {self.user.username}.')
+            message = f'Generating {self.limit} Attempts for User {self.user.username}.'
+        log.start(message)
 
         futures = []
-        async for password in self.user.generate_attempts(loop, limit=self.limit):
+        async for password in self.user.stream_new_attempts(loop, limit=self.limit):
             futures.append(self.passwords.put(password))
 
         await asyncio.gather(*futures)
@@ -234,12 +234,15 @@ class LoginHandler(RequestHandler):
 
         log.start(f'Atempting Login with {context.password}')
 
-        result = await limit_on_success(
+        result, num_tries = await limit_on_success(
             login_attempt_task_generator(),
             self.attempt_batch_size
         )
 
-        log.complete(f'Done Attempting Login with {context.password}', extra={
-            'other': result
-        })
+        log.complete(
+            f'Done Attempting Login with {context.password} '
+            f'After {num_tries} Attempt(s)',
+            extra={
+                'other': result
+            })
         return result

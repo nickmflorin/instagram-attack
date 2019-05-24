@@ -50,10 +50,13 @@ async def limit_on_success(coros, batch_size, max_tries=None):
             futures.append(asyncio.create_task(c))
 
     attempts = batch_size
+    num_tries = 0
+
     while len(futures) > 0:
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
         for f in futures:
             if f.done():
+                num_tries += 1
                 if f.exception():
                     raise f.exception()
                 else:
@@ -61,7 +64,7 @@ async def limit_on_success(coros, batch_size, max_tries=None):
                     # to be cancelled and return the result.
                     if f.result():
                         asyncio.create_task(cancel_remaining_tasks(futures=futures))
-                        return f.result()
+                        return f.result(), num_tries
                     else:
                         futures.remove(f)
                         if not max_tries or attempts < max_tries:

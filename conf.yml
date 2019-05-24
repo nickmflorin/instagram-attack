@@ -2,13 +2,13 @@ silent_shutdown: False
 
 login:
     # limit: 10
-    batch_size: 10
+    batch_size: 20
     log: True
     remove_proxy_on_error: True
 
     attempts:
         log: True
-        batch_size: 5
+        batch_size: 15
 
     connection:
         limit_per_host: 0
