@@ -1,46 +1,51 @@
 from argparse import ArgumentTypeError
 from plumbum.path import LocalPath, Path
 
-
-def get_root():
-    from .settings import APP_NAME
-    parents = LocalPath(__file__).parents
-    return [p for p in parents if p.name == APP_NAME][0].parent
-
-
-def get_app_root():
-    from .settings import APP_NAME
-    root = get_root()
-    return root / APP_NAME
+from instattack import settings
 
 
 def get_app_stack_at(stack, step=1):
-    root = dir_str(get_app_root())
-    frames = [frame for frame in stack if frame.filename.startswith(root)]
+    frames = [
+        frame for frame in stack
+        if frame.filename.startswith(settings.APP_ROOT)
+    ]
     return frames[step]
 
 
 def relative_to_root(path):
-    from .settings import APP_NAME
+
     if not isinstance(path, LocalPath):
         path = LocalPath(path)
 
     # This only happens for the test.py file...  We should remove this conditional
     # when we do not need that functionality anymore.
-    if APP_NAME in path.parts:
-        ind = path.parts.index(APP_NAME)
+    if settings.APP_NAME in path.parts:
+        ind = path.parts.index(settings.APP_NAME)
         parts = path.parts[ind:]
         path = LocalPath(*parts)
 
-    return dir_str(path)
-
-
-def dir_str(path):
-    return "%s/%s" % (path.dirname, path.name)
+    return settings.DIR_STR(path)
 
 
 def percentage(num1, num2):
     return f"{'{0:.2f}'.format((num1 / num2 * 100))} %"
+
+
+def task_is_third_party(task):
+    """
+    Need to find a more sustainable way of doing this, this makes
+    sure that we are not raising exceptions for external tasks.
+    """
+    directory = get_task_path(task)
+    return not directory.startswith(settings.APP_ROOT)
+
+
+def get_coro_path(coro):
+    return coro.cr_code.co_filename
+
+
+def get_task_path(task):
+    return get_coro_path(task._coro)
 
 
 def is_numeric(value):
@@ -89,8 +94,6 @@ def validate_config_filepath(value):
     We might not need all of the validations for each case, maybe just the
     last two.
     """
-    from .settings import ROOT_DIR
-
     def _validate_path(path):
         if not path.dirname.exists():
             raise ArgumentTypeError(f'The path {value} does not exist.')
@@ -109,9 +112,9 @@ def validate_config_filepath(value):
 
         if not path.exists():
             raise ArgumentTypeError(f'The path {value} does not exist.')
-        return dir_str(path)
+        return settings.DIR_STR(path)
 
-    root_path = ROOT_DIR / Path(value)
+    root_path = settings.GET_ROOT() / Path(value)
     try:
         return _validate_path(root_path)
     except ArgumentTypeError:

@@ -50,7 +50,20 @@ class ProxyBrokerMixin(object):
             return all_proxies[0]
 
     @classmethod
-    async def from_proxybroker(cls, broker_proxy):
+    def translate_proxybroker_errors(cls, broker_proxy):
+        log = logger.get_sync(__name__, subname='translate_proxybroker_errors')
+
+        errors = {}
+        for err, count in broker_proxy.stat['errors'].__dict__.items():
+            if err in settings.PROXY_BROKER_ERROR_TRANSLATION:
+                errors[translation[err]] = count
+            else:
+                log.warning(f'Unexpected Proxy Broker Error: {err}.')
+                errors[err] = count
+        return errors
+
+    @classmethod
+    async def update_or_create_from_proxybroker(cls, broker_proxy, save=False):
         """
         Finds the possibly related Proxy instance for a proxybroker Proxy instance
         and updates it with relevant info from the proxybroker instance if
@@ -68,22 +81,28 @@ class ProxyBrokerMixin(object):
 
         proxy = await cls.find_for_proxybroker(broker_proxy)
         if proxy:
+            errors = cls.translate_proxybroker_errors(broker_proxy)
+            proxy.include_errors(errors)
+            proxy.num_requests += broker_proxy.stat['requests']
+
             # Only do this for as long as we are not measuring this value ourselves.
+            # When we start measuring ourselves, we are not going to want to
+            # overwrite it.
             proxy.avg_resp_time = broker_proxy.avg_resp_time
-            return proxy
+            if save:
+                await proxy.save()
+            return proxy, False
         else:
             proxy = Proxy(
                 host=broker_proxy.host,
                 port=broker_proxy.port,
                 avg_resp_time=broker_proxy.avg_resp_time,
+                errors=cls.translate_proxybroker_errors(broker_proxy),
+                num_requests=broker_proxy.stat['requests'],
             )
-            return proxy
-
-    @classmethod
-    async def create_from_proxybroker(cls, broker_proxy):
-        proxy = await cls.from_proxybroker(broker_proxy)
-        await proxy.save()
-        return proxy
+            if save:
+                await proxy.save()
+            return proxy, True
 
 
 class ProxyModelMixin(ModelMixin):
@@ -174,17 +193,15 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
 
     # Invalid means that the last request this was used for resulted in a
     # fatal error.
-    invalid = fields.BooleanField(default=False)
+    # invalid = fields.BooleanField(default=False)
 
     # Confirmed means that the last request this was used for did not result in
     # an error that would cause it to be invalid, but instead resulted in a
     # a result or in an error that does not rule out the validity of the proxy.
-    confirmed = fields.BooleanField(default=False)
+    # confirmed = fields.BooleanField(default=False)
 
     errors = fields.JSONField(default={})
-    num_successful_requests = fields.IntField(default=0)
-    num_failed_requests = fields.IntField(default=0)
-    num_active_requests = fields.IntField(default=0)
+    num_requests = fields.IntField(default=0)
 
     # Used to determine if the proxy is fundamentally different in database.
     priority_fields = (
@@ -259,6 +276,13 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
             return True
         return False
 
+    def include_errors(self, errors):
+        for key, val in errors.items():
+            if key in self.errors:
+                self.errors[key] += val
+            else:
+                self.errors[key] = val
+
     def different_from(self, other):
         if any([
             other.priority_values[i] != self.priority_values[i]
@@ -328,13 +352,8 @@ class Proxy(Model, ProxyModelMixin, ProxyBrokerMixin):
         await self.save()
 
     async def save(self, *args, **kwargs):
-        if self.confirmed and self.invalid:
-            raise tortoise.exceptions.IntegrityError(
-                f"Proxy cannot be both confirmed and invalid.")
-
         if not self.errors:
             self.errors = {}
-
         await super(Proxy, self).save(*args, **kwargs)
 
 

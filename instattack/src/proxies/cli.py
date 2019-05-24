@@ -21,7 +21,7 @@ class BaseProxy(BaseApplication):
 
     def main(self):
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.operation())
+        loop.run_until_complete(self.operation(loop))
 
 
 @ProxyEntryPoint.subcommand('clean')
@@ -48,7 +48,7 @@ class ProxyScrape(BaseProxy):
         help="Limit the number of proxies to collect.")
     concurrent = cli.Flag("--concurrent", default=False)
 
-    async def operation(self):
+    async def operation(self, loop):
         log = logger.get_sync(__name__, subname='operation')
 
         message = 'Scraping Proxies...'
@@ -70,10 +70,24 @@ class ProxyCollect(BaseProxy):
     concurrent = cli.Flag("--concurrent", default=False)
 
     async def operation(self, loop):
+        log = logger.get_async(__name__, subname='operation')
+
+        config = self.config()
         broker = InstattackProxyBroker(
-            self.config['proxies']['broker'],
+            config['proxies']['broker'],
             limit=self.limit,
         )
 
         async with broker.session(loop):
-            await save_proxies(broker.collect(), concurrent=self.concurrent)
+            updated = []
+            created = []
+            async for proxy, was_created in broker.collect(loop, save=False):
+                if was_created:
+                    created.append(proxy)
+                else:
+                    updated.append(proxy)
+
+        await log.success(f'Collected {len(created)} New Proxies')
+        await log.success(f'Updated {len(updated)} Collected Proxies')
+
+        # await save_proxies(broker.collect(), concurrent=self.concurrent)

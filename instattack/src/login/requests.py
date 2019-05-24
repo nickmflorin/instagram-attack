@@ -281,13 +281,21 @@ class RequestHandler(Handler):
                     })
                     await asyncio.sleep(3.0)
                 elif e.errno == 61:
+
+                    # We might want to stop removing proxies and just severely limit
+                    # the priority of connection error based proxies.
                     await self.handle_fatal_proxy(e, context.proxy, scheduler)
                 else:
                     # We would sometimes raise here to try to pickup on unnoticed exceptions.
                     # We need to output though to get errno's and refine our request
                     # exception handling.
+
+                    # We might want to stop removing proxies and just severely limit
+                    # the priority of connection error based proxies.
                     await self.handle_fatal_proxy(e, context.proxy, scheduler)
             else:
+                # We might want to stop removing proxies and just severely limit
+                # the priority of connection error based proxies.
                 await self.handle_fatal_proxy(e, context.proxy, scheduler)
 
     async def login_request(self, loop, session, context, scheduler):

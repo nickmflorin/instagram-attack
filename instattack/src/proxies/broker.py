@@ -4,6 +4,7 @@ from proxybroker import Broker
 
 from instattack import logger
 from instattack import settings
+from instattack.src.utils import cancel_remaining_tasks
 from instattack.src.base import HandlerMixin
 
 from .models import Proxy
@@ -47,7 +48,7 @@ class InstattackProxyBroker(Broker, HandlerMixin):
             yield self
         finally:
             log.debug('Stopping Proxy Broker Session')
-            self.stop(loop)
+            await self.shutdown(loop)
 
     async def start(self, loop):
         log = logger.get_async(self.__name__, subname='start')
@@ -65,7 +66,7 @@ class InstattackProxyBroker(Broker, HandlerMixin):
         log.complete('Broker Successfully Started')
         self.personal_start_event.set()
 
-    async def collect(self):
+    async def collect(self, loop, save=False):
         if not self._started:
             raise RuntimeError('Cannot collect proxies without starting broker.')
 
@@ -73,18 +74,48 @@ class InstattackProxyBroker(Broker, HandlerMixin):
         await self.personal_start_event.wait()
         log.start('Starting Proxy Collection')
 
-        while True:
-            proxy = await self._proxies.get()
-            if proxy:
-                # Do not save instances now, we are saving in the pool as they
-                # are pulled out of the queue.
-                proxy = await Proxy.from_proxybroker(proxy)
-                if self.log_proxies:
-                    log.debug('Broker Returned Proxy', {'proxy': proxy})
-                yield proxy
-            else:
-                log.warning('Null Proxy Returned from Broker... Stopping')
-                break
+        async with self.session(loop) as broker:
+            while True:
+                proxy = await broker._proxies.get()
+                if proxy:
+                    proxy, created = await Proxy.update_or_create_from_proxybroker(
+                        proxy,
+                        save=False
+                    )
+
+                    # TODO: Eventually maybe spawn off into scheduler, although
+                    # scheduler is acting weirdly now and swallowing exceptions.
+                    if save:
+                        await proxy.save()
+                    yield proxy, created
+                else:
+                    log.warning('Null Proxy Returned from Broker... Stopping')
+                    break
+
+    async def shutdown(self, loop):
+        """
+        Cannot override stop() method, because stop() method must remain synchronous
+        since ProxyBroker package attaches signal handlers to it.
+        """
+        log = logger.get_async(self.__name__, subname='shutdown')
+        log.stop('Shutting Down Proxy Broker')
+
+        self._proxies.put_nowait(None)
+
+        # I think this is throwing an error because ProxyBroker is also stopping
+        # it on their own terms.
+        if not self._stopped:
+            self.stop(loop)
+            self._stopped = True
+
+        # If we do not do this here, these tasks can raise exceptions in our
+        # shutdown method.
+        log.debug('Cancelling Proxy Broker Tasks')
+        await cancel_remaining_tasks(
+            futures=self._all_tasks,
+            silence_exceptions=True,
+            log_exceptions=False,
+        )
 
     def stop(self, loop):
         """
@@ -96,14 +127,8 @@ class InstattackProxyBroker(Broker, HandlerMixin):
         We still use the logic in the original Proxy Broker stop method so we do
         not need to call super().
         """
-        log = logger.get_async(self.__name__, subname='stop')
-        log.stop('Stopping')
-
         if self._stopped:
             raise RuntimeError('Proxy Broker Already Stopped')
-
-        self._stopped = True
-        self._proxies.put_nowait(None)
 
         # We tried doing this in this manner so that all of the connections/tasks
         # will be closed for the broker when stop() is completed, so they are

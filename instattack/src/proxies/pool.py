@@ -79,32 +79,29 @@ class InstattackProxyPool(ProxyPriorityQueue, HandlerMixin):
         We should maybe make this more dynamic, and add proxies from the broker
         when the pool drops below the limit.
         """
+        log = logger.get_async(self.__name__, subname='collect')
+        log.start('Collecting Proxies')
+
+        scheduler = await aiojobs.create_scheduler(limit=None)
+
+        count = 0
+        collect_limit = 10000
+
         # collect_limit = max(self._maxsize - self.qsize(), 0)
         # if collect_limit == 0:
         #     self.issue_start_event('No Proxies to Collect')
         #     return
 
-        # self.log_async.debug(f'Number of Proxies to Collect: {collect_limit}.')
-
-        log = logger.get_async(self.__name__, subname='collect')
-        log.start('Collecting Proxies')
-
-        added = []
-        scheduler = await aiojobs.create_scheduler(limit=None)
-
-        # while len(added) < collect_limit:
-        async for proxy in self.broker.collect():
-
-            # [!] Will suppress any errors of duplicate attempts
-            await scheduler.spawn(proxy.save())
-
+        async for proxy, created in self.broker.collect(loop, save=True, scheduler=scheduler):
             added_proxy = await self.put(proxy, source='Broker')
             if added_proxy:
-                added.append(added_proxy)
-
                 # Set Start Event on First Proxy Retrieved from Broker
                 if self.start_event and not self.start_event.is_set():
                     self.start_event.set()
                     log.info('Setting Start Event', extra={
                         'other': 'Broker Started Sending Proxies'
                     })
+
+            if collect_limit and count == collect_limit:
+                break
+            count += 1

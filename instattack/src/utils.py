@@ -2,6 +2,11 @@ import aiofiles
 import asyncio
 from weakref import WeakKeyDictionary
 
+from instattack import logger
+from instattack import settings
+from instattack.utils import task_is_third_party
+
+
 
 async def coro_exc_wrapper(coro, loop):
     try:
@@ -15,25 +20,36 @@ def get_remaining_tasks():
     return list(tasks)
 
 
-async def cancel_remaining_tasks(futures=None):
+async def cancel_remaining_tasks(futures=None, silence_exceptions=False, log_exceptions=None):
+    log = logger.get_async(__name__, subname='cancel_remaining_tasks')
+
+    if log_exceptions is None:
+        log_exceptions = not silence_exceptions
+
     if not futures:
+        log.debug('Collecting Default Tasks')
         futures = asyncio.Task.all_tasks()
+        futures = [task for task in futures if task is not
+            asyncio.tasks.Task.current_task()]
 
     def cancel_task(task):
         if not task.cancelled():
             if task.done():
                 if task.exception():
-                    raise task.exception()
+                    # Need to find a more sustainable way of doing this, this makes
+                    # sure that we are not raising exceptions for external tasks.
+                    if not task_is_third_party(task):
+                        if not silence_exceptions:
+                            raise task.exception()
+                        elif log_exceptions:
+                            log.warning(task.exception())
             else:
+                log.debug(f'Cancelling Task {task}')
                 task.cancel()
 
-    tasks = [task for task in futures if task is not
-         asyncio.tasks.Task.current_task()]
-
-    list(map(cancel_task, tasks))
-
-    await asyncio.gather(*tasks, return_exceptions=True)
-    return tasks
+    list(map(cancel_task, futures))
+    await asyncio.gather(*futures, return_exceptions=True)
+    return futures
 
 
 def join(val, *gens):

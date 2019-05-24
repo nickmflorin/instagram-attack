@@ -58,13 +58,13 @@ class ProxyHandler(Handler):
                 raise e
 
         if self.pool.should_collect:
-            async with self.broker.session(loop):
-                await self.pool.collect(loop)
+            await self.pool.collect(loop)
         else:
             log.debug('Not Collecting Proxies...')
 
             if self.start_event.is_set():
                 raise RuntimeError('Start Event Already Set')
+
             self.start_event.set()
             log.info('Setting Start Event', extra={
                 'other': 'Pool Prepopulated'

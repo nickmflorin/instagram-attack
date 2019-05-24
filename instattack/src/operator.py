@@ -12,9 +12,10 @@ import tortoise
 # Need to figure out how to delay import of this module totally until LEVEL set
 # in os.environ, or finding a better way of setting LEVEL with CLI.
 from instattack import logger
+from instattack import settings
+
 from instattack.config import Configuration
-from instattack.settings import USER_DIR, DB_CONFIG
-from instattack.utils import dir_str, get_app_root, get_app_stack_at
+from instattack.utils import get_app_stack_at
 
 from .utils import cancel_remaining_tasks, get_remaining_tasks
 from .exceptions import ArgumentError
@@ -175,13 +176,13 @@ class operator(shutdown_mixin):
 
     def setup_directories(self, loop):
         self.remove_pycache_files(loop)
-        if not USER_DIR.exists():
-            USER_DIR.mkdir()
+        directory = settings.GET_USER_ROOT()
+        if not directory.exists():
+            directory.mkdir()
 
     def remove_pycache_files(self, loop):
-        root = get_app_root()
-        [p.unlink() for p in pathlib.Path(dir_str(root)).rglob('*.py[co]')]
-        [p.rmdir() for p in pathlib.Path(dir_str(root)).rglob('__pycache__')]
+        [p.unlink() for p in pathlib.Path(settings.APP_ROOT).rglob('*.py[co]')]
+        [p.rmdir() for p in pathlib.Path(settings.APP_ROOT).rglob('__pycache__')]
 
     def setup_logger(self, loop):
         from instattack.logger import disable_external_loggers
@@ -195,7 +196,7 @@ class operator(shutdown_mixin):
         )
 
     async def setup_database(self, loop):
-        await tortoise.Tortoise.init(config=DB_CONFIG)
+        await tortoise.Tortoise.init(config=settings.DB_CONFIG)
         await tortoise.Tortoise.generate_schemas()
 
     def handle_exception(self, loop, context):
@@ -217,8 +218,6 @@ class operator(shutdown_mixin):
         stack = inspect.stack()
         frame = get_app_stack_at(stack, step=1)
 
-        tb = context['tb']
-        import ipdb; ipdb.set_trace()
         # The only benefit including the frame has is that the filename
         # will not be in the logger, it will be in the last place before the
         # logger and this statement.
