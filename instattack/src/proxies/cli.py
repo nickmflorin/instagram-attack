@@ -88,8 +88,10 @@ class ProxyCollect(BaseProxy):
                 else:
                     updated.append(proxy)
 
-        await log.complete(f'Creating {len(created)} New Proxies')
+        await log.complete(f'Creating {len(created)} Proxies')
         await save_proxies(created, concurrent=self.concurrent)
+        await log.success(f'Created {len(created)} Proxies')
 
-        await log.success(f'Saving {len(updated)} Updated Proxies')
+        await log.complete(f'Updating {len(updated)} Proxies')
         await save_proxies(updated, concurrent=self.concurrent)
+        await log.success(f'Updated {len(updated)} Proxies')
