@@ -5,10 +5,12 @@ from plumbum import cli
 import tortoise
 
 from instattack import logger
-from instattack.config import Configuration
-from instattack.src.users import User
-from instattack.src.login import LoginHandler
-from instattack.src.proxies import ProxyHandler
+
+from .exceptions import ArgumentError
+from .config import Configuration
+from .users.models import User
+from .login.handler import LoginHandler
+from .proxies.handler import ProxyHandler
 
 
 def post_handlers(user, config):
@@ -67,6 +69,27 @@ class BaseApplication(cli.Application):
             return user
 
 
+class SelectOperatorApplication(BaseApplication):
+
+    def main(self, *args):
+        loop = asyncio.get_event_loop()
+        operator = self.get_operator(*args)
+        loop.run_until_complete(operator(loop))
+        return 1
+
+    def get_operator(self, *args):
+        if len(args) == 0:
+            if not hasattr(self, 'operation'):
+                raise ArgumentError('Missing positional argument.')
+            return self.operation
+        else:
+            method_name = args[0]
+            if not hasattr(self, method_name):
+                raise ArgumentError('Invalid positional argument.')
+
+            return getattr(self, method_name)
+
+
 class EntryPoint(BaseApplication):
 
     def main(self, *args):
@@ -85,9 +108,9 @@ class EntryPoint(BaseApplication):
 
 
 @EntryPoint.subcommand('login')
-class TestLogin(BaseApplication):
+class Login(BaseApplication):
 
-    __name__ = 'Test Login'
+    __name__ = 'Login'
 
     collect = cli.Flag("--collect", default=False)
 
@@ -129,7 +152,7 @@ class TestLogin(BaseApplication):
 
 
 @EntryPoint.subcommand('attack')
-class BaseAttack(BaseApplication):
+class Attack(BaseApplication):
 
     __name__ = 'Run Attack'
 

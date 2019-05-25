@@ -12,13 +12,13 @@ import tortoise
 # Need to figure out how to delay import of this module totally until LEVEL set
 # in os.environ, or finding a better way of setting LEVEL with CLI.
 from instattack import logger
-from instattack.logger import AsyncLogger
 from instattack import settings
 
-from instattack.config import Configuration
-from instattack.utils import get_app_stack_at, task_is_third_party
+from instattack.src.config import Configuration
+from instattack.src.utils import (
+    get_app_stack_at, task_is_third_party, cancel_remaining_tasks,
+    get_remaining_tasks)
 
-from .utils import cancel_remaining_tasks, get_remaining_tasks
 from .exceptions import ArgumentError
 from .cli import EntryPoint
 
@@ -31,12 +31,10 @@ SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 # You can log all uncaught exceptions on the main thread by assigning a handler
 # to sys.excepthook.
-def exception_hook(exc_type, exc_value, exc_traceback):
-    log = logger.get_sync(__name__)
-    log.traceback(exc_type, exc_value, exc_traceback)
-
-
-sys.excepthook = exception_hook
+# def exception_hook(exc_type, exc_value, exc_traceback):
+#     log = logger.get_sync(__name__)
+#     log.traceback(exc_type, exc_value, exc_traceback)
+# sys.excepthook = exception_hook
 
 
 class shutdown_mixin(object):
@@ -70,12 +68,6 @@ class shutdown_mixin(object):
 
         log.start('Starting Shut Down')
         loop.run_until_complete(self.shutdown_async(loop))
-        # loop.run_until_complete(asyncio.gather(
-        #     self.shutdown_async_loggers(loop),
-        #     self.shutdown_database(loop)
-        # ))
-        # loop.run_until_complete(self.shutdown_outstanding_tasks(loop))
-
         loop.stop()
         log.complete('Shutdown Complete')
 
@@ -113,6 +105,7 @@ class shutdown_mixin(object):
             log.complete('No Leftover Tasks to Cancel')
 
     async def shutdown_async_loggers(self, loop):
+        from instattack.logger import AsyncLogger
 
         log = logger.get_async(__name__, subname='shutdown_async_loggers')
 
@@ -143,6 +136,7 @@ class operator(shutdown_mixin):
         self._shutdown = False
 
     def start(self, loop, *a):
+        from instattack.logger import progressbar_wrap
         log = logger.get_sync(__name__, subname='start')
 
         self.setup(loop)
@@ -154,18 +148,18 @@ class operator(shutdown_mixin):
         # application directly, instead of storing as ENV variable.
         self.config.set()
 
-        # with progressbar_wrap():
-        try:
-            EntryPoint.run(argv=cli_args)
-        except (ArgumentTypeError, ArgumentError) as e:
-            log.error(e)
-        finally:
-            # Using finally here instead of else might cause race conditions with
-            # shutdown, but we issue a warning if the shutdown was already performed.
-            # If we don't use finally, than we cannot stop the program.
-            if not self._shutdown:
-                log.debug('Shutting Down in Start Method')
-                self.shutdown(loop)
+        with progressbar_wrap():
+            try:
+                EntryPoint.run(argv=cli_args)
+            except (ArgumentTypeError, ArgumentError) as e:
+                log.error(e)
+            finally:
+                # Using finally here instead of else might cause race conditions with
+                # shutdown, but we issue a warning if the shutdown was already performed.
+                # If we don't use finally, than we cannot stop the program.
+                if not self._shutdown:
+                    log.debug('Shutting Down in Start Method')
+                    self.shutdown(loop)
 
     def setup(self, loop):
         self.setup_directories(loop)
@@ -180,13 +174,12 @@ class operator(shutdown_mixin):
 
     def setup_directories(self, loop):
         self.remove_pycache_files(loop)
-        directory = settings.GET_USER_ROOT()
-        if not directory.exists():
-            directory.mkdir()
+        if not settings.USER_PATH.exists():
+            settings.USER_PATH.mkdir()
 
     def remove_pycache_files(self, loop):
-        [p.unlink() for p in pathlib.Path(settings.APP_ROOT).rglob('*.py[co]')]
-        [p.rmdir() for p in pathlib.Path(settings.APP_ROOT).rglob('__pycache__')]
+        [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
+        [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
 
     def setup_logger(self, loop):
         from instattack.logger import disable_external_loggers

@@ -1,8 +1,20 @@
 from datetime import datetime
-from plumbum import colors
+from plumbum import LocalPath, colors
+import os
 
 from .constants import DATE_FORMAT, RecordAttributes
 from .format import Format
+
+
+def is_log_file(path):
+    pt = LocalPath(path)
+    if 'logger' in pt.parts:
+        module_index = pt.parts.index('logger')
+        parts = pt.parts[:module_index + 1]
+        full_path = os.path.join('/', *parts)
+        if path.startswith(full_path):
+            return True
+    return False
 
 
 def get_record_message(record):

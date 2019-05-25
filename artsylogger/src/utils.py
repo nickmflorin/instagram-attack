@@ -12,6 +12,22 @@ def ensure_list(value):
     return value
 
 
+def string_format_tuple(value):
+    """
+    Recursively formats a tuple and nested tuples into string format.
+    """
+    value = list(value)
+    formatted = []
+
+    for item in value:
+        if isinstance(item, tuple):
+            formatted.append(string_format_tuple(item))
+        else:
+            formatted.append("%s" % item)
+
+    return '(' + ', '.join(formatted) + ')'
+
+
 def escape_ansi_string(value):
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
     return ansi_escape.sub('', value)

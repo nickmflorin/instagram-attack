@@ -5,5 +5,5 @@ PROXY_TYPES = ["HTTP"]
 ERROR_RATE_HORIZON = 5
 
 PROXY_BROKER_ERROR_TRANSLATION = {
-    'connection_error': 'connection',
+    'connection_error': 'client_connection',
 }

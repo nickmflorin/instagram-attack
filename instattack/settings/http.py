@@ -32,3 +32,23 @@ def HEADERS(token=None):
     if token:
         headers["X-CSRFToken"] = token
     return headers
+
+
+ERROR_TRANSLATION = {
+    'ClientProxyConnectionError': 'proxy_connection',
+    'ClientConnectorError': 'client_connection',
+    'ServerConnectionError': 'server_connection',
+    'ClientConnectorError': 'client_connection',
+    'ClientConnectorCertificateError': 'ssl',
+    'ClientConnectorSSLError': 'ssl',
+    'ConnectionResetError': 'server_connection',
+    'ConnectionRefusedError': 'server_connection',
+    'SSLError': 'ssl',
+    'ClientResponseError': 'invalid_response',
+}
+
+CONNECTION_ERRORS = (
+    'client_connection',
+    'proxy_connection',
+    'server_connection',
+)

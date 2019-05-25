@@ -7,35 +7,7 @@ from typing import List, Any, Optional
 
 from instattack.logger.constants import LoggingLevels
 from instattack.src.login import constants
-from instattack.src.proxies import Proxy
-from instattack.src.base import TaskContext
-
-
-__all__ = ('LoginContext', 'LoginAttemptContext', 'InstagramResult', )
-
-
-@dataclass
-class LoginContext(TaskContext):
-
-    password: str
-    index: int = 0
-
-    @property
-    def name(self):
-        return f'Login Task'
-
-
-@dataclass
-class LoginAttemptContext(TaskContext):
-
-    password: str
-    proxy: Proxy
-    index: int = 0
-    parent_index: int = 0
-
-    @property
-    def name(self):
-        return f'Login Task {self.parent_index} - Attempt {self.index}'
+from instattack.src.proxies.models import Proxy
 
 
 @dataclass
@@ -54,7 +26,9 @@ class InstagramResultErrors:
 @dataclass
 class InstagramResult:
 
-    context: LoginAttemptContext
+    proxy: Proxy
+    password: str
+
     status: str = None
     user: Optional[bool] = None
     authenticated: Optional[bool] = None
@@ -76,8 +50,9 @@ class InstagramResult:
             return LoggingLevels.DEBUG.format(string_rep)
 
     @classmethod
-    def from_dict(cls, data, context):
-        data['context'] = context
+    def from_dict(cls, data, proxy=None, password=None):
+        data['password'] = password
+        data['proxy'] = proxy
         return from_dict(data_class=cls, data=data)
 
     @property

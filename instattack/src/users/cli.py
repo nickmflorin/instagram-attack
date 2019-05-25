@@ -3,7 +3,7 @@ from plumbum import cli
 
 from instattack import logger
 from instattack.src.exceptions import ArgumentError
-from instattack.src.cli import EntryPoint, BaseApplication
+from instattack.src.cli import EntryPoint, BaseApplication, SelectOperatorApplication
 
 from .models import User
 
@@ -13,27 +13,9 @@ class UserEntryPoint(BaseApplication):
     pass
 
 
-class UsersApplication(BaseApplication):
+class UsersApplication(SelectOperatorApplication):
 
     limit = cli.SwitchAttr('--limit', int, default=None)
-
-    def main(self, *args):
-        loop = asyncio.get_event_loop()
-        operator = self.get_operator(*args)
-        loop.run_until_complete(operator(loop))
-        return 1
-
-    def get_operator(self, *args):
-        if len(args) == 0:
-            if not hasattr(self, 'operation'):
-                raise ArgumentError('Missing positional argument.')
-            return self.operation
-        else:
-            method_name = args[0]
-            if not hasattr(self, method_name):
-                raise ArgumentError('Invalid positional argument.')
-
-            return getattr(self, method_name)
 
 
 class SingleUserApplication(UsersApplication):

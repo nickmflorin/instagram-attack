@@ -1,31 +1,29 @@
 from instattack import logger
 from instattack.src.base import Handler
 
-from .broker import InstattackProxyBroker
-from .pool import InstattackProxyPool
+from .broker import ProxyBroker
+from .pool import ProxyPool
 
 
 class ProxyHandler(Handler):
-    """
-    Imports and gives proxies from queue on demand.
-    We might not even need to inherit from the ProxyPool anymore... just the
-    method handler.
-    """
+
     __name__ = "Proxy Handler"
-    REMOVED = '<removed-proxy>'
 
     def __init__(self, config, **kwargs):
+        """
+        [x] TODO:
+        ---------
+        What would be really cool would be if we could pass in our custom pool
+        directly so that the broker popoulated that queue with the proxies.
+        """
         super(ProxyHandler, self).__init__(**kwargs)
 
-        self.broker = InstattackProxyBroker(
+        self.broker = ProxyBroker(
             config['broker'],
             **kwargs
         )
 
-        # !! TODO:
-        # What would be really cool would be if we could pass in our custom pool
-        # directly so that the broker popoulated that queue with the proxies.
-        self.pool = InstattackProxyPool(
+        self.pool = ProxyPool(
             config['pool'],
             self.broker,
             start_event=self.start_event,
@@ -46,6 +44,12 @@ class ProxyHandler(Handler):
 
         Prepopulates proxies if the flag is set to put proxies that we previously
         saved into the pool.
+
+        [x] TODO:
+        ---------
+        We are eventually going to need the relationship between prepopulation
+        and collection to be more dynamic and adjust, and collection to trigger
+        if we are running low on proxies.
         """
         log = logger.get_async(self.__name__, subname='start')
         log.start('Starting')

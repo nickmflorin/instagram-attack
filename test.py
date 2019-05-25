@@ -2,35 +2,38 @@
 import argparse
 import asyncio
 import os
-from plumbum import colors
-
-from instattack.logger.format import Format
-from instattack.config import Configuration
-from instattack.utils import validate_log_level
-from instattack.src import operator
 
 from instattack import logger
+from instattack.src import operator
 
-
-log = logger.get_sync('Test')
-log2 = logger.get_async('Test')
+from instattack.src.config import Configuration
+from instattack.src.utils import validate_log_level
 
 
 async def test(config):
-    import sys
+    log = logger.get_async('Test Logger')
+    queue = asyncio.PriorityQueue()
 
-    def test_raise():
-        raise Exception('Blah')
+    await queue.put(((1, 2), 'First'))
+    await queue.put(((3, 4), 'Third'))
+    await queue.put(((2, 1), 'Second'))
 
-    try:
-        test_raise()
-    except Exception as ex:
-        import inspect
-        stack = inspect.stack()
+    retrieved = await queue.get()
+    await log.success(retrieved)
 
-        log.error('test', extra={
-            'stack': stack
-        })
+    await queue.put(((1, 1), 'New First'))
+    await queue.put(((2, 2), 'New Second'))
+    await queue.put(((6, 1), 'Last'))
+
+    retrieved = await queue.get()
+    print(retrieved)
+
+    retrieved = await queue.get()
+    print(retrieved)
+
+    retrieved = await queue.get()
+    print(retrieved)
+
 
 def main():
     # We have to retrieve the --level at the top level and then use it to set

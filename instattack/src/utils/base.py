@@ -7,7 +7,7 @@ from instattack import settings
 def get_app_stack_at(stack, step=1):
     frames = [
         frame for frame in stack
-        if frame.filename.startswith(settings.APP_ROOT)
+        if frame.filename.startswith(settings.APP_DIR)
     ]
     return frames[step]
 
@@ -31,23 +31,6 @@ def percentage(num1, num2):
     return f"{'{0:.2f}'.format((num1 / num2 * 100))} %"
 
 
-def task_is_third_party(task):
-    """
-    Need to find a more sustainable way of doing this, this makes
-    sure that we are not raising exceptions for external tasks.
-    """
-    directory = get_task_path(task)
-    return not directory.startswith(settings.APP_ROOT)
-
-
-def get_coro_path(coro):
-    return coro.cr_code.co_filename
-
-
-def get_task_path(task):
-    return get_coro_path(task._coro)
-
-
 def is_numeric(value):
     try:
         float(value)
@@ -67,14 +50,34 @@ def is_numeric(value):
             return float(value)
 
 
+def humanize_list(value, callback=str, conjunction='and', oxford_comma=True):
+    """
+    Turns an interable list into a human readable string.
+    >>> list = ['First', 'Second', 'Third', 'fourth']
+    >>> humanize_list(list)
+    u'First, Second, Third, and fourth'
+    >>> humanize_list(list, conjunction='or')
+    u'First, Second, Third, or fourth'
+    """
+
+    num = len(value)
+    if num == 0:
+        return ""
+    elif num == 1:
+        return callback(value[0])
+    s = u", ".join(map(callback, value[:num - 1]))
+    if len(value) >= 3 and oxford_comma is True:
+        s += ","
+    return "%s %s %s" % (s, conjunction, callback(value[num - 1]))
+
+
 def validate_log_level(val):
-    from .settings import LEVELS
     try:
         val = str(val)
     except TypeError:
         raise ArgumentTypeError("Invalid log level.")
     else:
-        if val.upper() not in LEVELS:
+        if val.upper() not in settings.LEVELS:
             raise ArgumentTypeError("Invalid log level.")
         return val.upper()
 

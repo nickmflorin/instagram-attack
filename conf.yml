@@ -23,17 +23,11 @@ proxies:
         collect: True
         log: False
 
-        max_resp_time:
-            value: 4.0
-            strict: False
-
-        max_error_rate:
-            value: 0.5
-            strict: True
-
-        min_req_proxy:
-            value: 6
-            strict: False
+        max_resp_time: 5.0
+        max_connection_errors: 2
+        max_error_rate: 0.5
+        max_req_proxy: 10
+        min_time_between_proxy: 10
 
     broker:
         max_conn: 200

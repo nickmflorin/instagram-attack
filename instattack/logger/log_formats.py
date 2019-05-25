@@ -62,27 +62,7 @@ PRIMARY_LINE = Line(
 CONTEXT_LINES = Lines(
     Line(
         Item(
-            value=['index', 'context.index'],
-            label=Label(
-                constant="Index",
-                delimiter=":",
-                formatter=RecordAttributes.LABEL,
-            )
-        ),
-    ),
-    Line(
-        Item(
-            value=['parent_index', 'context.parent_index'],
-            label=Label(
-                constant="Parent Index",
-                delimiter=":",
-                formatter=RecordAttributes.LABEL,
-            )
-        ),
-    ),
-    Line(
-        Item(
-            value=['password', 'context.password'],
+            value=['password'],
             formatter=RecordAttributes.PASSWORD,  # Override
             label=Label(
                 constant="Password",
@@ -90,14 +70,15 @@ CONTEXT_LINES = Lines(
                 formatter=RecordAttributes.LABEL,
             )
         ),
+        indent=2,
     ),
     Line(
         Item(
-            value=['proxy.method', 'context.proxy.method'],
+            value=['proxy.method'],
             formatter=RecordAttributes.METHOD,
         ),
         Item(
-            value=['proxy.url', 'context.proxy.url'],
+            value=['proxy.url'],
             formatter=RecordAttributes.PROXY,
             wrapper="<%s>"
         ),
@@ -106,48 +87,54 @@ CONTEXT_LINES = Lines(
             delimiter=":",
             formatter=RecordAttributes.LABEL,
         ),
+        indent=2,
     ),
     Line(
         Item(
-            value=['proxy.humanized_state', 'context.proxy.humanized_state'],
+            value=["proxy.error_count"],
             label=Label(
-                constant="State",
+                constant="Num. Errors",
                 delimiter=":",
                 formatter=RecordAttributes.LABEL,
             ),
         ),
+        indent=6,
     ),
     Line(
         Item(
-            value=["proxy.flattened_error_rate", "context.proxy.flattened_error_rate"],
+            value=["proxy.num_connection_errors"],
             label=Label(
-                constant="Error Rate (Flat)",
+                constant="Num. Connection Errors",
                 delimiter=":",
                 formatter=RecordAttributes.LABEL,
             ),
         ),
+        indent=6,
     ),
     Line(
         Item(
-            value=["proxy.avg_res_time", "context.proxy.avg_res_time"],
+            value=["proxy.humanized_errors"],
             label=Label(
-                constant="Avg. Resp Time",
+                constant="Errors",
                 delimiter=":",
                 formatter=RecordAttributes.LABEL,
             ),
         ),
+        indent=6,
     ),
     Line(
         Item(
-            value=["proxy.num_active_requests", "context.proxy.num_active_requests"],
+            value=["proxy.num_active_requests"],
             label=Label(
-                constant="Num. Requests",
+                constant="# Active Requests",
                 delimiter=":",
                 formatter=RecordAttributes.LABEL,
             ),
         ),
+        indent=6,
     ),
     formatter=RecordAttributes.CONTEXT_ATTRIBUTE,
+    lines_above=1,
 )
 
 

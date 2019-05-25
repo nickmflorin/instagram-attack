@@ -1,8 +1,6 @@
 import progressbar
 from plumbum import colors
 
-from instattack.utils import percentage
-
 
 # TODO: Replace with Plumbum Progressbar
 # https://plumbum.readthedocs.io/en/latest/api/cli.html

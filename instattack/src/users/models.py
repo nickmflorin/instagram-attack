@@ -6,15 +6,12 @@ from tortoise.exceptions import OperationalError
 
 from instattack import logger
 from instattack import settings
+
 from instattack.src.generator import password_gen
 from instattack.src.utils import stream_raw_data, read_raw_data
 from instattack.src.users import constants
 
 from .exceptions import UserDirDoesNotExist, UserFileDoesNotExist
-
-
-log = logger.get_async('User')
-log_sync = logger.get_sync('User')
 
 
 class UserAttempt(Model):
@@ -81,7 +78,7 @@ class User(Model):
             directory.delete()
 
     def directory(self):
-        return settings.USER_DIR / self.username
+        return settings.USER_PATH / self.username
 
     def create_directory(self):
         directory = self.directory()
@@ -116,29 +113,35 @@ class User(Model):
             self.create_file(filename)
 
     def verify_files(self):
+        log = logger.get_sync(__name__, subname='verify_files')
+
         for filename in self.FILES:
             filepath = self.file_path(filename)
             if not filepath.exists() or not filepath.is_file():
                 # TODO: In rare care where the path is a directory, we may want
                 # to delete it.
                 e = UserFileDoesNotExist(filepath, self)
-                log_sync.warning(e)
+                log.warning(e)
                 self.create_file(filename)
 
     async def stream_data(self, filename, limit=None):
+        log = logger.get_async(__name__, subname='stream_data')
+
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
         try:
             filepath = self.file_path(filename, strict=True)
         except UserFileDoesNotExist as e:
-            log.warning(e)
+            await log.warning(e)
             filepath = self.create_file(filename)
 
         async for item in stream_raw_data(filepath, limit=limit):
             yield item
 
     def read_data(self, filename, limit=None):
+        log = logger.get_sync(__name__, subname='read_data')
+
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 

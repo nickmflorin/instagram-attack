@@ -2,15 +2,15 @@
 import argparse
 import asyncio
 import os
-
-
 import warnings
+
+
 warnings.filterwarnings("ignore")
 
 
 def main():
-    from instattack.config import Configuration
-    from instattack.utils import validate_log_level
+    from instattack.src.config import Configuration
+    from instattack.src.utils import validate_log_level
 
     # We have to retrieve the --level at the top level and then use it to set
     # the environment variable - which is in turn used to configure the loggers.

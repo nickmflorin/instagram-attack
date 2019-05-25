@@ -1,4 +1,5 @@
-from ..utils import get_log_value, get_formatter_value, escape_ansi_string
+from ..utils import (
+    get_log_value, get_formatter_value, escape_ansi_string, string_format_tuple)
 
 
 __all__ = (
@@ -24,7 +25,7 @@ class Part(object):
     def base_value(self, record):
         if self._value:
             value = get_log_value(self._value, record)
-            if value:
+            if value is not None:
                 return value
         elif self._constant:
             return self._constant
@@ -85,7 +86,12 @@ class FormattablePart(Part):
 
             formatter = get_formatter_value(self._formatter, record)
             if formatter:
-                formatted = formatter("%s" % formatted)
+                try:
+                    formatted = formatter("%s" % formatted)
+                except TypeError:
+                    if isinstance(formatted, tuple):
+                        formatted = string_format_tuple(formatted)
+                        formatted = formatter(formatted)
 
             formatted = self._wrap(formatted)
             return self._apply_prefix_suffix(formatted)

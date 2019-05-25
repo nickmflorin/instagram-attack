@@ -4,7 +4,7 @@ import sys
 
 from artsylogger import ArtsyHandlerMixin
 
-from instattack.utils import relative_to_root
+from instattack.src.utils import relative_to_root
 from .constants import LoggingLevels
 
 

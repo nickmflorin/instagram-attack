@@ -10,29 +10,22 @@ from instattack.src.base import HandlerMixin
 from .models import Proxy
 
 
-log = logger.get_async('Proxy Broker')
-
-
-class InstattackProxyBroker(Broker, HandlerMixin):
+class ProxyBroker(Broker, HandlerMixin):
 
     __name__ = 'Proxy Broker'
 
     def __init__(self, config, limit=None, **kwargs):
-        self.engage(**kwargs)
+        self.init(**kwargs)
         self.personal_start_event = asyncio.Event()
-
-        # Don't want to disable entire logger.
-        self.log_proxies = config.get('log', False)
 
         # ProxyBroker needs a numeric limit unfortunately... if we do not set it,
         # it will be arbitrarily high.
         self.limit = limit or config.get('limit', 10000)
+
+        self.log_proxies = config.get('log', False)
         self._proxies = asyncio.Queue()
 
-        # TODO:
-        # What would be really cool would be if we could pass in our custom pool
-        # directly so that the broker popoulated that queue with the proxies.
-        super(InstattackProxyBroker, self).__init__(
+        super(ProxyBroker, self).__init__(
             self._proxies,
             max_tries=config['max_tries'],
             max_conn=config['max_conn'],
@@ -42,43 +35,41 @@ class InstattackProxyBroker(Broker, HandlerMixin):
 
     @contextlib.asynccontextmanager
     async def session(self, loop):
-        log.debug('Starting Proxy Broker Session')
+        log = logger.get_async(self.__name__, subname='session')
+
+        await log.start('Opening Broker Session')
         await self.start(loop)
         try:
             yield self
         finally:
-            log.debug('Stopping Proxy Broker Session')
+            await log.complete('Closing Broker Session')
             await self.shutdown(loop)
 
     async def start(self, loop):
         log = logger.get_async(self.__name__, subname='start')
-        log.start('Starting')
+        log.start(f'Starting Broker with Limit = {self.limit}')
 
         self._started = True
 
-        log.start(f'Starting Broker with Limit = {self.limit}')
         await self.find(
             limit=self.limit,
             post=True,
             countries=settings.PROXY_COUNTRIES,
             types=settings.PROXY_TYPES,
         )
-        log.complete('Broker Successfully Started')
-        self.personal_start_event.set()
 
     async def collect(self, loop, save=False):
-        if not self._started:
-            raise RuntimeError('Cannot collect proxies without starting broker.')
+        log = logger.get_async(self.__name__, subname='collect')
 
-        log.debug('Waiting on Start Event')
-        await self.personal_start_event.wait()
-        log.start('Starting Proxy Collection')
+        if self._started:
+            raise RuntimeError('Broker should not be started before collect method.')
 
-        async with self.session(loop) as broker:
+        async with self.session(loop):
             while True:
-                proxy = await broker._proxies.get()
+                proxy = await self._proxies.get()
                 if proxy:
-                    # TODO: Eventually maybe spawn off save into scheduler, although
+                    # [x] TODO:
+                    # Eventually maybe spawn off save into scheduler, although
                     # scheduler is acting weirdly now and swallowing exceptions.
                     proxy, created = await Proxy.update_or_create_from_proxybroker(
                         proxy,

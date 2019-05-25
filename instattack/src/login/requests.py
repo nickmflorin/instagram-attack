@@ -150,7 +150,7 @@ class RequestHandler(Handler):
 
         return self._cookies
 
-    async def parse_response_result(self, result, context):
+    async def parse_response_result(self, result, password, proxy):
         """
         Raises an exception if the result that was in the response is either
         non-conclusive or has an error in it.
@@ -158,7 +158,7 @@ class RequestHandler(Handler):
         If the result does not have an error and is non conslusive, than we
         can assume that the proxy was most likely good.
         """
-        result = InstagramResult.from_dict(result, context)
+        result = InstagramResult.from_dict(result, proxy=proxy, password=password)
         if result.has_error:
             raise InstagramResultError(result.error_message)
         else:
@@ -166,7 +166,7 @@ class RequestHandler(Handler):
                 raise InstagramResultError("Inconslusive result.")
             return result
 
-    async def handle_client_response(self, response, context):
+    async def handle_client_response(self, response, password, proxy):
         """
         Takes the AIOHttp ClientResponse and tries to return a parsed
         InstagramResult object.
@@ -187,7 +187,7 @@ class RequestHandler(Handler):
             except ValueError:
                 raise InvalidResponseJson(response)
             else:
-                return await self.parse_response_result(json, context)
+                return await self.parse_response_result(json, password, proxy)
         else:
             try:
                 response.raise_for_status()
@@ -201,7 +201,7 @@ class RequestHandler(Handler):
                 except ValueError:
                     raise InvalidResponseJson(response)
                 else:
-                    return await self.parse_response_result(json, context)
+                    return await self.parse_response_result(json, password, proxy)
 
     async def handle_inconclusive_proxy(self, e, proxy, scheduler, extra=None):
 
@@ -240,7 +240,7 @@ class RequestHandler(Handler):
         else:
             await self.handle_proxy_error(e, proxy, scheduler, extra={'proxy': proxy})
 
-    async def handle_request_error(self, e, proxy, context, scheduler):
+    async def handle_request_error(self, e, proxy, scheduler):
         """
         For errors related to proxy connectivity issues, and the validity of
         the proxy, we remove the proxy entirely and don't note the error/put
@@ -256,7 +256,7 @@ class RequestHandler(Handler):
             RuntimeError: File descriptor 87 is used by transport
             <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
             """
-            await self.handle_inconclusive_proxy(e, context.proxy, scheduler)
+            await self.handle_inconclusive_proxy(e, proxy, scheduler)
 
         elif isinstance(e, asyncio.CancelledError):
             # Don't want to mark as inconclusive because we don't want to note
@@ -264,7 +264,7 @@ class RequestHandler(Handler):
             pass
 
         elif isinstance(e, ClientResponseError):
-            await self.handle_proxy_error(e, context.proxy, scheduler)
+            await self.handle_proxy_error(e, proxy, scheduler)
 
         elif isinstance(e, self.REQUEST_ERRORS):
             if isinstance(e, OSError):
@@ -274,9 +274,9 @@ class RequestHandler(Handler):
                 # >>> ClientProxyConnectionError [Errno 61] Cannot connect to host ... ssl:False
                 # Mark as Inconclusive for Now
                 if e.errno == 54:
-                    await self.handle_fatal_proxy(e, context.proxy, scheduler)
+                    await self.handle_fatal_proxy(e, proxy, scheduler)
                 elif e.errno == 24:
-                    await self.handle_proxy_error(e, context.proxy, scheduler, extra={
+                    await self.handle_proxy_error(e, proxy, scheduler, extra={
                         'other': f'Sleeping for {self.SLEEP} Seconds',
                     })
                     await asyncio.sleep(3.0)
@@ -284,7 +284,7 @@ class RequestHandler(Handler):
 
                     # We might want to stop removing proxies and just severely limit
                     # the priority of connection error based proxies.
-                    await self.handle_fatal_proxy(e, context.proxy, scheduler)
+                    await self.handle_fatal_proxy(e, proxy, scheduler)
                 else:
                     # We would sometimes raise here to try to pickup on unnoticed exceptions.
                     # We need to output though to get errno's and refine our request
@@ -292,13 +292,13 @@ class RequestHandler(Handler):
 
                     # We might want to stop removing proxies and just severely limit
                     # the priority of connection error based proxies.
-                    await self.handle_fatal_proxy(e, context.proxy, scheduler)
+                    await self.handle_fatal_proxy(e, proxy, scheduler)
             else:
                 # We might want to stop removing proxies and just severely limit
                 # the priority of connection error based proxies.
-                await self.handle_fatal_proxy(e, context.proxy, scheduler)
+                await self.handle_fatal_proxy(e, proxy, scheduler)
 
-    async def login_request(self, loop, session, context, scheduler):
+    async def login_request(self, loop, session, password, proxy, scheduler):
         """
         For a given password, makes a series of concurrent requests, each using
         a different proxy, until a result is found that authenticates or dis-
@@ -313,19 +313,28 @@ class RequestHandler(Handler):
         log = logger.get_async(self.__name__, subname='login_request')
         log.disable_on_false(self.log_attempts)
 
+        # TODO: Make sure we are saving proxy in situations in which there
+        # was no error or other reason to potentially save, so that the time
+        # is always adjusted.  This might already be taken care of though.
+        proxy.update_time()
+        log.debug('Making Login Request', extra={
+            'password': password,
+            'proxy': proxy,
+        })
         try:
             async with session.post(
                 settings.INSTAGRAM_LOGIN_URL,
                 headers=self.headers,
-                data=self._login_data(context.password),
+                data=self._login_data(password),
                 ssl=False,
-                proxy=context.proxy.url  # Only Http Proxies Are Supported by AioHTTP
+                proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
             ) as response:
                 try:
-                    result = await self.handle_client_response(response, context)
+                    result = await self.handle_client_response(
+                        response, password, proxy)
 
                 except ClientResponseError as e:
-                    await self.handle_proxy_error(e, context.proxy, scheduler, extra={
+                    await self.handle_proxy_error(e, proxy, scheduler, extra={
                         'response': response
                     })
 
@@ -334,10 +343,10 @@ class RequestHandler(Handler):
                         raise RuntimeError("Handling client response should "
                             "not return null proxy.")
 
-                    await context.proxy.was_success(save=False)
-                    await self.proxy_handler.pool.put(context.proxy)
-                    await scheduler.spawn(context.proxy.save())
+                    await proxy.was_success(save=False)
+                    await self.proxy_handler.pool.put(proxy)
+                    await scheduler.spawn(proxy.save())
                     return result
 
         except Exception as e:
-            await self.handle_request_error(e, context.proxy, context, scheduler)
+            await self.handle_request_error(e, proxy, scheduler)
