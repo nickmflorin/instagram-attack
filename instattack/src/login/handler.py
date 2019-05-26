@@ -153,6 +153,10 @@ class LoginHandler(RequestHandler):
                     raise RuntimeError("Result should be valid and conclusive.")
 
                 self.num_completed += 1
+
+                # TODO: Using the login_index here as the total number only works
+                # because the login_tasks are generated so quickly, we need a more
+                # sustainable way of doing this.
                 await log.success(
                     f'Percent Done: {percentage(self.num_completed, self.login_index)}')
 

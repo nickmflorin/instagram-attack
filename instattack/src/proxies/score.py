@@ -6,8 +6,11 @@ from instattack.src.utils import humanize_list
 
 
 PROXY_PRIORITY_FIELDS = (
+    (-1, 'num_active_successful_requests'),
     (-1, 'num_successful_requests'),
     (1, 'num_connection_errors'),
+    (1, 'num_response_errors'),
+    (1, 'num_ssl_errors'),
     (1, 'avg_resp_time'),
 )
 
@@ -184,8 +187,13 @@ def evaluate_for_use(proxy, config):
     # TODO: We should only restrict time since last used if the last request was
     # a too many request error.
     time_since_used = config.get('min_time_between_proxy')
-    evaluation = evaluate(
-        proxy,
-        time_since_used=time_since_used,
-    )
-    return evaluation
+
+    if (proxy.active_errors.get('most_recent') and
+            proxy.active_errors['most_recent'] == 'too_many_requests'):
+        evaluation = evaluate(
+            proxy,
+            time_since_used=time_since_used,
+        )
+        return evaluation
+    else:
+        return ProxyEvaluation(reasons=[])

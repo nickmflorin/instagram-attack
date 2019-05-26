@@ -75,12 +75,13 @@ class ProxyClean(SelectOperatorApplication, ProxyApplicationMixin):
 @ProxyEntryPoint.subcommand('clear')
 class ProxyClear(SelectOperatorApplication, ProxyApplicationMixin):
 
-    async def errors(self, loop):
+    async def history(self, loop):
         to_save = []
         async for proxy in Proxy.all():
             # Regular errors are translated on save currently.
             proxy.errors = {}
             proxy.active_errors = {}
+            proxy.num_requests = 0
             to_save.append(proxy)
 
         await self.save_proxies(to_save, update_duplicates=True, ignore_duplicates=True)
