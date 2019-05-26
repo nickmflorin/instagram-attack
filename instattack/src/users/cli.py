@@ -74,7 +74,7 @@ class ClearUser(SingleUserApplication):
 
     async def attempts(self, loop, user):
         log = logger.get_async(__name__, subname='attempts')
-        await log.start(f'Clearing User {user.username} Attempts')
+        await log.info(f'Clearing User {user.username} Attempts')
 
         await log.debug('Fetching User Attempts...')
         attempts = await user.get_attempts(limit=self.limit)
@@ -87,10 +87,10 @@ class ClearUser(SingleUserApplication):
         await log.start('Deleting Attempts...')
         await asyncio.gather(*tasks)
         if len(tasks) == 0:
-            self.log.error(f"No attempts to clear for user {user.username}.")
+            await log.error(f"No attempts to clear for user {user.username}.")
             return
 
-        log.complete(f"Cleared {len(tasks)} attempts for user {user.username}.")
+        await log.complete(f"Cleared {len(tasks)} attempts for user {user.username}.")
 
 
 @UserEntryPoint.subcommand('get')

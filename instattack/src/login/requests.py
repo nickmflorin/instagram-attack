@@ -9,7 +9,7 @@ from instattack.src.exceptions import ClientResponseError
 from instattack.src.base import Handler
 from instattack.src.login import constants
 
-from .exceptions import InvalidResponseJson, InstagramResultError
+from .exceptions import InvalidResponseJson, InstagramResultError, ClientTooManyRequests
 from .models import InstagramResult
 from .utils import get_token
 
@@ -71,7 +71,66 @@ https://docs.aiohttp.org/en/stable/client_reference.html
 """
 
 
-class RequestHandler(Handler):
+class ProxyErrorHandlerMixin(object):
+
+    async def handle_inconclusive_proxy(self, e, proxy, scheduler, extra=None):
+
+        log = logger.get_async(self.__name__, subname='handle_inconclusive_proxy')
+        log.disable_on_false(self.log_attempts)
+
+        extra = extra or {}
+        extra['proxy'] = proxy
+        log.error(e, extra=extra)
+
+        await proxy.was_inconclusive(save=False)
+        await self.proxy_handler.pool.put(proxy)
+        await scheduler.spawn(proxy.save())
+
+    async def handle_proxy_error(self, e, proxy, scheduler, extra=None, put_back=True):
+
+        log = logger.get_async(self.__name__, subname='handle_proxy_error')
+        log.disable_on_false(self.log_attempts)
+
+        extra = extra or {}
+        extra['proxy'] = proxy
+        log.error(e, extra=extra)
+
+        await proxy.was_error(e, save=False)
+        await scheduler.spawn(proxy.save())
+
+        if put_back:
+            await self.proxy_handler.pool.put(proxy)
+
+    async def handle_semifatal_proxy(self, e, proxy, scheduler):
+        """
+        The proxy will have it's error stored on the model but will always be
+        removed from the pool, instead of optionally deleting if the
+        `remove_proxy_on_error` config flag is set to True.
+        """
+        await self.handle_proxy_error(e, proxy, scheduler, put_back=False)
+
+    async def handle_fatal_proxy(self, e, proxy, scheduler):
+        """
+        If remove_proxy_on_error is set to True, errors considered fatal will
+        remove the proxy from the database.  Otherwise, the proxy will simply
+        not be put back in the pool.
+
+        Note that for normal errors, the proxy has the error stored on it but
+        it is still put back in the pool.
+        """
+        log = logger.get_async(self.__name__, subname='handle_fatal_proxy')
+        log.disable_on_false(self.log_attempts)
+
+        # Not sure if we want to do this at all - maybe just not put back in
+        # pool.
+        if self.remove_proxy_on_error:
+            log.error(e, extra={'other': 'Removing Proxy', 'proxy': proxy})
+            await scheduler.spawn(proxy.delete())
+        else:
+            await self.handle_proxy_error(e, proxy, scheduler, put_back=False)
+
+
+class RequestHandler(Handler, ProxyErrorHandlerMixin):
 
     SLEEP = 3
 
@@ -194,7 +253,10 @@ class RequestHandler(Handler):
             except (
                 aiohttp.ClientResponseError,
             ) as e:
-                raise ClientResponseError(response)
+                if response.status == 429:
+                    raise ClientTooManyRequests(response)
+                else:
+                    raise ClientResponseError(response)
             else:
                 try:
                     json = await response.json()
@@ -203,42 +265,25 @@ class RequestHandler(Handler):
                 else:
                     return await self.parse_response_result(json, password, proxy)
 
-    async def handle_inconclusive_proxy(self, e, proxy, scheduler, extra=None):
+    async def handle_response_error(self, e, proxy, scheduler, response=None):
 
-        log = logger.get_async(self.__name__, subname='handle_inconclusive_proxy')
-        log.disable_on_false(self.log_attempts)
+        if isinstance(e, ClientTooManyRequests):
+            await self.handle_inconclusive_proxy(e, proxy, scheduler, extra={
+                'response': response
+            })
 
-        extra = extra or {}
-        extra['proxy'] = proxy
-        log.error(e, extra=extra)
+        elif isinstance(e, InvalidResponseJson):
+            await self.handle_semifatal_proxy(e, proxy, scheduler, extra={
+                'response': response
+            })
 
-        await proxy.was_inconclusive(save=False)
-        await self.proxy_handler.pool.put(proxy)
-        await scheduler.spawn(proxy.save())
+        elif isinstance(e, InstagramResultError):
+            await self.handle_semifatal_proxy(e, proxy, scheduler, extra={
+                'response': response
+            })
 
-    async def handle_proxy_error(self, e, proxy, scheduler, extra=None):
-
-        log = logger.get_async(self.__name__, subname='handle_proxy_error')
-        log.disable_on_false(self.log_attempts)
-
-        extra = extra or {}
-        extra['proxy'] = proxy
-        log.error(e, extra=extra)
-
-        await proxy.was_error(e, save=False)
-        await self.proxy_handler.pool.put(proxy)
-        await scheduler.spawn(proxy.save())
-
-    async def handle_fatal_proxy(self, e, proxy, scheduler):
-
-        log = logger.get_async(self.__name__, subname='handle_fatal_proxy')
-        log.disable_on_false(self.log_attempts)
-
-        if self.remove_proxy_on_error:
-            log.error(e, extra={'other': 'Removing Proxy', 'proxy': proxy})
-            await scheduler.spawn(proxy.delete())
         else:
-            await self.handle_proxy_error(e, proxy, scheduler, extra={'proxy': proxy})
+            raise e
 
     async def handle_request_error(self, e, proxy, scheduler):
         """
@@ -264,7 +309,7 @@ class RequestHandler(Handler):
             pass
 
         elif isinstance(e, ClientResponseError):
-            await self.handle_proxy_error(e, proxy, scheduler)
+            await self.handle_response_error(e)
 
         elif isinstance(e, self.REQUEST_ERRORS):
             if isinstance(e, OSError):
@@ -274,29 +319,22 @@ class RequestHandler(Handler):
                 # >>> ClientProxyConnectionError [Errno 61] Cannot connect to host ... ssl:False
                 # Mark as Inconclusive for Now
                 if e.errno == 54:
-                    await self.handle_fatal_proxy(e, proxy, scheduler)
+                    # For now, keep as semi-fatal errors just to remove from pool.
+                    await self.handle_semifatal_proxy(e, proxy, scheduler)
                 elif e.errno == 24:
                     await self.handle_proxy_error(e, proxy, scheduler, extra={
                         'other': f'Sleeping for {self.SLEEP} Seconds',
                     })
                     await asyncio.sleep(3.0)
                 elif e.errno == 61:
-
-                    # We might want to stop removing proxies and just severely limit
-                    # the priority of connection error based proxies.
-                    await self.handle_fatal_proxy(e, proxy, scheduler)
+                    # For now, keep as semi-fatal errors just to remove from pool.
+                    await self.handle_semifatal_proxy(e, proxy, scheduler)
                 else:
-                    # We would sometimes raise here to try to pickup on unnoticed exceptions.
-                    # We need to output though to get errno's and refine our request
-                    # exception handling.
-
-                    # We might want to stop removing proxies and just severely limit
-                    # the priority of connection error based proxies.
-                    await self.handle_fatal_proxy(e, proxy, scheduler)
+                    # For now, keep as semi-fatal errors just to remove from pool.
+                    await self.handle_semifatal_proxy(e, proxy, scheduler)
             else:
-                # We might want to stop removing proxies and just severely limit
-                # the priority of connection error based proxies.
-                await self.handle_fatal_proxy(e, proxy, scheduler)
+                # For now, keep as semi-fatal errors just to remove from pool.
+                await self.handle_semifatal_proxy(e, proxy, scheduler)
 
     async def login_request(self, loop, session, password, proxy, scheduler):
         """
@@ -330,14 +368,9 @@ class RequestHandler(Handler):
                 proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
             ) as response:
                 try:
-                    result = await self.handle_client_response(
-                        response, password, proxy)
-
-                except ClientResponseError as e:
-                    await self.handle_proxy_error(e, proxy, scheduler, extra={
-                        'response': response
-                    })
-
+                    result = await self.handle_client_response(response, password, proxy)
+                except Exception as e:
+                    await self.handle_response_error(e, response, proxy, scheduler)
                 else:
                     if not result:
                         raise RuntimeError("Handling client response should "

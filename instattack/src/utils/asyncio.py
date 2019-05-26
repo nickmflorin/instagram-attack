@@ -43,11 +43,8 @@ def get_remaining_tasks():
     return list(tasks)
 
 
-async def cancel_remaining_tasks(futures=None, silence_exceptions=False, log_exceptions=None):
+async def cancel_remaining_tasks(futures=None, raise_exceptions=False, log_exceptions=None, log_tasks=False):
     log = logger.get_async(__name__, subname='cancel_remaining_tasks')
-
-    if log_exceptions is None:
-        log_exceptions = not silence_exceptions
 
     if not futures:
         log.debug('Collecting Default Tasks')
@@ -65,14 +62,15 @@ async def cancel_remaining_tasks(futures=None, silence_exceptions=False, log_exc
                     # Need to find a more sustainable way of doing this, this makes
                     # sure that we are not raising exceptions for external tasks.
                     if not task_is_third_party(task):
-                        if not silence_exceptions:
+                        if raise_exceptions:
                             raise task.exception()
                         elif log_exceptions:
                             log.warning(task.exception())
             else:
+                task.cancel()
                 if not task_is_third_party(task):
-                    log.debug(f'Cancelling Task {task}')
-                    task.cancel()
+                    if log_tasks:
+                        log.debug(f'Cancelled Task {task}')
 
     list(map(cancel_task, futures))
     await asyncio.gather(*futures, return_exceptions=True)

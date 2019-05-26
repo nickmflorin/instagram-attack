@@ -64,14 +64,16 @@ class LoginHandler(RequestHandler):
 
     async def run(self, loop):
         log = logger.get_async(self.__name__, subname='attack')
-        log.start('Running')
+        await log.start('Running Login Handler')
 
         await self.prepopulate(loop)
-        return await self.attack(loop)
+        results = await self.attack(loop)
+        await log.complete('Login Handler Done')
+        return results
 
     async def attempt_single_login(self, loop, password):
         log = logger.get_async(self.__name__, subname='attack')
-        log.start('Starting Single Login')
+        await log.start('Starting Single Login')
 
         await self.passwords.put(password)
         results = await self.attack(loop)
@@ -91,17 +93,16 @@ class LoginHandler(RequestHandler):
         message = f'Generating All Attempts for User {self.user.username}.'
         if self.limit:
             message = f'Generating {self.limit} Attempts for User {self.user.username}.'
-        log.start(message)
+        await log.start(message)
 
-        futures = []
-        async for password in self.user.stream_new_attempts(loop, limit=self.limit):
-            futures.append(self.passwords.put(password))
-
-        await asyncio.gather(*futures)
-        if len(futures) == 0:
+        passwords = await self.user.get_new_attempts(loop, limit=self.limit)
+        if len(passwords) == 0:
             raise NoPasswordsError()
 
-        log.complete(f"Prepopulated {len(futures)} Password Attempts")
+        for password in passwords:
+            await self.passwords.put(password)
+
+        await log.complete(f"Prepopulated {len(passwords)} Password Attempts")
 
     async def generate_login_tasks(self, loop, session, scheduler):
         """
@@ -147,19 +148,17 @@ class LoginHandler(RequestHandler):
             gen = self.generate_login_tasks(loop, session, scheduler)
 
             async for result in limit_as_completed(gen, self.batch_size):
-                await log.debug('Generator Returned Result')
-
                 # Generator Does Not Yield None on No More Coroutines
                 if not result.conclusive:
                     raise RuntimeError("Result should be valid and conclusive.")
 
                 self.num_completed += 1
-                log.success(
+                await log.success(
                     f'Percent Done: {percentage(self.num_completed, self.login_index)}')
 
                 if result.authorized:
-                    await scheduler.spawn(
-                        self.user.create_or_update_attempt(result.password, success=True))
+                    asyncio.shield(scheduler.spawn(
+                        self.user.create_or_update_attempt(result.password, success=True)))
                     results.add(result)
                     break
 
@@ -168,13 +167,13 @@ class LoginHandler(RequestHandler):
                         raise RuntimeError('Result should not be authorized.')
 
                     results.add(result)
-                    await scheduler.spawn(
-                        self.user.create_or_update_attempt(result.password, success=False))
+                    asyncio.shield(scheduler.spawn(
+                        self.user.create_or_update_attempt(result.password, success=False)))
 
         await log.complete('Closing Session')
         await asyncio.sleep(0)
 
-        await scheduler.close()
+        asyncio.shield(scheduler.close())
         return results
 
     async def generate_login_attempts(self, loop, session, password, scheduler):
@@ -192,11 +191,11 @@ class LoginHandler(RequestHandler):
             proxy = await self.proxy_handler.pool.get()
             if not proxy:
                 # TODO: Raise Exception Here Instead
-                log.error('No More Proxies in Pool')
+                await log.error('No More Proxies in Pool')
                 break
 
             if proxy.unique_id in self.proxies_count:
-                log.warning(
+                await log.warning(
                     f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
                     extra={'proxy': proxy}
                 )
@@ -223,14 +222,14 @@ class LoginHandler(RequestHandler):
         # requests with the proxies.
         await self.start_event.wait()
 
-        log.start(f'Atempting Login with {password}')
+        await log.start(f'Atempting Login with {password}')
 
         result, num_tries = await limit_on_success(
             self.generate_login_attempts(loop, session, password, scheduler),
             self.attempt_batch_size
         )
 
-        log.complete(
+        await log.complete(
             f'Done Attempting Login with {password} '
             f'After {num_tries} Attempt(s)',
             extra={

@@ -38,13 +38,15 @@ ERROR_TRANSLATION = {
     'ClientProxyConnectionError': 'proxy_connection',
     'ClientConnectorError': 'client_connection',
     'ServerConnectionError': 'server_connection',
+    'ServerDisconnectedError': 'server_connection',
     'ClientConnectorError': 'client_connection',
     'ClientConnectorCertificateError': 'ssl',
     'ClientConnectorSSLError': 'ssl',
     'ConnectionResetError': 'server_connection',
     'ConnectionRefusedError': 'server_connection',
     'SSLError': 'ssl',
-    'ClientResponseError': 'invalid_response',
+    'InvalidResponseJson': 'invalid_response',
+    'InstagramResultError': 'invalid_response',
 }
 
 CONNECTION_ERRORS = (

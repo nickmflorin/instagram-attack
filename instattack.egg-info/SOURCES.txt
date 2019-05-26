@@ -19,7 +19,6 @@ instattack/logger/handler.py
 instattack/logger/handlers.py
 instattack/logger/log_formats.py
 instattack/logger/logger.py
-instattack/logger/mixins.py
 instattack/logger/setup.py
 instattack/logger/utils.py
 instattack/settings/__init__.py
@@ -53,7 +52,7 @@ instattack/src/proxies/exceptions.py
 instattack/src/proxies/handler.py
 instattack/src/proxies/models.py
 instattack/src/proxies/pool.py
-instattack/src/proxies/queue.py
+instattack/src/proxies/score.py
 instattack/src/proxies/utils.py
 instattack/src/users/__init__.py
 instattack/src/users/cli.py

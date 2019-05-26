@@ -31,10 +31,12 @@ SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 # You can log all uncaught exceptions on the main thread by assigning a handler
 # to sys.excepthook.
-# def exception_hook(exc_type, exc_value, exc_traceback):
-#     log = logger.get_sync(__name__)
-#     log.traceback(exc_type, exc_value, exc_traceback)
-# sys.excepthook = exception_hook
+def exception_hook(exc_type, exc_value, exc_traceback):
+    log = logger.get_sync(__name__)
+    log.traceback(exc_type, exc_value, exc_traceback)
+
+
+sys.excepthook = exception_hook
 
 
 class shutdown_mixin(object):
@@ -72,35 +74,28 @@ class shutdown_mixin(object):
         log.complete('Shutdown Complete')
 
     async def shutdown_async(self, loop):
-        await asyncio.sleep(0)
+        await self.shutdown_outstanding_tasks(loop)
         await self.shutdown_async_loggers(loop)
         await self.shutdown_database(loop)
-
-        await asyncio.sleep(0)
-        await self.shutdown_outstanding_tasks(loop)
 
     async def shutdown_outstanding_tasks(self, loop):
         log = logger.get_sync(__name__, subname='shutdown_outstanding_tasks')
 
-        to_cancel = get_remaining_tasks()
-
-        if len(to_cancel) != 0:
-            log.complete(f'{len(to_cancel)} Leftover Tasks')
+        log.start('Cancelling Remaining Tasks')
+        futures = await cancel_remaining_tasks(raise_exceptions=True, log_tasks=True)
+        if len(futures) != 0:
+            log.complete(f'Cancelled {len(futures)} Leftover Tasks')
 
             with log.logging_lines():
-                log_tasks = to_cancel[:20]
+                log_tasks = futures[:20]
                 for task in log_tasks:
                     if task_is_third_party(task):
                         log.line(f"{task._coro.__name__} (Third Party)")
                     else:
                         log.line(task._coro.__name__)
 
-                if len(to_cancel) > 20:
+                if len(futures) > 20:
                     log.line('...')
-
-            log.start('Cancelling Tasks')
-            # Not sure if we still want to do this...
-            await cancel_remaining_tasks(futures=to_cancel)
         else:
             log.complete('No Leftover Tasks to Cancel')
 

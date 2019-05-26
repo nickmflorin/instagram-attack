@@ -38,6 +38,7 @@ MESSAGE_LINE = Line(
         formatter=RecordAttributes.STATUS_CODE,
         wrapper="[%s]"
     ),
+    indent=2,
 )
 
 
@@ -56,6 +57,7 @@ PRIMARY_LINE = Line(
         value="subname",
         formatter=RecordAttributes.SUBNAME
     ),
+    indent=2,
 )
 
 
@@ -63,11 +65,11 @@ CONTEXT_LINES = Lines(
     Line(
         Item(
             value=['password'],
-            formatter=RecordAttributes.PASSWORD,  # Override
+            formatter=RecordAttributes.CONTEXT_ATTRIBUTE_3,
             label=Label(
                 constant="Password",
                 delimiter=":",
-                formatter=RecordAttributes.LABEL,
+                formatter=RecordAttributes.LABEL_1,
             )
         ),
         indent=2,
@@ -75,66 +77,72 @@ CONTEXT_LINES = Lines(
     Line(
         Item(
             value=['proxy.method'],
-            formatter=RecordAttributes.METHOD,
+            formatter=RecordAttributes.CONTEXT_ATTRIBUTE_3,
         ),
         Item(
             value=['proxy.url'],
-            formatter=RecordAttributes.PROXY,
+            formatter=RecordAttributes.CONTEXT_ATTRIBUTE_1,
             wrapper="<%s>"
         ),
         label=Label(
             constant="Proxy",
             delimiter=":",
-            formatter=RecordAttributes.LABEL,
+            formatter=RecordAttributes.LABEL_1,
         ),
         indent=2,
     ),
-    Line(
-        Item(
-            value=["proxy.error_count"],
-            label=Label(
-                constant="Num. Errors",
-                delimiter=":",
-                formatter=RecordAttributes.LABEL,
+    Lines(
+        Line(
+            Item(
+                value=["proxy.error_count"],
+                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                label=Label(
+                    constant="Num. Errors",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL_2,
+                ),
             ),
+            indent=4,
         ),
-        indent=6,
-    ),
-    Line(
-        Item(
-            value=["proxy.num_connection_errors"],
-            label=Label(
-                constant="Num. Connection Errors",
-                delimiter=":",
-                formatter=RecordAttributes.LABEL,
+        Line(
+            Item(
+                value=["proxy.num_connection_errors"],
+                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                label=Label(
+                    constant="Num. Connection Errors",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL_2,
+                ),
             ),
+            indent=4,
         ),
-        indent=6,
-    ),
-    Line(
-        Item(
-            value=["proxy.humanized_errors"],
-            label=Label(
-                constant="Errors",
-                delimiter=":",
-                formatter=RecordAttributes.LABEL,
+        Line(
+            Item(
+                value=["proxy.humanized_errors"],
+                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                label=Label(
+                    constant="Errors",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL_2,
+                ),
             ),
+            indent=4,
         ),
-        indent=6,
-    ),
-    Line(
-        Item(
-            value=["proxy.num_active_requests"],
-            label=Label(
-                constant="# Active Requests",
-                delimiter=":",
-                formatter=RecordAttributes.LABEL,
+        Line(
+            Item(
+                value=["proxy.num_active_requests"],
+                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                label=Label(
+                    constant="# Active Requests",
+                    delimiter=":",
+                    formatter=RecordAttributes.LABEL_2,
+                ),
             ),
+            indent=4,
         ),
-        indent=6,
     ),
-    formatter=RecordAttributes.CONTEXT_ATTRIBUTE,
     lines_above=1,
+    lines_below=1,
 )
 
 
@@ -155,6 +163,7 @@ TRACEBACK_LINE = Line(
         formatter=RecordAttributes.LINENO,
         suffix=")"
     ),
+    indent=2,
 )
 
 
@@ -170,12 +179,12 @@ LOG_FORMAT_STRING = Lines(
             value="other",
             formatter=RecordAttributes.OTHER_MESSAGE
         ),
+        indent=2,
     ),
     CONTEXT_LINES,
     TRACEBACK_LINE,
     lines_above=1,
     lines_below=0,
-    indent=4,
     header=Header(
         char="-",
         length=25,

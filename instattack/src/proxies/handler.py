@@ -52,24 +52,24 @@ class ProxyHandler(Handler):
         if we are running low on proxies.
         """
         log = logger.get_async(self.__name__, subname='start')
-        log.start('Starting')
+        log.start('Starting Proxy Handler')
 
         if self.pool.should_prepopulate:
             try:
-                log.debug('Prepopulating Pool...')
+                log.debug('Prepopulating Proxy Pool...')
                 await self.pool.prepopulate(loop)
             except Exception as e:
                 raise e
 
         if self.pool.should_collect:
+            # Pool will set start event when it starts collecting proxies.
             await self.pool.collect(loop)
         else:
             log.debug('Not Collecting Proxies...')
-
             if self.start_event.is_set():
                 raise RuntimeError('Start Event Already Set')
 
             self.start_event.set()
             log.info('Setting Start Event', extra={
-                'other': 'Pool Prepopulated'
+                'other': 'Proxy Pool Prepopulated'
             })

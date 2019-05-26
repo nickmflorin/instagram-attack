@@ -14,6 +14,11 @@ class InstagramResultError(ClientResponseError):
     __message__ = "Instagram Result Error"
 
 
+class ClientTooManyRequests(ClientResponseError):
+
+    __message__ = "Too Many Requests"
+
+
 class NoPasswordsError(AppException):
 
     __message__ = 'There are no passwords to try.'

@@ -191,7 +191,6 @@ class User(Model):
     async def create_or_update_attempt(self, attempt, success=False, try_attempt=0):
 
         log = logger.get_async(__name__, subname='create_or_update_attempt')
-        log.info('Writing/Updating User Attempt')
 
         try:
             attempt, created = await UserAttempt.get_or_create(
@@ -205,6 +204,9 @@ class User(Model):
                 attempt.success = success
                 attempt.num_attempts += 1
                 await attempt.save()
+                log.debug(f'Updated Attempt {attempt.password} for User {self.username}.')
+            else:
+                log.debug(f'Saved New Attempt {attempt.password} for User {self.username}.')
 
         except OperationalError:
             if try_attempt <= self.MAX_SAVE_ATTEMPT_TRIES:
@@ -232,6 +234,8 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
+        log = logger.get_async(__name__, subname='get_new_attempts')
+
         current_attempts = await self.get_attempts()
         current_attempts = [attempt.password for attempt in current_attempts]
 
@@ -241,7 +245,7 @@ class User(Model):
             generated.append(item)
 
         if len(generator.duplicates) != 0:
-            log_sync.warning(
+            await log.warning(
                 f'There Were {len(generator.duplicates)} '
                 'Duplicates Removed from Generated Passwords')
 
@@ -253,6 +257,8 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
+        log = logger.get_async(__name__, subname='stream_new_attempts')
+
         current_attempts = await self.get_attempts()
         current_attempts = [attempt.password for attempt in current_attempts]
 
@@ -261,6 +267,6 @@ class User(Model):
             yield item
 
         if len(generator.duplicates) != 0:
-            log_sync.warning(
+            await log.warning(
                 f'There Were {len(generator.duplicates)} '
                 'Duplicates Removed from Generated Passwords')

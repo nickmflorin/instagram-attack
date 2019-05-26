@@ -139,7 +139,7 @@ class SyncLoggerMixin(LoggerMixin):
             [self.line(line, color=color) for line in lines]
 
 
-class AsyncLoggerMixin(LoggerMixin):
+class AsyncLoggerMixin(SyncLoggerMixin):
 
     async def success(self, msg, *args, **kwargs):
         kwargs.setdefault('extra', {})
@@ -163,8 +163,26 @@ class AsyncLoggerMixin(LoggerMixin):
 
     async def bare(self, msg, color='darkgray', *args, **kwargs):
         kwargs.setdefault('extra', {})
-        kwargs['extra']['frame_correction'] = 1
+        kwargs['extra'].update({'color': color, 'bare': True})
         return await self._log(LoggingLevels.INFO.num, msg, args, **kwargs)
+
+    @contextlib.asynccontextmanager
+    async def logging_lines(self):
+        self.line_index = 0
+        try:
+            sys.stdout.write('\n')
+            yield self
+        finally:
+            sys.stdout.write('\n')
+            self.line_index = 0
+
+    async def line(self, item, color='darkgray'):
+        await self.bare(item, color=color, extra={'line_index': self.line_index + 1})
+        self.line_index += 1
+
+    async def line_by_line(self, lines, color='darkgray'):
+        async with self.logging_lines():
+            [await self.line(line, color=color) for line in lines]
 
 
 class SimpleSyncLogger(SyncLoggerMixin, logging.Logger):

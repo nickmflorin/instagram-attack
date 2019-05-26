@@ -2,7 +2,6 @@ import asyncio
 from plumbum import cli
 
 from instattack import logger
-from instattack.lib import CustomProgressbar
 from instattack.src.cli import EntryPoint, BaseApplication, SelectOperatorApplication
 from instattack.src.utils import save_iteratively, save_concurrently
 
@@ -16,15 +15,19 @@ class ProxyEntryPoint(BaseApplication):
     pass
 
 
-class BaseProxy(BaseApplication):
-
-    __group__ = 'Proxy Pool'
+class ProxyApplicationMixin(object):
 
     concurrent = cli.Flag("--concurrent", default=False)
 
-    def main(self):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.operation(loop))
+    async def log_save_results(self, created, updated):
+        log = logger.get_async(__name__, subname='log_save_results')
+
+        if len(created) != 0:
+            await log.success(f'Created {len(created)} Proxies')
+        if len(updated) != 0:
+            await log.success(f'Updated {len(updated)} Proxies')
+        if len(updated) == 0 and len(created) == 0:
+            await log.error('No Proxies to Update or Create')
 
     async def save_proxies(self, iterable, update_duplicates=False, ignore_duplicates=True):
         log = logger.get_async(__name__, subname='save_proxies')
@@ -44,26 +47,43 @@ class BaseProxy(BaseApplication):
                 update_duplicates=update_duplicates,
             )
 
-        if len(created) != 0:
-            await log.success(f'Created {len(created)} Proxies')
-        if len(updated) != 0:
-            await log.success(f'Updated {len(updated)} Proxies')
-        if len(updated) == 0 and len(created) == 0:
-            await log.error('No Proxies to Update or Create')
+        await self.log_save_results(created, updated)
+
+
+class BaseProxy(BaseApplication, ProxyApplicationMixin):
+
+    __group__ = 'Proxy Pool'
+
+    def main(self):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.operation(loop))
 
 
 @ProxyEntryPoint.subcommand('clean')
-class ProxyClean(SelectOperatorApplication):
+class ProxyClean(SelectOperatorApplication, ProxyApplicationMixin):
 
     async def errors(self, loop):
-        progress = CustomProgressbar(Proxy.count_all(), label='Cleaning Errors')
-        progress.start()
+        to_save = []
         async for proxy in Proxy.all():
             # Regular errors are translated on save currently.
             proxy.active_errors = {}
-            await proxy.save()
-            progress.update()
-        progress.finish()
+            to_save.append(proxy)
+
+        await self.save_proxies(to_save, update_duplicates=True, ignore_duplicates=True)
+
+
+@ProxyEntryPoint.subcommand('clear')
+class ProxyClear(SelectOperatorApplication, ProxyApplicationMixin):
+
+    async def errors(self, loop):
+        to_save = []
+        async for proxy in Proxy.all():
+            # Regular errors are translated on save currently.
+            proxy.errors = {}
+            proxy.active_errors = {}
+            to_save.append(proxy)
+
+        await self.save_proxies(to_save, update_duplicates=True, ignore_duplicates=True)
 
 
 @ProxyEntryPoint.subcommand('scrape')
@@ -93,7 +113,6 @@ class ProxyCollect(BaseProxy):
         help="Limit the number of proxies to collect.")
 
     async def operation(self, loop):
-        log = logger.get_async(__name__, subname='operation')
 
         config = self.config()
         broker = ProxyBroker(
@@ -109,8 +128,5 @@ class ProxyCollect(BaseProxy):
             else:
                 updated.append(proxy)
 
-        await log.start(f'Creating {len(created)} Proxies')
         await self.save_proxies(created, update_duplicates=True)
-
-        await log.start(f'Updating {len(updated)} Proxies')
         await self.save_proxies(updated, update_duplicates=True)

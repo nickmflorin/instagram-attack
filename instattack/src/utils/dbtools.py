@@ -15,6 +15,11 @@ async def create_save_tasks(iterable):
 
 async def save_iteratively(iterable,
         ignore_duplicates=False, update_duplicates=False, log_duplicates=False):
+    """
+    TODO
+    ----
+    Incorporate progress bar optionality.
+    """
     log = logger.get_async(__name__, subname='save_iteratively')
 
     created = []
@@ -43,7 +48,11 @@ async def save_iteratively(iterable,
 
 async def save_concurrently(iterable,
         ignore_duplicates=False, update_duplicates=False, log_duplicates=False):
-
+    """
+    TODO
+    ----
+    Incorporate progress bar optionality.
+    """
     log = logger.get_async(__name__, subname='save_concurrently')
 
     tasks = await create_save_tasks(iterable)

@@ -195,15 +195,16 @@ class Attack(BaseApplication):
         # Result will only return if it is authorized.
         results = self.attack(loop, user, config)
         if results.has_authenticated:
-            log.success(f'Authenticated User!', extra={
+            log.success(f'Authenticated {username}!', extra={
                 'password': results.authenticated_result.context.password
             })
-        return 1
+        else:
+            log.error(f'User {username} Not Authenticated.')
 
     def attack(self, loop, user, config):
 
         async def _attack(loop, user, config):
-            log = logger.get_async(__name__, subname='test_login')
+            log = logger.get_async(__name__, subname='attack')
 
             proxy_handler, password_handler = post_handlers(user, config)
 

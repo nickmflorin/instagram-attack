@@ -16,6 +16,7 @@ FORMAL_ATTRS = {
     'flattened_error_rate': 'Flat. Error Rate',
     'avg_resp_time': 'Avg. Response Time',
     'time_since_used': 'Time Since Used',
+    'num_connection_errors': 'Num. Connection Errors'
 }
 
 
@@ -126,7 +127,7 @@ def evaluate(
             attr="num_connection_errors"
         ))
 
-    if time_since_used and proxy.time_since_used < time_since_used:
+    if time_since_used and proxy.time_since_used != 0.0 and proxy.time_since_used < time_since_used:
         evaluations.add(AttributeEvaluation(
             value=proxy.time_since_used,
             relative_value=time_since_used,

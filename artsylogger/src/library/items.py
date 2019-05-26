@@ -13,11 +13,19 @@ __all__ = (
 class Part(object):
 
     def __init__(self, value=None, constant=None):
+        self.owner = None
+        self.parent = None
+        self.siblings = None
+
         self._value = value
         self._constant = constant
 
     def __call__(self, record):
         return self.base_value(record)
+
+    @classmethod
+    def none(cls):
+        return cls()
 
     def valid(self, record):
         return self.base_value(record) is not None
@@ -34,15 +42,35 @@ class Part(object):
 
 class Indentation(Part):
 
-    def base_value(self, record):
-        if self._value:
-            return " " * self._value
+    def __init__(self, value=None, constant=None):
+        super(Indentation, self).__init__(constant=constant)
+        self._value = value or 0  # Prevent None Type
 
-    def add_from_parent(self, parent):
-        if self._value is None:
-            self._value = parent.indentation._value
-        elif parent.indentation._value is not None:
-            self._value += parent.indentation._value
+    @classmethod
+    def none(cls):
+        return cls(value=0)
+
+    def base_value(self, record):
+        """
+        Trying to Add Parent Indent to Children Causing Lots of Problems.
+        This was the closest we got:
+
+        >>> if isinstance(self.owner, Lines):
+        >>>    for i, child in enumerate(self.owner.children):
+        >>>        if isinstance(child, Line):
+        >>>            child.indentation._value += self._value
+        >>>        else:
+        >>>            print('Removing Indent %s' % self._value)
+        >>>            child.indentation._value -= self._value
+        >>>    return 0.0
+
+        This works fine unless it is nested Lines in Lines...
+        The following will indent each line 4 spaces instead of 2:
+        >>> Lines(Lines([Line, Line], indent=2))
+
+        For now, we will just explicitly set indentation for Line objects only.
+        """
+        return " " * self._value
 
 
 class FormattablePart(Part):
@@ -69,21 +97,33 @@ class FormattablePart(Part):
             return self._wrapper % val
         return val
 
-    def _apply_prefix_suffix(self, val):
-        """
-        TODO
-        ----
-        Start passing in group and determine if the next item is valid before
-        applying the suffix (like we used to with the Separator object).
-        """
+    def _apply_prefix_suffix(self, val, record):
+
         prefix = self._prefix or ""
         suffix = self._suffix or ""
+
+        index = self.owner.index
+        if self.owner.parent and self.owner.parent.children:
+            try:
+                child_after = self.owner.parent.children[index + 1]
+            except IndexError:
+                pass
+            else:
+                if not child_after.valid(record):
+                    suffix = ""
+
         return "%s%s%s" % (prefix, val, suffix)
 
     def formatted(self, record):
+        """
+        [x] TODO:
+        --------
+        This is causing bugs, owner.parent._formatter does not exist:
+        >>> if not formatter and (self.owner.parent and self.owner.parent._formatter):
+        >>>    formatter = self.owner.parent._formatter
+        """
         if self.valid(record):
             formatted = self.base_value(record)
-
             formatter = get_formatter_value(self._formatter, record)
             if formatter:
                 try:
@@ -94,7 +134,7 @@ class FormattablePart(Part):
                         formatted = formatter(formatted)
 
             formatted = self._wrap(formatted)
-            return self._apply_prefix_suffix(formatted)
+            return self._apply_prefix_suffix(formatted, record)
 
 
 class Label(FormattablePart):
@@ -116,7 +156,7 @@ class LineIndex(FormattablePart):
     def base_value(self, record):
         value = super(LineIndex, self).base_value(record)
         if value:
-            # TODO: Make bracketing an optional parameter.
+            # [x] TODO: Make bracketing an optional parameter.
             return f"[{value}] "
 
 
@@ -168,17 +208,9 @@ class AbstractObj(object):
 
     separator = ""
 
-    def __init__(self, indent=None, line_index=None, label=None):
-
-        self.line_index = line_index
-        if isinstance(line_index, dict):
-            self.line_index = LineIndex(**line_index)
-
-        self.label = label
-        if isinstance(label, dict):
-            self.label = Label(**label)
-
-        self.indentation = Indentation(value=indent)
+    def __init__(self, **kwargs):
+        self._pre_init(**kwargs)
+        self._post_init()
 
     def __call__(self, record):
         if self.valid(record):
@@ -190,6 +222,47 @@ class AbstractObj(object):
             ]
             return self._deliminate_parts(parts)
 
+    def _pre_init(self, children=None, indent=None, line_index=None, label=None, formatter=None):
+        self.parent = None
+        self.index = 0
+        self.siblings = None
+
+        self.children = list(children or [])
+
+        self._formatter = formatter
+
+        self.indentation = Indentation(value=indent)
+
+        self.line_index = line_index or LineIndex.none()
+        if isinstance(line_index, dict):
+            self.line_index = LineIndex(**line_index)
+
+        self.label = label or Label.none()
+        if isinstance(label, dict):
+            self.label = Label(**label)
+
+    def _post_init(self):
+        self.parent_children()
+        self.own_parts()
+
+    def own_parts(self):
+        self.indentation.owner = self
+        self.line_index.owner = self
+        self.label.parent = self
+
+    def parent_children(self):
+        for i, child in enumerate(self.children):
+            child.add_parent(self, i)
+            siblings = [sib for sib in self.children if sib != child]
+            child.add_siblings(siblings)
+
+    def add_siblings(self, siblings):
+        self.siblings = siblings
+
+    def add_parent(self, parent, index):
+        self.parent = parent
+        self.index = index
+
     def valid(self, record):
         return self.base_part.valid(record)
 
@@ -199,7 +272,6 @@ class AbstractObj(object):
     @property
     def parts(self):
         return [
-            self.indentation,
             self.line_index,
             self.label,
             self.base_part,
@@ -208,22 +280,33 @@ class AbstractObj(object):
 
 class Item(AbstractObj):
 
-    def __init__(
+    def _pre_init(
         self,
         value=None,
         constant=None,
-        formatter=None,
         prefix=None,
         suffix=None,
         wrapper=None,
         **kwargs
     ):
-        super(Item, self).__init__(**kwargs)
+        super(Item, self)._pre_init(**kwargs)
         self.base_part = FormattablePart(
             value=value,
             constant=constant,
-            formatter=formatter,
+            formatter=kwargs.get('formatter'),
             prefix=prefix,
             suffix=suffix,
             wrapper=wrapper,
         )
+
+    def own_parts(self):
+        super(Item, self).own_parts()
+        self.base_part.owner = self
+
+    def add_siblings(self, siblings):
+        super(Item, self).add_siblings(siblings)
+        self.base_part.siblings = siblings
+
+    def add_parent(self, parent, index):
+        super(Item, self).add_parent(parent, index)
+        self.base_part.parent = parent

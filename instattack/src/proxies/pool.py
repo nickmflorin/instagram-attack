@@ -165,7 +165,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
 
             evaluation = evaluate_for_use(proxy, self.config)
             if not evaluation.passed:
-                await log.warning('Cannot Use Proxy from Pool', extra={
+                await log.debug('Cannot Use Proxy from Pool', extra={
                     'proxy': proxy,
                     'other': str(evaluation),
                 })
@@ -193,7 +193,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
 
         evaluation = evaluate_for_pool(proxy, self.config)
         if not evaluation.passed:
-            await log.warning('Cannot Add Proxy to Pool', extra={
+            await log.debug('Cannot Add Proxy to Pool', extra={
                 'proxy': proxy,
                 'other': str(evaluation),
             })

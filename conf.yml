@@ -4,10 +4,10 @@ login:
     # limit: 10
     batch_size: 20
     log: True
-    remove_proxy_on_error: True
+    remove_proxy_on_error: False
 
     attempts:
-        log: True
+        log: False
         batch_size: 15
 
     connection:
