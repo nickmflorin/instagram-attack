@@ -2,7 +2,7 @@ import asyncio
 from plumbum import cli
 
 from instattack import logger
-from instattack.src.cli import EntryPoint, BaseApplication, SelectOperatorApplication
+from instattack.src.entrypoint import EntryPoint, BaseApplication, SelectOperatorApplication
 from instattack.src.utils import save_iteratively, save_concurrently
 
 from .models import Proxy

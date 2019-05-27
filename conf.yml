@@ -1,13 +1,14 @@
-silent_shutdown: False
+log:
+    operator: "DEBUG"
+    proxy_broker: "DEBUG"
+    login_attempts: "DEBUG"
+    proxy_pool: "DEBUG"
 
 login:
     # limit: 100
     batch_size: 20
-    log: True
-    remove_proxy_on_error: False
 
     attempts:
-        log: True
         batch_size: 15
 
     connection:
@@ -15,23 +16,44 @@ login:
         timeout: 10
         limit: 200
 
-# proxies:
+proxies:
+    collect: False
+    prepopulate: True
+    pool:
+        # The maximum amount of time to wait for a proxy from the queue before failing.
+        timeout: 25
+        # The maximum response time in seconds. If proxy.avg_resp_time exceeds this
+        # value, proxy will be removed from the pool.
+        max_resp_time: 5.0
+        # The maximum number of allowed connection errors for a proxy before being
+        # removed from the pool.
+        max_connection_errors: 2
+        # The maximum overall error rate for a proxy to be put into or used from
+        # the pool.
+        max_error_rate: 0.5
+        # The minimum number of requests that a proxy can be used for (overall/saved)
+        # before the error_rate starts becoming a factor.
+        error_rate_horizon: 5
+        # The maxmium number of allowed requests for each proxy per attack, before
+        # being removed from pool.
+        max_requests: 10
+        # The amount of time to wait before using a proxy that raises a 429 too many
+        # requests error.
+        time_between_request_timeout: 10
+        remove_proxy_on_error: False
 
-#     pool:
-#         timeout: 25
-#         prepopulate: True
-#         collect: True
-#         log: False
+    # Settings Here Only Matter if Collect = True
+    broker:
+        # The maximum number of concurrent checks of proxies
+        max_conn: 200
+        # The maximum number of attempts to check a proxy
+        # Note that the lower the value of max_tries, the faster the broker will return
+        # proxies, but they will not contain as much information to gauge their
+        # relative reliability and speed.
+        max_tries: 2
 
-#         max_resp_time: 5.0
-#         max_connection_errors: 2
-#         max_error_rate: 0.5
-#         max_req_proxy: 10
-#         min_time_between_proxy: 10
+        # Maximum amount of time to wait for broker to return a proxy before failing.
+        timeout: 5
 
-#     broker:
-#         max_conn: 200
-#         max_tries: 2
-#         timeout: 5
-#         log: False
-#         # limit: 2000
+        # Not sure if we are going to allow a limit parameter yet.
+        # limit: 2000

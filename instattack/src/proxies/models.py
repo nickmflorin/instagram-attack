@@ -5,13 +5,12 @@ from tortoise import fields
 from tortoise.models import Model
 
 from instattack import logger, settings
-from instattack.src.base import ModelMixin
 
 from .evaluation import evaluate, ProxyEvaluation
 from .mixins import ErrorHandlerMixin, ProxyBrokerMixin
 
 
-class Proxy(Model, ModelMixin, ProxyBrokerMixin, ErrorHandlerMixin):
+class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
 
     id = fields.IntField(pk=True)
     host = fields.CharField(max_length=30)

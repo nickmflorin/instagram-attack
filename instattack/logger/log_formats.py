@@ -12,11 +12,21 @@ def get_record_time(record):
     return datetime.now().strftime(DATE_FORMAT)
 
 
-def get_level_formatter(record):
-    if getattr(record, 'color', None):
-        return Format(record.color, colors.bold)
-    else:
-        return record.level.format
+def get_level_formatter(without_text_decoration=False, without_wrapping=False):
+    def _level_formatter(record):
+        if getattr(record, 'color', None):
+            if without_text_decoration:
+                return Format(record.color)
+            else:
+                return Format(record.color, colors.bold)
+        else:
+            format = record.level.format
+            if without_text_decoration:
+                format = format.without_text_decoration()
+            if without_wrapping:
+                format = format.without_wrapping()
+            return format
+    return _level_formatter
 
 
 def get_message_formatter(record):
@@ -210,7 +220,10 @@ LOG_FORMAT_STRING = Lines(
     header=Header(
         char="-",
         length=25,
-        label=['level.name'],
-        format=get_level_formatter,
+        label=Label(
+            value='level.name',
+            format=get_level_formatter(without_text_decoration=True),
+        ),
+        format=get_level_formatter(without_wrapping=True, without_text_decoration=True),
     )
 )

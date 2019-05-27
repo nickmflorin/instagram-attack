@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from weakref import WeakKeyDictionary
 
+from instattack import logger
+
 
 class DynamicProperty(object):
     """
@@ -38,44 +40,17 @@ class Identifier(DynamicProperty):
         return value
 
 
-class ModelMixin(object):
-
-    name = Identifier()
-
-    @classmethod
-    def count_all(cls):
-        """
-        Do not ask me why the count() method returns a CountQuery that does
-        not have an easily accessible integer value.
-        """
-        return cls.all().count().__sizeof__()
-
-
 class HandlerMixin(object):
 
     name = Identifier()
 
-    def init(self, lock=None, start_event=None, stop_event=None,
-            user=None, queue=None):
+    def create_logger(self, subname, ignore_config=False, sync=False):
+        if not sync:
+            log = logger.get_async(self.name, subname=subname)
+        else:
+            log = logger.get_sync(self.name, subname=subname)
 
-        self._stopped = False
-        self._started = False
-
-        self.lock = lock
-
-        self.stop_event = stop_event
-        self.start_event = start_event
-        self.user = user
-
-
-class BaseHandler(object):
-
-    def __init__(self, **kwargs):
-        self.init(**kwargs)
-
-
-class Handler(BaseHandler, HandlerMixin):
-
-    @property
-    def starting_message(self):
-        return f"Starting {self.name}"
+        if not ignore_config:
+            log_level = self.config['log'][self.__logconfig__]
+            log.setLevel(log_level)
+        return log

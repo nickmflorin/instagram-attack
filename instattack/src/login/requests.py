@@ -1,13 +1,11 @@
 import aiohttp
 import asyncio
 
-from instattack import logger, settings
+from instattack import settings
 from instattack.exceptions import (
     ClientResponseError, HttpRequestError, InvalidResponseJson,
     InstagramResultError, ClientTooManyRequests, find_request_error,
     HTTP_REQUEST_ERRORS, HttpFileDescriptorError)
-
-from instattack.src.base import Handler
 
 from .models import InstagramResult
 from .utils import get_token
@@ -47,7 +45,7 @@ class ProxyErrorHandlerMixin(object):
         Only remove proxy if the error has occured a certain number of times, we
         should allow proxies to occasionally throw a single error.
         """
-        log = logger.get_async(self.__name__, subname='login_request')
+        log = self.create_logger('login_request')
 
         # Allow Manual Treatments
         await proxy.handle_error(e)
@@ -70,38 +68,33 @@ class ProxyErrorHandlerMixin(object):
             await self.proxy_handler.pool.put(proxy)
 
 
-class RequestHandler(Handler, ProxyErrorHandlerMixin):
+class RequestHandler(ProxyErrorHandlerMixin):
 
-    def __init__(self, config, proxy_handler, **kwargs):
-        super(RequestHandler, self).__init__(**kwargs)
+    def __init__(self, config, proxy_handler):
+
+        self.config = config
         self.proxy_handler = proxy_handler
 
         self._headers = None
         self._cookies = None
         self._token = None
 
-        self.log_attempts = config['attempts']['log']
-
-        self.limit = config['connection']['limit']
-        self.timeout = config['connection']['timeout']
-        self.limit_per_host = config['connection']['limit_per_host']
-
-        self.remove_proxy_on_error = config.get('remove_proxy_on_error', False)
+        self.remove_proxy_on_error = config['proxies']['pool']['remove_proxy_on_error']
 
     @property
     def _connector(self):
         return aiohttp.TCPConnector(
             ssl=False,
             force_close=True,
-            limit=self.limit,
-            limit_per_host=self.limit_per_host,
+            limit=self.config['login']['connection']['limit'],
+            limit_per_host=self.config['login']['connection']['limit_per_host'],
             enable_cleanup_closed=True,
         )
 
     @property
     def _timeout(self):
         return aiohttp.ClientTimeout(
-            total=self.timeout
+            total=self.config['login']['connection']['timeout']
         )
 
     def _login_data(self, password):
@@ -198,7 +191,7 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
         which will eventually be called for all errors unless they are raised
         or suppressed (CancelledError).
         """
-        log = logger.get_async(self.__name__, subname='login_request')
+        log = self.create_logger('login_request')
 
         # These Are Our Errors
         if isinstance(e, (HttpRequestError, ClientResponseError)):
@@ -229,14 +222,14 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
         Only remove proxy if the error has occured a certain number of times, we
         should allow proxies to occasionally throw a single error.
         """
-        log = logger.get_async(self.__name__, subname='login_request')
+        log = self.create_logger('login_request')
 
         proxy.update_time()
-        if self.log_attempts:
-            log.debug('Making Login Request', extra={
-                'password': password,
-                'proxy': proxy,
-            })
+
+        log.debug('Making Login Request', extra={
+            'password': password,
+            'proxy': proxy,
+        })
 
         try:
             async with session.post(

@@ -37,17 +37,10 @@ class AbstractObj(object):
         self.index = index
 
     def valid(self, record):
-        return self.value.valid(record)
+        return self.value.valid(record, self)
 
     def _deliminate_parts(self, parts):
         return "".join(["%s" % part for part in parts])
-
-    @property
-    def parts(self):
-        return [
-            self.line_index,
-            self.label,
-        ]
 
 
 class AbstractGroup(AbstractObj):
@@ -141,6 +134,13 @@ class Item(AbstractObj):
             prefix=prefix,
             suffix=suffix,
         )
+
+    @property
+    def decorated_parts(self):
+        return [
+            self.line_index,
+            self.label,
+        ]
 
 
 class Line(AbstractGroup):

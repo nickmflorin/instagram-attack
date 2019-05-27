@@ -2,10 +2,9 @@ import asyncio
 import contextlib
 from proxybroker import Broker
 
-from instattack import logger
 from instattack import settings
-from instattack.src.utils import cancel_remaining_tasks
 from instattack.src.base import HandlerMixin
+from instattack.src.utils import cancel_remaining_tasks
 
 from .models import Proxy
 
@@ -13,29 +12,29 @@ from .models import Proxy
 class ProxyBroker(Broker, HandlerMixin):
 
     __name__ = 'Proxy Broker'
+    __logconfig__ = 'proxy_broker'
 
-    def __init__(self, config, limit=None, **kwargs):
-        self.init(**kwargs)
-        self.personal_start_event = asyncio.Event()
+    def __init__(self, config, limit=None):
+
+        self._stopped = False
+        self.config = config
 
         # ProxyBroker needs a numeric limit unfortunately... if we do not set it,
         # it will be arbitrarily high.
-        self.limit = limit or config.get('limit', 10000)
-
-        self.log_proxies = config.get('log', False)
+        self.limit = limit or config['proxies']['broker'].get('limit', 10000)
         self._proxies = asyncio.Queue()
 
         super(ProxyBroker, self).__init__(
             self._proxies,
-            max_tries=config['max_tries'],
-            max_conn=config['max_conn'],
-            timeout=config['timeout'],
+            max_tries=config['proxies']['broker']['max_tries'],
+            max_conn=config['proxies']['broker']['max_conn'],
+            timeout=config['proxies']['broker']['timeout'],
             verify_ssl=False,
         )
 
     @contextlib.asynccontextmanager
     async def session(self, loop):
-        log = logger.get_async(self.__name__, subname='session')
+        log = self.create_logger(subname='session', ignore_config=True)
 
         await log.start('Opening Broker Session')
         await self.start(loop)
@@ -46,8 +45,8 @@ class ProxyBroker(Broker, HandlerMixin):
             await self.shutdown(loop)
 
     async def start(self, loop):
-        log = logger.get_async(self.__name__, subname='start')
-        log.start(f'Starting Broker with Limit = {self.limit}')
+        log = self.create_logger(subname='start')
+        await log.start(f'Starting Broker with Limit = {self.limit}')
 
         self._started = True
 
@@ -59,7 +58,7 @@ class ProxyBroker(Broker, HandlerMixin):
         )
 
     async def collect(self, loop, save=False):
-        log = logger.get_async(self.__name__, subname='collect')
+        log = self.create_logger(subname='collect')
 
         if self._started:
             raise RuntimeError('Broker should not be started before collect method.')
@@ -75,9 +74,11 @@ class ProxyBroker(Broker, HandlerMixin):
                         proxy,
                         save=save
                     )
+                    if self.log_proxies:
+                        await log.debug('Broker Returned Proxy', extra={'proxy': proxy})
                     yield proxy, created
                 else:
-                    log.warning('Null Proxy Returned from Broker... Stopping')
+                    await log.warning('Null Proxy Returned from Broker... Stopping')
                     break
 
     async def shutdown(self, loop):
@@ -85,8 +86,8 @@ class ProxyBroker(Broker, HandlerMixin):
         Cannot override stop() method, because stop() method must remain synchronous
         since ProxyBroker package attaches signal handlers to it.
         """
-        log = logger.get_async(self.__name__, subname='shutdown')
-        log.stop('Shutting Down Proxy Broker')
+        log = self.create_logger(subname='shutdown')
+        await log.stop('Shutting Down Proxy Broker')
 
         self._proxies.put_nowait(None)
 
@@ -98,7 +99,7 @@ class ProxyBroker(Broker, HandlerMixin):
 
         # If we do not do this here, these tasks can raise exceptions in our
         # shutdown method.
-        log.debug('Cancelling Proxy Broker Tasks')
+        await log.debug('Cancelling Proxy Broker Tasks')
         await cancel_remaining_tasks(
             futures=self._all_tasks,
             silence_exceptions=True,

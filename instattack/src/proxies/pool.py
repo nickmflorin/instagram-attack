@@ -2,7 +2,6 @@ import asyncio
 import aiojobs
 import itertools
 
-from instattack import logger
 from instattack.src.base import HandlerMixin
 
 from .utils import stream_proxies
@@ -22,22 +21,21 @@ the desired queues based on priority.
 class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
 
     __name__ = 'Proxy Pool'
+    __logconfig__ = 'proxy_pool'
 
-    DEFAULT_TIMEOUT = 25  # TODO: Move to settings or config.
-
-    def __init__(self, config, broker, **kwargs):
+    def __init__(self, config, broker, start_event=None):
         super(ProxyPool, self).__init__(config.get('limit', -1))
-        self.init(**kwargs)
 
         self.broker = broker
-        self.config = config  # Needed to Pass to Proxy Models
+        self.config = config
+        self.start_event = start_event
 
-        self.should_collect = config.get('collect', True)
-        self.should_prepopulate = config.get('prepopulate', True)
-        self.prepopulate_limit = config.get('prepopulate_limit')
+        self.should_collect = config['proxies']['collect']
+        self.should_prepopulate = config['proxies']['prepopulate']
+        self.timeout = config['proxies']['pool']['timeout']
 
-        self.log_queue = config.get('log', False)
-        self.timeout = config.get('timeout', self.DEFAULT_TIMEOUT)
+        # Not Using This Right Now
+        self.prepopulate_limit = None
 
         # Tuple Comparison Breaks in Python3 -  The entry count serves as a
         # tie-breaker so that two tasks with the same priority are returned in
@@ -52,23 +50,23 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        log = logger.get_async(self.__name__, subname='prepopulate')
-        log.start('Prepopulating Proxies')
+        log = self.create_logger('prepopulate')
+
+        await log.start('Prepopulating Proxies')
 
         async for proxy in stream_proxies():
             # Whether or not the proxy is okay for the pull is checked in the
             # put() method directly.
             proxy.reset()
             await self.put(proxy, source='Database')
-
             if self.prepopulate_limit and self.qsize() == self.prepopulate_limit:
                 break
 
         if self.qsize() == 0:
-            log.error('No Proxies to Prepopulate')
+            await log.error('No Proxies to Prepopulate')
             return
 
-        log.complete(f"Prepopulated {self.qsize()} Proxies")
+        await log.complete(f"Prepopulated {self.qsize()} Proxies")
 
     async def collect(self, loop):
         """
@@ -85,8 +83,9 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         based on the prepopulated limit.
         >>> collect_limit = max(self._maxsize - self.qsize(), 0)
         """
-        log = logger.get_async(self.__name__, subname='collect')
-        log.start('Collecting Proxies')
+        log = self.create_logger('collect')
+
+        await log.start('Collecting Proxies')
 
         scheduler = await aiojobs.create_scheduler(limit=None)
 
@@ -100,7 +99,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
                 # Set Start Event on First Proxy Retrieved from Broker
                 if self.start_event and not self.start_event.is_set():
                     self.start_event.set()
-                    log.info('Setting Start Event', extra={
+                    await log.info('Setting Start Event', extra={
                         'other': 'Broker Started Sending Proxies'
                     })
 
@@ -137,11 +136,11 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         >>>             self._threshold = True
         >>>         ...
         """
-        log = logger.get_async(self.__name__, subname='get')
+        log = self.create_logger('get')
 
         try:
             if self.qsize() <= 20:
-                await log.info(f'Running Low on Proxies: {self.qsize()}')
+                await log.warning(f'Running Low on Proxies: {self.qsize()}')
 
             # We might not need this timeout, since it might be factored into the
             # session already.
@@ -156,7 +155,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         Retrieves the lowest priority proxy from the queue that is ready to
         be used.
         """
-        log = logger.get_async('Proxy Priority Queue', subname='get')
+        log = self.create_logger('get')
 
         while True:
             ret = await super(ProxyPool, self).get()
@@ -188,7 +187,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         quantitative metrics aren't perfect, but we know the proxy has
         successful requests.
         """
-        log = logger.get_async('Proxy Priority Queue', subname='put')
+        log = self.create_logger('put')
 
         evaluation = proxy.evaluate_for_pool(self.config)
         if not evaluation.passed:

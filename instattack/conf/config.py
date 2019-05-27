@@ -5,7 +5,13 @@ import json
 import os
 import yaml
 
+from instattack import logger
+from instattack.exceptions import ConfigurationError
+
 from .utils import validate_config_filepath, validate_config_schema
+
+
+log = logger.get_sync('Configuration')
 
 
 class Configuration(collections.MutableMapping):
@@ -14,13 +20,14 @@ class Configuration(collections.MutableMapping):
 
     env_key = 'INSTATTACK_CONFIG'
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, data=None, top_level=False, path=None):
 
         self.store = dict()
-        self.path = kwargs.pop('path', None)
+        self.path = path
         if self.path:
             self.read()
-        self.update(dict(*args))
+        else:
+            self.update(data or {}, top_level=top_level)
 
     def __getitem__(self, key):
         item = self.store[self.__keytransform__(key)]
@@ -53,7 +60,12 @@ class Configuration(collections.MutableMapping):
     def load(cls):
         data = os.environ[cls.env_key]
         data = json.loads(data)
-        return cls(data)
+        try:
+            validate_config_schema(data)
+        except ConfigurationError as e:
+            log.critical('Configuration Not Valid After Loading from OS Environment')
+            raise e
+        return cls(data, top_level=True)
 
     def read(self):
         if not self.path:
@@ -94,14 +106,15 @@ class Configuration(collections.MutableMapping):
                 serialized[k] = v
         return serialized
 
-    def update(self, data):
+    def update(self, data, top_level=False):
         """
         Similar to regular dict update, but will only update nested dict values
         for single keys, not the entire structures.
         """
         if data:
             self.recursively_update(data)
-        self.set()
+        if top_level:
+            self.set()
 
     def default(self, key, val):
         """
@@ -120,9 +133,21 @@ class Configuration(collections.MutableMapping):
         return self[key]
 
     def set(self):
+        try:
+            validate_config_schema(self.store)
+        except ConfigurationError as e:
+            log.critical('Configuration Not Valid Before Storing in OS Environment')
+            raise e
+
         os.environ[self.env_key] = json.dumps(self.serialize())
 
     def override(self, **kwargs):
         new_config = Configuration(deepcopy(self.store))
         new_config.update(**kwargs)
+
+        try:
+            validate_config_schema(new_config.store)
+        except ConfigurationError as e:
+            log.critical('Configuration Not Valid After Override')
+            raise e
         return new_config

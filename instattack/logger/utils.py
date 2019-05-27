@@ -1,9 +1,5 @@
-from datetime import datetime
-from plumbum import LocalPath, colors
+from plumbum import LocalPath
 import os
-
-from artsylogger import Format
-from .constants import DATE_FORMAT, RecordAttributes
 
 
 def is_log_file(path):

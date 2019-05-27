@@ -83,51 +83,101 @@ def validate_config_schema(config):
         config.update(**kwargs)
         return config
 
-    def boolean():
-        return {
+    def positive_float(**kwargs):
+        config = {
+            'required': True,
+            'type': 'float',
+            'min': 0.0,
+        }
+        config.update(**kwargs)
+        return config
+
+    def boolean(**kwargs):
+        config = {
             'required': True,
             'type': 'boolean'
         }
+        config.update(**kwargs)
+        return config
 
-    config.setdefault('silent_shutdown', True)
-
-    config.setdefault('login', {})
-    config['login'].setdefault('limit', None)
-    config['login'].setdefault('log', False)
-    config['login'].setdefault('remove_proxy_on_error', False)
+    def log_level(**kwargs):
+        to_level = lambda v: v.upper()  # noqa
+        config = {
+            'required': True,
+            'type': 'string',
+            # 'coerce': (str, to_level),
+        }
+        config.update(**kwargs)
+        return config
 
     v = Validator()
+
     v.schema = {
-        'silent_shutdown': {
+        'log': {
             'required': True,
-            'type': 'boolean'
+            'type': 'dict',
+            'schema': {
+                'operator': log_level(default='INFO'),
+                'proxy_broker': log_level(default='WARNING'),
+                'login_attempts': log_level(default='ERROR'),
+                'proxy_pool': log_level(default='WARNING'),
+            }
         },
         'login': {
             'required': True,
             'type': 'dict',
             'schema': {
-                'limit': positive_int(max=10000, nullable=True),
+                'limit': positive_int(max=10000, nullable=True, default=None),
                 'batch_size': positive_int(max=100),
-                'log': boolean(),
-                'remove_proxy_on_error': boolean(),
                 'attempts': {
                     'required': True,
                     'type': 'dict',
                     'schema': {
                         'batch_size': positive_int(max=100),
-                        'log': boolean(),
                     }
                 },
                 'connection': {
                     'required': True,
                     'type': 'dict',
                     'schema': {
-                        'limit_per_host': positive_int(max=10),
-                        'timeout': positive_int(max=20),
+                        'limit_per_host': positive_int(max=100, default=10),
+                        'timeout': positive_int(max=20, default=10),
                         # Might want to raise this max value higher.
-                        'limit': positive_int(max=200),
+                        'limit': positive_int(max=200, default=100),
                     }
                 }
+            }
+        },
+        'proxies': {
+            'required': True,
+            'type': 'dict',
+            'schema': {
+                'collect': boolean(),
+                'prepopulate': boolean(),
+                'pool': {
+                    'required': True,
+                    'type': 'dict',
+                    'schema': {
+                        'remove_proxy_on_error': boolean(default=False),
+                        'max_conn': positive_int(max=1000, default=100),
+                        'timeout': positive_int(max=50, default=25),
+                        'max_connection_errors': positive_int(max=100),
+                        'max_error_rate': positive_float(max=1.0),
+                        'max_resp_time': positive_float(max=10.0),
+                        'error_rate_horizon': positive_int(max=10),
+                        'max_requests': positive_int(),
+                        'time_between_request_timeout': positive_int(default=10),
+                    }
+                },
+                'broker': {
+                    'required': True,
+                    'type': 'dict',
+                    'schema': {
+                        'max_conn': positive_int(max=1000),
+                        'max_tries': positive_int(max=10),
+                        'timeout': positive_int(max=10),
+                    },
+                },
             }
         }
     }

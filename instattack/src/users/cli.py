@@ -3,7 +3,7 @@ from plumbum import cli
 
 from instattack import logger
 from instattack.exceptions import ArgumentError
-from instattack.src.cli import EntryPoint, BaseApplication, SelectOperatorApplication
+from instattack.src.entrypoint import EntryPoint, BaseApplication, SelectOperatorApplication
 
 from .models import User
 

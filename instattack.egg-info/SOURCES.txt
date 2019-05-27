@@ -17,12 +17,9 @@ instattack/exceptions/base.py
 instattack/exceptions/http.py
 instattack/exceptions/io.py
 instattack/exceptions/utils.py
-instattack/lib/__init__.py
-instattack/lib/progress.py
 instattack/logger/__init__.py
 instattack/logger/constants.py
 instattack/logger/filters.py
-instattack/logger/format.py
 instattack/logger/handler.py
 instattack/logger/handlers.py
 instattack/logger/log_formats.py

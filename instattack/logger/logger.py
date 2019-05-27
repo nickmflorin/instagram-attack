@@ -47,6 +47,7 @@ class LoggerMixin(object):
                 f = f.f_back
                 continue
 
+            # TODO: Keep looking until file is inside app_root.
             elif is_log_file(filename):
                 f = f.f_back
                 continue
@@ -57,29 +58,6 @@ class LoggerMixin(object):
             rv = (co.co_filename, f.f_lineno, co.co_name, None)
             break
         return rv
-
-    def disable_on_false(self, value):
-        self._conditional = (value, False)
-
-    def disable_on_true(self, value):
-        self._conditional = (value, True)
-
-    def condition_on_true(self, value, subname=None):
-        logger = self.__class__(self.name, subname=subname)
-        logger.disable_on_true(value)
-        return logger
-
-    def condition_on_false(self, value, subname=None):
-        logger = self.__class__(self.name, subname=subname)
-        logger.disable_on_false(value)
-        return logger
-
-    @property
-    def conditionally_disabled(self):
-        if self._conditional is not None:
-            if self._conditional[0] == self._conditional[1]:
-                return True
-        return False
 
     def updateLevel(self):
         # Environment variable might not be set for usages of AppLogger
@@ -142,24 +120,28 @@ class SyncLoggerMixin(LoggerMixin):
 class AsyncLoggerMixin(SyncLoggerMixin):
 
     async def success(self, msg, *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra']['frame_correction'] = 1
-        return await self._log(LoggingLevels.SUCCESS.num, msg, args, **kwargs)
+        if self.isEnabledFor(LoggingLevels.SUCCESS.num):
+            kwargs.setdefault('extra', {})
+            kwargs['extra']['frame_correction'] = 1
+            return await self._log(LoggingLevels.SUCCESS.num, msg, args, **kwargs)
 
     async def start(self, msg, *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra']['frame_correction'] = 1
-        return await self._log(LoggingLevels.START.num, msg, args, **kwargs)
+        if self.isEnabledFor(LoggingLevels.START.num):
+            kwargs.setdefault('extra', {})
+            kwargs['extra']['frame_correction'] = 1
+            return await self._log(LoggingLevels.START.num, msg, args, **kwargs)
 
     async def stop(self, msg, *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra']['frame_correction'] = 1
-        return await self._log(LoggingLevels.STOP.num, msg, args, **kwargs)
+        if self.isEnabledFor(LoggingLevels.STOP.num):
+            kwargs.setdefault('extra', {})
+            kwargs['extra']['frame_correction'] = 1
+            return await self._log(LoggingLevels.STOP.num, msg, args, **kwargs)
 
     async def complete(self, msg, *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra']['frame_correction'] = 1
-        return await self._log(LoggingLevels.COMPLETE.num, msg, args, **kwargs)
+        if self.isEnabledFor(LoggingLevels.COMPLETE.num):
+            kwargs.setdefault('extra', {})
+            kwargs['extra']['frame_correction'] = 1
+            return await self._log(LoggingLevels.COMPLETE.num, msg, args, **kwargs)
 
     async def bare(self, msg, color='darkgray', *args, **kwargs):
         kwargs.setdefault('extra', {})
@@ -193,9 +175,10 @@ class SimpleSyncLogger(SyncLoggerMixin, logging.Logger):
         logging.Logger.__init__(self, name)
         self.init()
 
-    def _log(self, *args, **kwargs):
-        if not self.conditionally_disabled:  # Reason We Override
-            super(SimpleSyncLogger, self)._log(*args, **kwargs)
+    def setLevel(self, level):
+        if not isinstance(level, int):
+            level = LoggingLevels[level].num
+        super(SimpleSyncLogger, self).setLevel(level)
 
 
 class SyncLogger(SimpleSyncLogger):
@@ -272,6 +255,11 @@ class SimpleAsyncLogger(AsyncLoggerMixin, aiologger.Logger):
             extra=extra,
         )
 
+    def setLevel(self, level):
+        if not isinstance(level, int):
+            level = LoggingLevels[level].num
+        super(SimpleAsyncLogger, self).setLevel(level)
+
     async def _log(
         self,
         level,
@@ -288,17 +276,20 @@ class SimpleAsyncLogger(AsyncLoggerMixin, aiologger.Logger):
         # is always right.
         self.updateLevel()
 
-        if not self.conditionally_disabled:  # Reason We Override
-            record = await self._create_record(
-                level,
-                msg,
-                args,
-                exc_info=exc_info,
-                extra=extra,
-                stack_info=stack_info,
-                caller=caller,
-            )
-            await self.handle(record)
+        # We used to override to check if conditionally_disabled was set here, but
+        # maybe we don't need that anymore?
+        # >>> if not self.conditionally_disabled:
+
+        record = await self._create_record(
+            level,
+            msg,
+            args,
+            exc_info=exc_info,
+            extra=extra,
+            stack_info=stack_info,
+            caller=caller,
+        )
+        await self.handle(record)
 
 
 class AsyncLogger(SimpleAsyncLogger):
@@ -315,13 +306,7 @@ class AsyncLogger(SimpleAsyncLogger):
         exceptions with their traceback.  For now, this is a workaround that
         works similiarly.
         """
-        extra = extra or {}
-        extra.update({
-            'header_label': "Error",
-            'header_formatter': (
-                LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()),
-        })
-        await self.error(exc_info[1], extra=extra)
+        await self.error(exc_info[1])
 
         # sys.stderr.write("\n")
         to_log = traceback.format_exception(*exc_info, limit=None)
@@ -342,23 +327,26 @@ class AsyncLogger(SimpleAsyncLogger):
         # is always right.
         self.updateLevel()
 
-        if not self.conditionally_disabled:  # Reason We Override
-            record = await self._create_record(
-                level,
-                msg,
-                args,
-                exc_info=exc_info,
-                extra=extra,
-                stack_info=stack_info,
-                caller=caller,
-            )
+        # We used to override partially to check if conditionally_disabled was
+        # set here, but maybe we don't need that anymore?
+        # >>> if not self.conditionally_disabled:
 
-            # For whatever reason, when using our custom log levels, the arguments
-            # in extra are not assigned to the record.
-            if extra:
-                for key, val in extra.items():
-                    setattr(record, key, val)
+        record = await self._create_record(
+            level,
+            msg,
+            args,
+            exc_info=exc_info,
+            extra=extra,
+            stack_info=stack_info,
+            caller=caller,
+        )
 
-            if self.subname is not None:
-                setattr(record, 'subname', self.subname)  # Reason We Override
-            await self.handle(record)
+        # For whatever reason, when using our custom log levels, the arguments
+        # in extra are not assigned to the record.
+        if extra:
+            for key, val in extra.items():
+                setattr(record, key, val)
+
+        if self.subname is not None:
+            setattr(record, 'subname', self.subname)  # Reason We Override
+        await self.handle(record)

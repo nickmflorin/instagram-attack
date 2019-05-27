@@ -7,15 +7,14 @@ from instattack import logger
 from instattack.exceptions import HttpServerConnectionError
 from instattack.conf import Configuration
 
-from instattack.src import operator
+from instattack.run import operator
 from instattack.conf.utils import validate_log_level
 
 
 async def test(config):
     log = logger.get_async('Test Logger')
 
-    e = HttpServerConnectionError()
-    await log.error(e)
+    await log.info('TEST INFO')
 
 
 def main():

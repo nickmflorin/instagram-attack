@@ -10,13 +10,17 @@ import tortoise
 
 # Need to figure out how to delay import of this module totally until LEVEL set
 # in os.environ, or finding a better way of setting LEVEL with CLI.
-from instattack import logger, settings
-from instattack.exceptions import ArgumentError
+from . import logger
+from . import settings
+from . import exceptions
 
-from instattack.conf import Configuration
-from instattack.src.utils import get_app_stack_at, task_is_third_party, cancel_remaining_tasks
+from .src.proxies.cli import *  # noqa
+from .src.users.cli import *  # noqa
+from .src.login.cli import *  # noqa
 
-from .cli import EntryPoint
+from .src.base import HandlerMixin
+from .src.utils import get_app_stack_at, task_is_third_party, cancel_remaining_tasks
+from .src.entrypoint import EntryPoint
 
 """
 May want to catch other signals too - these are not currently being
@@ -35,100 +39,20 @@ def exception_hook(exc_type, exc_value, exc_traceback):
 sys.excepthook = exception_hook
 
 
-class shutdown_mixin(object):
+class operator(HandlerMixin):
 
-    def shutdown(self, loop, signal=None):
-        """
-        For signal handlers, the shutdown() method requires the loop argument.
-        For all shutdown related methods, we will require the loop method to be
-        explicitly provided even though they could have access to self.loop if we
-        initialized operator that way. x
-        """
-        log = logger.get_sync('__name__', subname='shutdown')
-
-        if self._shutdown:
-            log.warning('Instattack Already Shutdown...')
-            return
-
-        self._shutdown = True
-        if signal:
-            log.warning(f'Received exit signal {signal.name}...')
-
-        # It would be easier if there was a way to pass this through to the CLI
-        # application directly, instead of storing as ENV variable.
-        config = Configuration.load()
-
-        # Temporary Issue - We cannot pass in the config object from the loop
-        # exception handler, only from teh start() method.  Eventually we might
-        # want to find a better way to do this.
-        if config:
-            log.disable_on_true(config.get('silent_shutdown', False))
-
-        log.start('Starting Shut Down')
-        loop.run_until_complete(self.shutdown_async(loop))
-        loop.stop()
-        log.complete('Shutdown Complete')
-
-    async def shutdown_async(self, loop):
-        await self.shutdown_outstanding_tasks(loop)
-        await self.shutdown_async_loggers(loop)
-        await self.shutdown_database(loop)
-
-    async def shutdown_outstanding_tasks(self, loop):
-        log = logger.get_sync(__name__, subname='shutdown_outstanding_tasks')
-
-        log.start('Cancelling Remaining Tasks')
-        futures = await cancel_remaining_tasks(raise_exceptions=True, log_tasks=True)
-        if len(futures) != 0:
-            log.complete(f'Cancelled {len(futures)} Leftover Tasks')
-
-            with log.logging_lines():
-                log_tasks = futures[:20]
-                for task in log_tasks:
-                    if task_is_third_party(task):
-                        log.line(f"{task._coro.__name__} (Third Party)")
-                    else:
-                        log.line(task._coro.__name__)
-
-                if len(futures) > 20:
-                    log.line('...')
-        else:
-            log.complete('No Leftover Tasks to Cancel')
-
-    async def shutdown_async_loggers(self, loop):
-        from instattack.logger import AsyncLogger
-
-        log = logger.get_async(__name__, subname='shutdown_async_loggers')
-
-        await log.complete('Shutting Down Async Loggers')
-        loggers = [logging.getLogger(name)
-            for name in logging.root.manager.loggerDict]
-
-        for lgr in loggers:
-            if isinstance(lgr, AsyncLogger):
-                log.start('Shutting Down Logger...')
-                await lgr.shutdown()
-
-        await log.complete('Async Loggers Shutdown')
-
-    async def shutdown_database(self, loop):
-        log = logger.get_async(__name__, subname='shutdown_database')
-        await log.start('Shutting Down Database')
-        await tortoise.Tortoise.close_connections()
-        await log.complete('Database Shutdown')
-
-
-class operator(shutdown_mixin):
+    __name__ = 'Operator'
+    __logconfig__ = "operator"
 
     def __init__(self, config):
         if 'LEVEL' not in os.environ:
             raise RuntimeError('Level must be set.')
+
         self.config = config
         self._shutdown = False
 
     def start(self, loop, *a):
-        from instattack.logger import progressbar_wrap
-        log = logger.get_sync(__name__, subname='start')
+        log = self.create_logger('start', sync=True)
 
         self.setup(loop)
 
@@ -139,18 +63,17 @@ class operator(shutdown_mixin):
         # application directly, instead of storing as ENV variable.
         self.config.set()
 
-        with progressbar_wrap():
-            try:
-                EntryPoint.run(argv=cli_args)
-            except (ArgumentTypeError, ArgumentError) as e:
-                log.error(e)
-            finally:
-                # Using finally here instead of else might cause race conditions with
-                # shutdown, but we issue a warning if the shutdown was already performed.
-                # If we don't use finally, than we cannot stop the program.
-                if not self._shutdown:
-                    log.debug('Shutting Down in Start Method')
-                    self.shutdown(loop)
+        try:
+            EntryPoint.run(argv=cli_args)
+        except (ArgumentTypeError, exceptions.ArgumentError) as e:
+            log.error(e)
+        finally:
+            # Using finally here instead of else might cause race conditions with
+            # shutdown, but we issue a warning if the shutdown was already performed.
+            # If we don't use finally, than we cannot stop the program.
+            if not self._shutdown:
+                log.debug('Shutting Down in Start Method')
+                self.shutdown(loop)
 
     def setup(self, loop):
         self.setup_directories(loop)
@@ -187,6 +110,77 @@ class operator(shutdown_mixin):
         await tortoise.Tortoise.init(config=settings.DB_CONFIG)
         await tortoise.Tortoise.generate_schemas()
 
+    def shutdown(self, loop, signal=None):
+        """
+        For signal handlers, the shutdown() method requires the loop argument.
+        For all shutdown related methods, we will require the loop method to be
+        explicitly provided even though they could have access to self.loop if we
+        initialized operator that way. x
+        """
+        log = self.create_logger('shutdown', sync=True)
+
+        if self._shutdown:
+            log.warning('Instattack Already Shutdown...')
+            return
+
+        self._shutdown = True
+        if signal:
+            log.warning(f'Received exit signal {signal.name}...')
+
+        log.start('Starting Shut Down')
+        loop.run_until_complete(self.shutdown_async(loop))
+        loop.stop()
+        log.complete('Shutdown Complete')
+
+    async def shutdown_async(self, loop):
+        await self.shutdown_outstanding_tasks(loop)
+        await self.shutdown_async_loggers(loop)
+        await self.shutdown_database(loop)
+
+    async def shutdown_outstanding_tasks(self, loop):
+        log = self.create_logger('shutdown_outstanding_tasks', sync=True)
+
+        log.start('Cancelling Remaining Tasks')
+        futures = await cancel_remaining_tasks(raise_exceptions=True, log_tasks=True)
+        if len(futures) != 0:
+            log.complete(f'Cancelled {len(futures)} Leftover Tasks')
+
+            with log.logging_lines():
+                log_tasks = futures[:20]
+                for task in log_tasks:
+                    if task_is_third_party(task):
+                        log.line(f"{task._coro.__name__} (Third Party)")
+                    else:
+                        log.line(task._coro.__name__)
+
+                if len(futures) > 20:
+                    log.line('...')
+        else:
+            log.complete('No Leftover Tasks to Cancel')
+
+    async def shutdown_async_loggers(self, loop):
+        from instattack.logger import AsyncLogger
+
+        log = self.create_logger('shutdown_async_loggers')
+
+        await log.complete('Shutting Down Async Loggers')
+        loggers = [logging.getLogger(name)
+            for name in logging.root.manager.loggerDict]
+
+        for lgr in loggers:
+            if isinstance(lgr, AsyncLogger):
+                log.start('Shutting Down Logger...')
+                await lgr.shutdown()
+
+        await log.complete('Async Loggers Shutdown')
+
+    async def shutdown_database(self, loop):
+        log = self.create_logger('shutdown_database')
+
+        await log.start('Shutting Down Database')
+        await tortoise.Tortoise.close_connections()
+        await log.complete('Database Shutdown')
+
     def handle_exception(self, loop, context):
         """
         We are having trouble using log.exception() with exc_info=True and seeing
@@ -197,7 +191,7 @@ class operator(shutdown_mixin):
         Not sure if we will keep it or not, since it might add some extra
         customization availabilities, but it works right now.
         """
-        log = logger.get_sync(__name__, subname='handle_exception')
+        log = self.create_logger('handle_exception', sync=True)
         log.debug('Handling Exception')
 
         # Unfortunately, the step will only work for exceptions that are caught

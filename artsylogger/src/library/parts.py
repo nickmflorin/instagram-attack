@@ -33,7 +33,7 @@ class Part(object):
         return None
 
     def valid(self, record, owner):
-        return self.unformatted_value(record) is not None
+        return self.unformatted_value(record, owner) is not None
 
     @classmethod
     def none(cls):
@@ -110,9 +110,7 @@ class FormattablePart(Part):
                     formatted = formatter(unformatted)
                 else:
                     raise
-
-            formatted = self._wrap(formatted, record, owner)
-            return self._apply_prefix_suffix(formatted, record, owner)
+            return formatted
         else:
             return unformatted
 
@@ -175,8 +173,8 @@ class Header(FormattablePart):
     def __init__(self, char=None, format=None, label=None, length=None):
         super(Header, self).__init__(format=format)
         self._char = char
-        self._label = label
         self._length = length
+        self._label = label
 
     def length(self, record, owner):
         if self._length:
@@ -197,12 +195,20 @@ class Header(FormattablePart):
             return self._label(record, owner)
 
     def line(self, record, owner):
-        return self._char * self.length(record)
+        return self._char * self.length(record, owner)
 
-    def unformatted_value(self, record, owner):
-        if self._char is not None:
-            line = self.line(record, owner)
-            label = self.label(record, owner)
-            if label:
-                return f"{line} {label} {line}\n"
-            return f"{line}\n"
+    def valid(self, record, owner):
+        return self._char is not None
+
+    def formatted(self, record, owner):
+        line = self.line(record, owner)
+        formatter = self.format(record, owner)
+
+        # Format Lines Separately of Label?
+        if formatter:
+            line = formatter(line)
+
+        label = self.label(record, owner)
+        if label:
+            return f"{line} {label} {line}\n"
+        return f"{line}\n"
