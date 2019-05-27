@@ -5,3 +5,13 @@ INSTAGRAM_PASSWORD_FIELD = 'password'
 CHECKPOINT_REQUIRED = "checkpoint_required"
 GENERIC_REQUEST_ERROR = 'generic_request_error'
 GENERIC_REQUEST_MESSAGE = 'Sorry, there was a problem with your request.'
+
+PASSWORDS = "passwords"
+ALTERATIONS = "alterations"
+NUMERICS = "numerics"
+
+FILES = [
+    PASSWORDS,
+    ALTERATIONS,
+    NUMERICS
+]

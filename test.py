@@ -4,35 +4,18 @@ import asyncio
 import os
 
 from instattack import logger
-from instattack.src import operator
+from instattack.exceptions import HttpServerConnectionError
+from instattack.conf import Configuration
 
-from instattack.src.config import Configuration
-from instattack.src.utils import validate_log_level
+from instattack.src import operator
+from instattack.conf.utils import validate_log_level
 
 
 async def test(config):
     log = logger.get_async('Test Logger')
-    queue = asyncio.PriorityQueue()
 
-    await queue.put(((1, 2), 'First'))
-    await queue.put(((3, 4), 'Third'))
-    await queue.put(((2, 1), 'Second'))
-
-    retrieved = await queue.get()
-    await log.success(retrieved)
-
-    await queue.put(((1, 1), 'New First'))
-    await queue.put(((2, 2), 'New Second'))
-    await queue.put(((6, 1), 'Last'))
-
-    retrieved = await queue.get()
-    print(retrieved)
-
-    retrieved = await queue.get()
-    print(retrieved)
-
-    retrieved = await queue.get()
-    print(retrieved)
+    e = HttpServerConnectionError()
+    await log.error(e)
 
 
 def main():

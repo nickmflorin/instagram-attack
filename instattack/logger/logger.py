@@ -309,6 +309,24 @@ class AsyncLogger(SimpleAsyncLogger):
         super(AsyncLogger, self).__init__(name)
         self.subname = subname
 
+    async def traceback(self, *exc_info, extra=None):
+        """
+        We are having problems with logbook and asyncio in terms of logging
+        exceptions with their traceback.  For now, this is a workaround that
+        works similiarly.
+        """
+        extra = extra or {}
+        extra.update({
+            'header_label': "Error",
+            'header_formatter': (
+                LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()),
+        })
+        await self.error(exc_info[1], extra=extra)
+
+        # sys.stderr.write("\n")
+        to_log = traceback.format_exception(*exc_info, limit=None)
+        await self.error(to_log)
+
     async def _log(
         self,
         level,

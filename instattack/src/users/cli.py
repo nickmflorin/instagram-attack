@@ -2,7 +2,7 @@ import asyncio
 from plumbum import cli
 
 from instattack import logger
-from instattack.src.exceptions import ArgumentError
+from instattack.exceptions import ArgumentError
 from instattack.src.cli import EntryPoint, BaseApplication, SelectOperatorApplication
 
 from .models import User

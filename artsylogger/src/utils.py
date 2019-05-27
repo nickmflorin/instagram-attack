@@ -109,15 +109,6 @@ def is_record_callable(value):
             return True
 
 
-def get_formatter_value(value, record):
-    if callable(value):
-        if is_record_callable(value):
-            return value(record)
-        else:
-            return value
-    return value
-
-
 def get_log_value(value, record):
     """
     TODO

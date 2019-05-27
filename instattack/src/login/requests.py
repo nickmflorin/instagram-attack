@@ -1,21 +1,21 @@
 import aiohttp
 import asyncio
 
-from instattack import logger
-from instattack import settings
+from instattack import logger, settings
+from instattack.exceptions import (
+    ClientResponseError, HttpRequestError, InvalidResponseJson,
+    InstagramResultError, ClientTooManyRequests, find_request_error,
+    HTTP_REQUEST_ERRORS, HttpFileDescriptorError)
 
-from instattack.src.exceptions import ClientResponseError
 from instattack.src.base import Handler
-from instattack.src.login import constants
 
-from .exceptions import InvalidResponseJson, InstagramResultError, ClientTooManyRequests
 from .models import InstagramResult
 from .utils import get_token
 
 
 class ProxyErrorHandlerMixin(object):
 
-    async def handle_proxy_error(self, e, proxy, scheduler, extra=None, treatment=None):
+    async def handle_proxy_error(self, e, proxy, scheduler):
         """
         [1] Fatal Error:
         ---------------
@@ -47,34 +47,25 @@ class ProxyErrorHandlerMixin(object):
         Only remove proxy if the error has occured a certain number of times, we
         should allow proxies to occasionally throw a single error.
         """
-        log = logger.get_async(self.__name__, subname='handle_proxy_error')
-        log.disable_on_false(self.log_attempts)
-
-        extra = extra or {}
-        extra['proxy'] = proxy
-        log.error(e, extra=extra)
+        log = logger.get_async(self.__name__, subname='login_request')
 
         # Allow Manual Treatments
-        await proxy.handle_error(e, treatment=treatment)
+        await proxy.handle_error(e)
 
-        # Allow Manual Treatments
-        if not treatment:
-            treatment = proxy.get_error_treatment(e)
-
-        if treatment == 'fatal':
+        if e.__treatment__ == 'fatal':
             if self.remove_proxy_on_error:
-                log.error(e, extra={'other': 'Removing Proxy', 'proxy': proxy})
+                await log.error(e, extra={'other': 'Removing Proxy', 'proxy': proxy})
                 await scheduler.spawn(proxy.delete())
             else:
                 await scheduler.spawn(proxy.save())
 
-        elif treatment in ('semifatal', 'error'):
-            if treatment == 'error':
+        elif e.__treatment__ in ('semifatal', 'error'):
+            if e.__treatment__ == 'error':
                 await self.proxy_handler.pool.put(proxy)
 
             await scheduler.spawn(proxy.save())
 
-        elif treatment == 'inconclusive':
+        elif e.__treatment__ == 'inconclusive':
             # Do not need to save...
             await self.proxy_handler.pool.put(proxy)
 
@@ -115,8 +106,8 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
 
     def _login_data(self, password):
         return {
-            constants.INSTAGRAM_USERNAME_FIELD: self.user.username,
-            constants.INSTAGRAM_PASSWORD_FIELD: password
+            settings.INSTAGRAM_USERNAME_FIELD: self.user.username,
+            settings.INSTAGRAM_PASSWORD_FIELD: password
         }
 
     @property
@@ -141,7 +132,7 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
 
         return self._cookies
 
-    async def parse_response_result(self, result, password, proxy):
+    async def parse_response_result(self, response, result, password, proxy):
         """
         Raises an exception if the result that was in the response is either
         non-conclusive or has an error in it.
@@ -151,10 +142,10 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
         """
         result = InstagramResult.from_dict(result, proxy=proxy, password=password)
         if result.has_error:
-            raise InstagramResultError(result.error_message)
+            raise InstagramResultError(response, result.error_message)
         else:
             if not result.conclusive:
-                raise InstagramResultError("Inconslusive result.")
+                raise InstagramResultError(response, "Inconslusive result.")
             return result
 
     async def parse_client_response(self, response, password, proxy):
@@ -169,22 +160,17 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
         via a `checkpoint_required` value, we cannot raise_for_status until after
         we try to first get the response json.
         """
-        log = logger.get_async(self.__name__, subname='handle_request_error')
-        log.disable_on_false(self.log_attempts)
-
         if response.status == 400:
             try:
                 json = await response.json()
             except ValueError:
                 raise InvalidResponseJson(response)
             else:
-                return await self.parse_response_result(json, password, proxy)
+                return await self.parse_response_result(response, json, password, proxy)
         else:
             try:
                 response.raise_for_status()
-            except (
-                aiohttp.ClientResponseError,
-            ) as e:
+            except aiohttp.ClientResponseError as e:
                 if response.status == 429:
                     raise ClientTooManyRequests(response)
                 else:
@@ -195,44 +181,42 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
                 except ValueError:
                     raise InvalidResponseJson(response)
                 else:
-                    return await self.parse_response_result(json, password, proxy)
-
-    async def handle_response_error(self, e, proxy, scheduler, response=None):
-        await self.handle_proxy_error(e, proxy, scheduler, extra={
-            'response': response
-        })
+                    return await self.parse_response_result(response, json, password, proxy)
 
     async def handle_request_error(self, e, proxy, scheduler):
         """
-        For errors related to proxy connectivity issues, and the validity of
-        the proxy, we remove the proxy entirely and don't note the error/put
-        back in the pool.  For situations in which it is a client response
-        error, i.e. a response was returned, we just note the error and put
-        the proxy back in the pool.
+        Creates exception instances that we have established internally so their
+        treatment and handling in regard to proxies and the pool can be determined
+        from the error directly.
+
+        If the error is not an instance of HttpError (our internal error), the
+        internal version of the error will be determined and this method will
+        be called recursively with the created error, that will be an instance
+        of HttpError.
+
+        Otherwise, the error will be handled by the handle_proxy_error() method,
+        which will eventually be called for all errors unless they are raised
+        or suppressed (CancelledError).
         """
-        log = logger.get_async(self.__name__, subname='handle_request_error')
-        log.disable_on_false(self.log_attempts)
+        log = logger.get_async(self.__name__, subname='login_request')
 
-        if isinstance(e, RuntimeError):
-            """
-            RuntimeError: File descriptor 87 is used by transport
-            <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
-            """
-            await self.handle_proxy_error(e, proxy, scheduler, treatment='inconclusive')
-
-        # Don't want to mark as inconclusive because we don't want to note
-        # the last time the proxy was used.
-        elif isinstance(e, asyncio.CancelledError):
-            pass
-
-        elif isinstance(e, ClientResponseError):
-            await self.handle_response_error(e, proxy, scheduler)
-
-        elif isinstance(e, (TimeoutError, ) + settings.REQUEST_ERRORS):
+        # These Are Our Errors
+        if isinstance(e, (HttpRequestError, ClientResponseError)):
+            await log.error(e, extra={'proxy': proxy})
             await self.handle_proxy_error(e, proxy, scheduler)
-
         else:
-            raise e
+            if isinstance(e, asyncio.CancelledError):
+                pass
+            else:
+                # Try to associate the error with one that we are familiar with,
+                # if we cannot find the appropriate error, than we raise it since
+                # we are not aware of this error.
+                err = find_request_error(e)
+                if not err:
+                    raise e
+
+                await log.error(err.original, extra={'proxy': proxy})
+                await self.handle_request_error(err, proxy, scheduler)
 
     async def login_request(self, loop, session, password, proxy, scheduler):
         """
@@ -246,13 +230,14 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
         should allow proxies to occasionally throw a single error.
         """
         log = logger.get_async(self.__name__, subname='login_request')
-        log.disable_on_false(self.log_attempts)
 
         proxy.update_time()
-        log.debug('Making Login Request', extra={
-            'password': password,
-            'proxy': proxy,
-        })
+        if self.log_attempts:
+            log.debug('Making Login Request', extra={
+                'password': password,
+                'proxy': proxy,
+            })
+
         try:
             async with session.post(
                 settings.INSTAGRAM_LOGIN_URL,
@@ -264,7 +249,8 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
                 try:
                     result = await self.parse_client_response(response, password, proxy)
                 except Exception as e:
-                    await self.handle_response_error(e, proxy, scheduler, response=response)
+                    await log.error(e, extra={'proxy': proxy, 'response': response})
+                    await self.handle_proxy_error(e, proxy, scheduler)
                 else:
                     if not result:
                         raise RuntimeError("Handling client response should "
@@ -275,5 +261,19 @@ class RequestHandler(Handler, ProxyErrorHandlerMixin):
                     await scheduler.spawn(proxy.save())
                     return result
 
-        except Exception as e:
+        except HTTP_REQUEST_ERRORS as e:
             await self.handle_request_error(e, proxy, scheduler)
+
+        except RuntimeError as e:
+            """
+            RuntimeError: File descriptor 87 is used by transport
+            <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
+
+            All other RuntimeError(s) we want to raise.
+            """
+            raise e  # Just for now
+            if e.errno == 87:
+                e = HttpFileDescriptorError(original=e)
+                await self.handle_request_error(e, proxy, scheduler)
+            else:
+                raise e

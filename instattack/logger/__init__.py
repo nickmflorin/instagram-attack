@@ -1,6 +1,5 @@
 from instattack import settings
 
-from .utils import Format  # noqa
 from .logger import AsyncLogger, SyncLogger, SimpleAsyncLogger, SimpleSyncLogger
 from .setup import *  # noqa
 

@@ -1,12 +1,34 @@
+from artsylogger import colors, Item, Line, Lines, Header, Label, LineIndex, Format
+from datetime import datetime
 import logging
-from artsylogger import (
-    Item, Line, Lines, Header, Label, LineIndex)
 
-from .constants import RecordAttributes
+from .constants import RecordAttributes, DATE_FORMAT
 from .utils import (
-    get_record_request_method, get_record_time, get_record_status_code,
-    get_record_message, get_level_formatter, get_message_formatter,
+    get_record_request_method, get_record_status_code, get_record_message,
     get_record_response_reason)
+
+
+def get_record_time(record):
+    return datetime.now().strftime(DATE_FORMAT)
+
+
+def get_level_formatter(record):
+    if getattr(record, 'color', None):
+        return Format(record.color, colors.bold)
+    else:
+        return record.level.format
+
+
+def get_message_formatter(record):
+
+    if getattr(record, 'highlight', None):
+        return RecordAttributes.SPECIAL_MESSAGE
+    elif getattr(record, 'level_format', None):
+        return record.level_format.message_formatter
+    elif getattr(record, 'color', None):
+        return Format(record.color)
+    else:
+        return record.level.message_formatter
 
 
 SIMPLE_FORMATTER = logging.Formatter(
@@ -17,26 +39,25 @@ SIMPLE_FORMATTER = logging.Formatter(
 MESSAGE_LINE = Line(
     Item(
         value=get_record_request_method,
-        formatter=RecordAttributes.METHOD,
+        format=RecordAttributes.METHOD,
         suffix=": "
     ),
     Item(
         value=get_record_response_reason,
-        formatter=RecordAttributes.REASON,
+        format=RecordAttributes.REASON,
         suffix=" - ",
     ),
     Item(
         value=get_record_message,
-        formatter=get_message_formatter,
+        format=get_message_formatter,
         line_index=LineIndex(
-            value=lambda record: getattr(record, 'line_index', None),
-            formatter=RecordAttributes.LINE_INDEX
+            value='line_index',
+            format=RecordAttributes.LINE_INDEX
         )
     ),
     Item(
         value=get_record_status_code,
-        formatter=RecordAttributes.STATUS_CODE,
-        wrapper="[%s]"
+        format=RecordAttributes.STATUS_CODE,
     ),
     indent=2,
 )
@@ -44,18 +65,17 @@ MESSAGE_LINE = Line(
 
 PRIMARY_LINE = Line(
     Item(
-        formatter=RecordAttributes.DATETIME,
+        format=RecordAttributes.DATETIME,
         value=get_record_time,
-        wrapper="[%s]"
     ),
     Item(
         value="name",
-        formatter=RecordAttributes.NAME,
+        format=RecordAttributes.NAME,
         suffix=": "
     ),
     Item(
         value="subname",
-        formatter=RecordAttributes.SUBNAME
+        format=RecordAttributes.SUBNAME
     ),
     indent=2,
 )
@@ -64,78 +84,80 @@ PRIMARY_LINE = Line(
 CONTEXT_LINES = Lines(
     Line(
         Item(
-            value=['password'],
-            formatter=RecordAttributes.CONTEXT_ATTRIBUTE_3,
+            value='password',
+            format=RecordAttributes.CONTEXT_ATTRIBUTE_3,
             label=Label(
                 constant="Password",
                 delimiter=":",
-                formatter=RecordAttributes.LABEL_1,
+                format=RecordAttributes.LABEL_1,
             )
         ),
         indent=2,
     ),
     Line(
         Item(
-            value=['proxy.method'],
-            formatter=RecordAttributes.CONTEXT_ATTRIBUTE_3,
+            value='proxy.method',
+            format=RecordAttributes.CONTEXT_ATTRIBUTE_3,
         ),
         Item(
-            value=['proxy.url'],
-            formatter=RecordAttributes.CONTEXT_ATTRIBUTE_1,
-            wrapper="<%s>"
+            value='proxy.url',
+            format=Format(
+                RecordAttributes.CONTEXT_ATTRIBUTE_1.format.colors,
+                wrapper="<%s>"
+            )
         ),
         label=Label(
             constant="Proxy",
             delimiter=":",
-            formatter=RecordAttributes.LABEL_1,
+            format=RecordAttributes.LABEL_1,
         ),
         indent=2,
     ),
     Lines(
         Line(
             Item(
-                value=["proxy.error_count"],
-                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                value="proxy.error_count",
+                format=RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
                     constant="Num. Errors",
                     delimiter=":",
-                    formatter=RecordAttributes.LABEL_2,
+                    format=RecordAttributes.LABEL_2,
                 ),
             ),
             indent=4,
         ),
         Line(
             Item(
-                value=["proxy.num_connection_errors"],
-                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                value="proxy.num_connection_errors",
+                format=RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
                     constant="Num. Connection Errors",
                     delimiter=":",
-                    formatter=RecordAttributes.LABEL_2,
+                    format=RecordAttributes.LABEL_2,
                 ),
             ),
             indent=4,
         ),
         Line(
             Item(
-                value=["proxy.humanized_errors"],
-                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                value="proxy.humanized_errors",
+                format=RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
                     constant="Errors",
                     delimiter=":",
-                    formatter=RecordAttributes.LABEL_2,
+                    format=RecordAttributes.LABEL_2,
                 ),
             ),
             indent=4,
         ),
         Line(
             Item(
-                value=["proxy.num_active_requests"],
-                formatter=RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                value="proxy.num_active_requests",
+                format=RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
                     constant="# Active Requests",
                     delimiter=":",
-                    formatter=RecordAttributes.LABEL_2,
+                    format=RecordAttributes.LABEL_2,
                 ),
             ),
             indent=4,
@@ -149,18 +171,18 @@ CONTEXT_LINES = Lines(
 TRACEBACK_LINE = Line(
     Item(
         value=["frame.filename", "pathname"],
-        formatter=RecordAttributes.PATHNAME,
+        format=RecordAttributes.PATHNAME,
         prefix="(",
         suffix=", "
     ),
     Item(
         value=["frame.function", "funcName"],
-        formatter=RecordAttributes.FUNCNAME,
+        format=RecordAttributes.FUNCNAME,
         suffix=", "
     ),
     Item(
         value=["frame.lineno", "lineno"],
-        formatter=RecordAttributes.LINENO,
+        format=RecordAttributes.LINENO,
         suffix=")"
     ),
     indent=2,
@@ -177,7 +199,7 @@ LOG_FORMAT_STRING = Lines(
     Line(
         Item(
             value="other",
-            formatter=RecordAttributes.OTHER_MESSAGE
+            format=RecordAttributes.OTHER_MESSAGE
         ),
         indent=2,
     ),
@@ -189,6 +211,6 @@ LOG_FORMAT_STRING = Lines(
         char="-",
         length=25,
         label=['level.name'],
-        formatter=get_level_formatter,
+        format=get_level_formatter,
     )
 )

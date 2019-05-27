@@ -5,9 +5,9 @@ from plumbum import cli
 import tortoise
 
 from instattack import logger
+from instattack.exceptions import ArgumentError
+from instattack.conf import Configuration
 
-from .exceptions import ArgumentError
-from .config import Configuration
 from .users.models import User
 from .login.handler import LoginHandler
 from .proxies.handler import ProxyHandler
@@ -195,8 +195,10 @@ class Attack(BaseApplication):
         # Result will only return if it is authorized.
         results = self.attack(loop, user, config)
         if results.has_authenticated:
+
+            # This log right here is causing an error for an unknown reason...
             log.success(f'Authenticated {username}!', extra={
-                'password': results.authenticated_result.context.password
+                'password': results.authenticated_result.password
             })
         else:
             log.error(f'User {username} Not Authenticated.')

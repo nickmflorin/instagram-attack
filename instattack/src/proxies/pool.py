@@ -7,7 +7,6 @@ from instattack.src.base import HandlerMixin
 
 from .utils import stream_proxies
 from .exceptions import PoolNoProxyError
-from .score import evaluate_for_pool, evaluate_for_use
 
 
 """
@@ -163,7 +162,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
             ret = await super(ProxyPool, self).get()
             proxy = ret[1]
 
-            evaluation = evaluate_for_use(proxy, self.config)
+            evaluation = proxy.evaluate_for_use(self.config)
             if not evaluation.passed:
                 await log.debug('Cannot Use Proxy from Pool', extra={
                     'proxy': proxy,
@@ -191,7 +190,7 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         """
         log = logger.get_async('Proxy Priority Queue', subname='put')
 
-        evaluation = evaluate_for_pool(proxy, self.config)
+        evaluation = proxy.evaluate_for_pool(self.config)
         if not evaluation.passed:
             await log.debug('Cannot Add Proxy to Pool', extra={
                 'proxy': proxy,

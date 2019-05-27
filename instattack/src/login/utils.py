@@ -1,9 +1,9 @@
 import asyncio
-
+import inspect
 import re
 
-from instattack import settings
-from instattack.src.utils import cancel_remaining_tasks
+from instattack import settings, logger
+from instattack.src.utils import cancel_remaining_tasks, get_app_stack_at
 
 
 """
@@ -40,6 +40,8 @@ async def limit_on_success(coros, batch_size, max_tries=None):
     The batch number is maintained as tasks are finished and do not return
     the desired non-null result.
     """
+    log = logger.get_async(__name__, subname='limit_on_success')
+
     futures = []
     while len(futures) < batch_size:
         try:
@@ -58,7 +60,18 @@ async def limit_on_success(coros, batch_size, max_tries=None):
             if f.done():
                 num_tries += 1
                 if f.exception():
-                    raise f.exception()
+                    exc = f.exception()
+
+                    stack = inspect.stack()
+                    frame = get_app_stack_at(stack, step=1)
+
+                    # The only benefit including the frame has is that the filename
+                    # will not be in the logger, it will be in the last place before the
+                    # logger and this statement.
+                    # await log.traceback(exc.__class__, exc, exc.__traceback__,
+                    #     extra={'frame': frame})
+                    raise exc
+                    # raise f.exception()
                 else:
                     # If the future returned a result, schedule the remaining tasks
                     # to be cancelled and return the result.

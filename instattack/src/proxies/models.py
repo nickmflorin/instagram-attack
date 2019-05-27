@@ -7,8 +7,8 @@ from tortoise.models import Model
 from instattack import logger, settings
 from instattack.src.base import ModelMixin
 
-from .err_handler import ErrorHandlerMixin
-from .proxybroker import ProxyBrokerMixin
+from .evaluation import evaluate, ProxyEvaluation
+from .mixins import ErrorHandlerMixin, ProxyBrokerMixin
 
 
 class Proxy(Model, ModelMixin, ProxyBrokerMixin, ErrorHandlerMixin):
@@ -87,9 +87,6 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin, ErrorHandlerMixin):
             return delta.total_seconds()
         return 0.0
 
-    async def handle_success(self, save=True):
-        self.num_requests += 1
-
     def reset(self):
         """
         Reset values that are meant to only be used during time proxy is active
@@ -98,12 +95,76 @@ class Proxy(Model, ModelMixin, ProxyBrokerMixin, ErrorHandlerMixin):
         self.num_active_requests = 0
         self.active_errors = {'all': {}}
 
-    def priority(self, count):
-        from .score import priority
-        return priority(self, count)
-
     def update_time(self):
         self.last_used = datetime.now()
+
+    @property
+    def priority_values(self):
+        return [
+            field[0] * getattr(self, field[1])
+            for field in settings.PROXY_PRIORITY_FIELDS
+        ]
+
+    def priority(self, count):
+        priority = self.priority_values
+        priority.append(count)
+        return tuple(priority)
+
+    def evaluate_for_pool(self, config):
+        """
+        Called before a proxy is put into the Pool.
+
+        Allows us to disregard or completely ignore proxies without having
+        to delete them from DB.
+
+        [x] TODO:
+        --------
+        Incorporate limit on certain errors or exclusion of proxy based on certain
+        errors in general.
+
+        Make it so that we can return the evaluations and also indicate
+        that it is okay or not okay for the pool.
+        """
+        flattened_error_rate = config.get('max_error_rate')
+        avg_resp_time = config.get('max_resp_time')
+        num_active_requests = config.get('max_req_proxy')
+        num_connection_errors = config.get('max_connection_errors')
+        num_connection_errors = config.get('max_connection_errors')
+
+        evaluation = evaluate(
+            self,
+            flattened_error_rate=flattened_error_rate,
+            avg_resp_time=avg_resp_time,
+            num_active_requests=num_active_requests,
+            num_connection_errors=num_connection_errors,
+        )
+
+        return evaluation
+
+    def evaluate_for_use(self, config):
+        """
+        Called before a proxy is returned from the Pool.  This is where we want to
+        evaluate things that would not prevent a proxy from going into the pool,
+        but just from being pulled out at that moment.
+
+        This should incorporate timing aspects and things of that nature.
+        Can include more custom logic indicating the desired use of the
+        proxy than we can do with the priority alone.
+        """
+
+        # TODO: We should only restrict time since last used if the last request was
+        # a too many request error.
+        time_since_used = config.get('min_time_between_proxy')
+
+        if (self.active_errors.get('most_recent') and
+                self.active_errors['most_recent'] == 'too_many_requests'):
+            evaluation = evaluate(
+                self,
+                time_since_used=time_since_used,
+            )
+            return evaluation
+        else:
+            return ProxyEvaluation(reasons=[])
 
     async def save(self, *args, **kwargs):
         """

@@ -1,7 +1,7 @@
 from plumbum import colors
 from enum import Enum
 
-from .format import Format
+from artsylogger import Format
 
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -54,14 +54,14 @@ class LoggingLevels(FormattedEnum):
 class RecordAttributes(FormattedEnum):
 
     LINE_INDEX = Format(colors.black, colors.bold)
-    DATETIME = Format(colors.fg('LightYellow3'))
+    DATETIME = Format(colors.fg('LightYellow3'), wrapper="[%s]")
     MESSAGE = Format(colors.fg('Grey7'))
     NAME = Format(colors.fg('DarkGray'))
     SUBNAME = Format(colors.black)
     OTHER_MESSAGE = Format(colors.fg('DarkGray'))
 
     # Exception Messages
-    STATUS_CODE = Format(colors.fg('DarkGray'))
+    STATUS_CODE = Format(colors.fg('DarkGray'), wrapper="[%s]")
     METHOD = Format(colors.fg('DarkGray'), colors.bold)
     REASON = Format(colors.fg('Grey69'))
 

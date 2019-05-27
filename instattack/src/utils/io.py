@@ -17,7 +17,7 @@ def read_raw_data(filepath, limit=None):
             break
         yield line
     """
-    from instattack.src.exceptions import InvalidFileLine
+    from instattack.exceptions import InvalidFileLine
 
     count = 0
 
@@ -53,7 +53,7 @@ async def stream_raw_data(filepath, limit=None):
             break
         yield line
     """
-    from instattack.src.exceptions import InvalidFileLine
+    from instattack.exceptions import InvalidFileLine
 
     count = 0
     async with aiofiles.open(filepath) as f:

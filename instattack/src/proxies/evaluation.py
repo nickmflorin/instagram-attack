@@ -2,25 +2,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Any
 
+from instattack import settings
 from instattack.src.utils import humanize_list
-
-
-PROXY_PRIORITY_FIELDS = (
-    (-1, 'num_active_successful_requests'),
-    (-1, 'num_successful_requests'),
-    (1, 'num_connection_errors'),
-    (1, 'num_response_errors'),
-    (1, 'num_ssl_errors'),
-    (1, 'avg_resp_time'),
-)
-
-FORMAL_ATTRS = {
-    'num_active_requests': 'Num. Active Requests',
-    'flattened_error_rate': 'Flat. Error Rate',
-    'avg_resp_time': 'Avg. Response Time',
-    'time_since_used': 'Time Since Used',
-    'num_connection_errors': 'Num. Connection Errors'
-}
 
 
 @dataclass
@@ -35,7 +18,7 @@ class AttributeEvaluation:
     strict: bool = False
 
     def __post_init__(self):
-        self.name = FORMAL_ATTRS[self.attr]
+        self.name = settings.PROXY_FORMAL_ATTRS[self.attr]
 
     def __str__(self):
         return f"{self.name} {self.value} {self.comparison} {self.relative_value}"
@@ -58,19 +41,6 @@ class ProxyEvaluation:
             return 'Evaluation Passed'
         else:
             return humanize_list([str(reason) for reason in self.reasons])
-
-
-def priority_values(proxy):
-    return [
-        field[0] * getattr(proxy, field[1])
-        for field in PROXY_PRIORITY_FIELDS
-    ]
-
-
-def priority(proxy, count):
-    priority = priority_values(proxy)
-    priority.append(count)
-    return tuple(priority)
 
 
 def evaluate(
@@ -139,61 +109,3 @@ def evaluate(
         ))
 
     return evaluations
-
-
-def evaluate_for_pool(proxy, config):
-    """
-    Called before a proxy is put into the Pool.
-
-    Allows us to disregard or completely ignore proxies without having
-    to delete them from DB.
-
-    [x] TODO:
-    --------
-    Incorporate limit on certain errors or exclusion of proxy based on certain
-    errors in general.
-
-    Make it so that we can return the evaluations and also indicate
-    that it is okay or not okay for the pool.
-    """
-    flattened_error_rate = config.get('max_error_rate')
-    avg_resp_time = config.get('max_resp_time')
-    num_active_requests = config.get('max_req_proxy')
-    num_connection_errors = config.get('max_connection_errors')
-    num_connection_errors = config.get('max_connection_errors')
-
-    evaluation = evaluate(
-        proxy,
-        flattened_error_rate=flattened_error_rate,
-        avg_resp_time=avg_resp_time,
-        num_active_requests=num_active_requests,
-        num_connection_errors=num_connection_errors,
-    )
-
-    return evaluation
-
-
-def evaluate_for_use(proxy, config):
-    """
-    Called before a proxy is returned from the Pool.  This is where we want to
-    evaluate things that would not prevent a proxy from going into the pool,
-    but just from being pulled out at that moment.
-
-    This should incorporate timing aspects and things of that nature.
-    Can include more custom logic indicating the desired use of the
-    proxy than we can do with the priority alone.
-    """
-
-    # TODO: We should only restrict time since last used if the last request was
-    # a too many request error.
-    time_since_used = config.get('min_time_between_proxy')
-
-    if (proxy.active_errors.get('most_recent') and
-            proxy.active_errors['most_recent'] == 'too_many_requests'):
-        evaluation = evaluate(
-            proxy,
-            time_since_used=time_since_used,
-        )
-        return evaluation
-    else:
-        return ProxyEvaluation(reasons=[])

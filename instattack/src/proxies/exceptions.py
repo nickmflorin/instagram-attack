@@ -1,4 +1,4 @@
-from instattack.src.exceptions import AppException
+from instattack.exceptions import AppException
 
 
 class PoolNoProxyError(AppException):

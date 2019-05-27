@@ -39,21 +39,38 @@ https://docs.aiohttp.org/en/stable/client_reference.html
                         :[SSL: WRONG_VERSION_NUMBER] wrong version number
 """
 
-
-REQUEST_ERRORS = (
-    aiohttp.ClientProxyConnectionError,
-    # Not sure why we need the .client_exceptions version and the base version?
-    aiohttp.client_exceptions.ClientConnectorError,
-    aiohttp.ServerConnectionError,
-    # Not sure why we have to add these even though they should be
+SEVER_CONNECTION_ERRORS = (
+    # Not sure why we have to add some of these even though they should be
     # covered by their parents...
-    aiohttp.ClientConnectorError,
-    aiohttp.ClientConnectorCertificateError,
-    aiohttp.ClientConnectorSSLError,
-    aiohttp.ClientHttpProxyError,
+    aiohttp.ServerConnectionError,
+    aiohttp.ServerDisconnectedError,
     ConnectionResetError,
     ConnectionRefusedError,
-    ssl.SSLError,
+
+)
+
+CLIENT_CONNECTION_ERRORS = (
+    # Not sure why we have to add some of these even though they should be
+    # covered by their parents...
+    aiohttp.ClientConnectorError,
+    aiohttp.client_exceptions.ClientConnectorError,
+
+)
+
+PROXY_CONNECTION_ERRORS = (
+    # Not sure why we have to add some of these even though they should be
+    # covered by their parents...
+    aiohttp.ClientProxyConnectionError,
+    aiohttp.ClientHttpProxyError,
+)
+
+SSL_ERRORS = (
+    aiohttp.ClientConnectorCertificateError,
+    aiohttp.ClientConnectorSSLError,
+
+)
+
+TIMEOUT_ERRORS = (
     TimeoutError,
 )
 

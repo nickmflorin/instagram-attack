@@ -5,7 +5,7 @@ import json
 import os
 import yaml
 
-from .utils import validate_config_filepath
+from .utils import validate_config_filepath, validate_config_schema
 
 
 class Configuration(collections.MutableMapping):
@@ -67,7 +67,12 @@ class Configuration(collections.MutableMapping):
             except (yaml.YAMLLoadWarning, yaml.scanner.ScannerError) as e:
                 raise ArgumentTypeError(str(e))
 
-        # Cannot recursively update since the values are not present yet.
+        validate_config_schema(data)
+
+        # We do not want to recursively update present values since they should not
+        # be present already, and if they are, we want to override the entire
+        # structure.  Therefore we update the store directly, instead of using
+        # the recursive update method.
         self.store.update(data)
 
     def recursively_update(self, newval):

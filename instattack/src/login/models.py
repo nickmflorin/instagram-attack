@@ -5,8 +5,9 @@ from dacite import from_dict
 from plumbum import colors
 from typing import List, Any, Optional
 
+from instattack import settings
+
 from instattack.logger.constants import LoggingLevels
-from instattack.src.login import constants
 from instattack.src.proxies.models import Proxy
 
 
@@ -66,7 +67,7 @@ class InstagramResult:
         # it is safer to associate the entire set of variable values that
         # should be returned by the request with a state of the result.
         # Checkpoint URL is the only thing that would vary
-        return self.message == constants.CHECKPOINT_REQUIRED
+        return self.message == settings.CHECKPOINT_REQUIRED
 
     @property
     def authorized(self):
@@ -104,8 +105,8 @@ class InstagramResult:
 
     @property
     def has_generic_request_error(self):
-        if self.errors == InstagramResultErrors(error=[constants.GENERIC_REQUEST_MESSAGE]):
-            if self.error_type == constants.GENERIC_REQUEST_ERROR:
+        if self.errors == InstagramResultErrors(error=[settings.GENERIC_REQUEST_MESSAGE]):
+            if self.error_type == settings.GENERIC_REQUEST_ERROR:
                 return True
         return False
 

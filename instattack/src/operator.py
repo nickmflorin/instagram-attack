@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from argparse import ArgumentTypeError
-import asyncio
 import inspect
 import logging
 import os
@@ -11,15 +10,12 @@ import tortoise
 
 # Need to figure out how to delay import of this module totally until LEVEL set
 # in os.environ, or finding a better way of setting LEVEL with CLI.
-from instattack import logger
-from instattack import settings
+from instattack import logger, settings
+from instattack.exceptions import ArgumentError
 
-from instattack.src.config import Configuration
-from instattack.src.utils import (
-    get_app_stack_at, task_is_third_party, cancel_remaining_tasks,
-    get_remaining_tasks)
+from instattack.conf import Configuration
+from instattack.src.utils import get_app_stack_at, task_is_third_party, cancel_remaining_tasks
 
-from .exceptions import ArgumentError
 from .cli import EntryPoint
 
 """
