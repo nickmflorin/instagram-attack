@@ -13,13 +13,13 @@ def filtered_array(*items):
     return array
 
 
-def get_exception_err_no(exc):
+def get_http_exception_err_no(exc):
     if hasattr(exc, 'errno'):
         return exc.errno
     return None
 
 
-def get_exception_status_code(exc):
+def get_http_exception_status_code(exc):
 
     if hasattr(exc, 'status'):
         return exc.status
@@ -29,9 +29,26 @@ def get_exception_status_code(exc):
         return None
 
 
-def get_exception_request_method(exc):
+def get_http_exception_request_method(exc):
 
     if hasattr(exc, 'request_info'):
         if exc.request_info.method:
             return exc.request_info.method
     return None
+
+
+def get_http_exception_message(exc):
+    from .http_exceptions import HttpException
+
+    if not isinstance(exc, HttpException):
+        return str(exc)
+    else:
+        message = getattr(exc, 'message', None) or str(exc)
+
+        parts = filtered_array(*(
+            message,
+            get_http_exception_request_method(exc),
+            ("[%s]", get_http_exception_status_code(exc)),
+            ("Err No: %s", get_http_exception_err_no(exc)),
+        ))
+        return ' '.join(parts)

@@ -1,7 +1,14 @@
+import logging
+
 from instattack import settings
 
 from .logger import AsyncLogger, SyncLogger, SimpleAsyncLogger, SimpleSyncLogger
-from .setup import *  # noqa
+
+
+def disable_external_loggers(*args):
+    for module in args:
+        external_logger = logging.getLogger(module)
+        external_logger.setLevel(logging.CRITICAL)
 
 
 def get_async(name, subname=None):

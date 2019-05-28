@@ -31,12 +31,12 @@ SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 # You can log all uncaught exceptions on the main thread by assigning a handler
 # to sys.excepthook.
-def exception_hook(exc_type, exc_value, exc_traceback):
-    log = logger.get_sync(__name__)
-    log.traceback(exc_type, exc_value, exc_traceback)
+# def exception_hook(exc_type, exc_value, exc_traceback):
+#     log = logger.get_sync(__name__)
+#     log.traceback(exc_type, exc_value, exc_traceback)
 
 
-sys.excepthook = exception_hook
+# sys.excepthook = exception_hook
 
 
 class operator(HandlerMixin):
@@ -45,8 +45,8 @@ class operator(HandlerMixin):
     __logconfig__ = "operator"
 
     def __init__(self, config):
-        if 'LEVEL' not in os.environ:
-            raise RuntimeError('Level must be set.')
+        # if not os.environ.get('INSTATTACK_LOG_LEVEL'):
+        #     raise RuntimeError('Level must be set.')
 
         self.config = config
         self._shutdown = False
@@ -74,6 +74,7 @@ class operator(HandlerMixin):
             if not self._shutdown:
                 log.debug('Shutting Down in Start Method')
                 self.shutdown(loop)
+            loop.stop()
 
     def setup(self, loop):
         self.setup_directories(loop)
@@ -129,11 +130,10 @@ class operator(HandlerMixin):
 
         log.start('Starting Shut Down')
         loop.run_until_complete(self.shutdown_async(loop))
-        loop.stop()
         log.complete('Shutdown Complete')
 
     async def shutdown_async(self, loop):
-        await self.shutdown_outstanding_tasks(loop)
+        # await self.shutdown_outstanding_tasks(loop)
         await self.shutdown_async_loggers(loop)
         await self.shutdown_database(loop)
 
@@ -203,12 +203,15 @@ class operator(HandlerMixin):
         # The only benefit including the frame has is that the filename
         # will not be in the logger, it will be in the last place before the
         # logger and this statement.
-        log.traceback(
-            context['exception'].__class__,
-            context['exception'],
-            context['exception'].__traceback__,
-            extra={'frame': frame}
-        )
+        try:
+            log.traceback(
+                context['exception'].__class__,
+                context['exception'],
+                context['exception'].__traceback__,
+                extra={'frame': frame}
+            )
+        except BlockingIOError:
+            log.warning('Could Not Output Traceback due to Blocking IO')
 
         log.debug('Shutting Down in Exception Handler')
         self.shutdown(loop)

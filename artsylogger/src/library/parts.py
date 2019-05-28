@@ -42,11 +42,10 @@ class Part(object):
 
 class Indentation(Part):
 
-    def __init__(self, value=None, constant=None):
-        super(Indentation, self).__init__(constant=constant)
-        self._value = value or 0  # Prevent None Type
+    def valid(self, record, owner):
+        return self._value is not None
 
-    def base_value(self, record, owner):
+    def unformatted_value(self, record, owner):
         """
         Trying to Add Parent Indent to Children Causing Lots of Problems.
         This was the closest we got:

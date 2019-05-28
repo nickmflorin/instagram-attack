@@ -2,6 +2,7 @@ setup.py
 artsylogger/__init__.py
 instattack/__init__.py
 instattack/__main__.py
+instattack/run.py
 instattack.egg-info/PKG-INFO
 instattack.egg-info/SOURCES.txt
 instattack.egg-info/dependency_links.txt
@@ -36,14 +37,14 @@ instattack/settings/logging.py
 instattack/settings/proxies.py
 instattack/src/__init__.py
 instattack/src/base.py
-instattack/src/cli.py
-instattack/src/operator.py
+instattack/src/entrypoint.py
 instattack/src/generator/__init__.py
 instattack/src/generator/base.py
 instattack/src/generator/case_gen.py
 instattack/src/generator/char_gen.py
 instattack/src/generator/generator.py
 instattack/src/login/__init__.py
+instattack/src/login/cli.py
 instattack/src/login/exceptions.py
 instattack/src/login/handler.py
 instattack/src/login/models.py

@@ -4,8 +4,8 @@ import sys
 
 from artsylogger import ArtsyHandlerMixin
 
+from instattack import settings
 from instattack.src.utils import relative_to_root
-from .constants import LoggingLevels
 
 
 class CustomHandlerMixin(ArtsyHandlerMixin):
@@ -16,7 +16,7 @@ class CustomHandlerMixin(ArtsyHandlerMixin):
         self.default(record, 'is_exception', default=False)
 
         if not getattr(record, 'level', None):
-            setattr(record, 'level', LoggingLevels[record.levelname])
+            setattr(record, 'level', settings.LoggingLevels[record.levelname])
 
         if isinstance(record.msg, Exception):
             record.is_exception = True

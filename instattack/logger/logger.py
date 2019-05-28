@@ -6,13 +6,14 @@ import os
 import sys
 import traceback
 
-from .utils import is_log_file
-from .constants import LoggingLevels
+from instattack import settings
+
+from .utils import is_log_file, is_site_package_file
 from .handlers import (
     SIMPLE_SYNC_HANDLERS, SYNC_HANDLERS, SIMPLE_ASYNC_HANDLERS, ASYNC_HANDLERS)
 
 
-for level in LoggingLevels:
+for level in settings.LoggingLevels:
     if level.name not in logging._levelToName.keys():
         logging.addLevelName(level.num, level.name)
 
@@ -20,15 +21,26 @@ for level in LoggingLevels:
 class LoggerMixin(object):
 
     def init(self):
-
-        self._conditional = None
         self.line_index = 0
+
+        # This is a TERRIBLE solution to an annoying problem, that is on the
+        # backburner for now... We have had trouble preventing the import of any
+        # file that would instantiate a Logger before we had a chance to set the
+        # level from the CLI args in os.environ... So it is not always guaranteed
+        # that the logger has access to os.environ['LEVEL'] on init.
+        self._environ_level_set = False
 
         for handler in self.__handlers__:
             self.addHandler(handler)
 
-        if 'LEVEL' in os.environ:
-            self.updateLevel()
+        if os.environ.get('INSTATTACK_LOG_LEVEL'):
+
+            level = os.environ['INSTATTACK_LOG_LEVEL']
+            if not isinstance(level, str):
+                raise RuntimeError('Invalid Level')
+
+            self.setLevel(level)
+            self._environ_level_set = True
 
     def findCaller(self, *args):
         """
@@ -52,6 +64,10 @@ class LoggerMixin(object):
                 f = f.f_back
                 continue
 
+            elif is_site_package_file(filename):
+                f = f.f_back
+                continue
+
             # We automatically set sininfo to None since we do not know where
             # that is coming from and the original method expects a 4-tuple to
             # return.
@@ -59,31 +75,24 @@ class LoggerMixin(object):
             break
         return rv
 
-    def updateLevel(self):
-        # Environment variable might not be set for usages of AppLogger
-        # in __main__ module right away.
-        if 'LEVEL' in os.environ:
-            level = LoggingLevels[os.environ['LEVEL']]
-            self.setLevel(level.num)
-
 
 class SyncLoggerMixin(LoggerMixin):
 
     def success(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.SUCCESS.num):
-            self._log(LoggingLevels.SUCCESS.num, msg, args, **kwargs)
+        if self.isEnabledFor(settings.LoggingLevels.SUCCESS.num):
+            self._log(settings.LoggingLevels.SUCCESS.num, msg, args, **kwargs)
 
     def start(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.START.num):
-            self._log(LoggingLevels.START.num, msg, args, **kwargs)
+        if self.isEnabledFor(settings.LoggingLevels.START.num):
+            self._log(settings.LoggingLevels.START.num, msg, args, **kwargs)
 
     def stop(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.STOP.num):
-            self._log(LoggingLevels.STOP.num, msg, args, **kwargs)
+        if self.isEnabledFor(settings.LoggingLevels.STOP.num):
+            self._log(settings.LoggingLevels.STOP.num, msg, args, **kwargs)
 
     def complete(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.COMPLETE.num):
-            self._log(LoggingLevels.COMPLETE.num, msg, args, **kwargs)
+        if self.isEnabledFor(settings.LoggingLevels.COMPLETE.num):
+            self._log(settings.LoggingLevels.COMPLETE.num, msg, args, **kwargs)
 
     def simple(self, msg, color=None, *args, **kwargs):
         kwargs.setdefault('extra', {})
@@ -91,12 +100,12 @@ class SyncLoggerMixin(LoggerMixin):
             'color': color,
             'simple': True,
         })
-        self._log(LoggingLevels.INFO.num, msg, args, **kwargs)
+        self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
 
     def bare(self, msg, color='darkgray', *args, **kwargs):
         kwargs.setdefault('extra', {})
         kwargs['extra'].update({'color': color, 'bare': True})
-        self._log(LoggingLevels.INFO.num, msg, args, **kwargs)
+        self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
 
     @contextlib.contextmanager
     def logging_lines(self):
@@ -120,33 +129,33 @@ class SyncLoggerMixin(LoggerMixin):
 class AsyncLoggerMixin(SyncLoggerMixin):
 
     async def success(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.SUCCESS.num):
+        if self.isEnabledFor(settings.LoggingLevels.SUCCESS.num):
             kwargs.setdefault('extra', {})
             kwargs['extra']['frame_correction'] = 1
-            return await self._log(LoggingLevels.SUCCESS.num, msg, args, **kwargs)
+            return await self._log(settings.LoggingLevels.SUCCESS.num, msg, args, **kwargs)
 
     async def start(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.START.num):
+        if self.isEnabledFor(settings.LoggingLevels.START.num):
             kwargs.setdefault('extra', {})
             kwargs['extra']['frame_correction'] = 1
-            return await self._log(LoggingLevels.START.num, msg, args, **kwargs)
+            return await self._log(settings.LoggingLevels.START.num, msg, args, **kwargs)
 
     async def stop(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.STOP.num):
+        if self.isEnabledFor(settings.LoggingLevels.STOP.num):
             kwargs.setdefault('extra', {})
             kwargs['extra']['frame_correction'] = 1
-            return await self._log(LoggingLevels.STOP.num, msg, args, **kwargs)
+            return await self._log(settings.LoggingLevels.STOP.num, msg, args, **kwargs)
 
     async def complete(self, msg, *args, **kwargs):
-        if self.isEnabledFor(LoggingLevels.COMPLETE.num):
+        if self.isEnabledFor(settings.LoggingLevels.COMPLETE.num):
             kwargs.setdefault('extra', {})
             kwargs['extra']['frame_correction'] = 1
-            return await self._log(LoggingLevels.COMPLETE.num, msg, args, **kwargs)
+            return await self._log(settings.LoggingLevels.COMPLETE.num, msg, args, **kwargs)
 
     async def bare(self, msg, color='darkgray', *args, **kwargs):
         kwargs.setdefault('extra', {})
         kwargs['extra'].update({'color': color, 'bare': True})
-        return await self._log(LoggingLevels.INFO.num, msg, args, **kwargs)
+        return await self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
 
     @contextlib.asynccontextmanager
     async def logging_lines(self):
@@ -175,11 +184,6 @@ class SimpleSyncLogger(SyncLoggerMixin, logging.Logger):
         logging.Logger.__init__(self, name)
         self.init()
 
-    def setLevel(self, level):
-        if not isinstance(level, int):
-            level = LoggingLevels[level].num
-        super(SimpleSyncLogger, self).setLevel(level)
-
 
 class SyncLogger(SimpleSyncLogger):
 
@@ -195,12 +199,6 @@ class SyncLogger(SimpleSyncLogger):
         exceptions with their traceback.  For now, this is a workaround that
         works similiarly.
         """
-        extra = extra or {}
-        extra.update({
-            'header_label': "Error",
-            'header_formatter': (
-                LoggingLevels.ERROR.format.without_text_decoration().without_wrapping()),
-        })
         self.error(exc_info[1], extra=extra)
 
         sys.stderr.write("\n")
@@ -255,11 +253,6 @@ class SimpleAsyncLogger(AsyncLoggerMixin, aiologger.Logger):
             extra=extra,
         )
 
-    def setLevel(self, level):
-        if not isinstance(level, int):
-            level = LoggingLevels[level].num
-        super(SimpleAsyncLogger, self).setLevel(level)
-
     async def _log(
         self,
         level,
@@ -274,7 +267,14 @@ class SimpleAsyncLogger(AsyncLoggerMixin, aiologger.Logger):
         # Until we come up with a better way of ensuring ths LEVEL in os.environ
         # before loggers are imported - this will at least make sure the level
         # is always right.
-        self.updateLevel()
+        if not self._environ_level_set:
+            if os.environ.get('INSTATTACK_LOG_LEVEL'):
+                level = os.environ['INSTATTACK_LOG_LEVEL']
+                if not isinstance(level, str):
+                    raise RuntimeError('Invalid Level')
+
+                self.setLevel(level)
+                self._environ_level_set = True
 
         # We used to override to check if conditionally_disabled was set here, but
         # maybe we don't need that anymore?
@@ -300,18 +300,6 @@ class AsyncLogger(SimpleAsyncLogger):
         super(AsyncLogger, self).__init__(name)
         self.subname = subname
 
-    async def traceback(self, *exc_info, extra=None):
-        """
-        We are having problems with logbook and asyncio in terms of logging
-        exceptions with their traceback.  For now, this is a workaround that
-        works similiarly.
-        """
-        await self.error(exc_info[1])
-
-        # sys.stderr.write("\n")
-        to_log = traceback.format_exception(*exc_info, limit=None)
-        await self.error(to_log)
-
     async def _log(
         self,
         level,
@@ -325,11 +313,14 @@ class AsyncLogger(SimpleAsyncLogger):
         # Until we come up with a better way of ensuring ths LEVEL in os.environ
         # before loggers are imported - this will at least make sure the level
         # is always right.
-        self.updateLevel()
+        if not self._environ_level_set:
+            if os.environ.get('INSTATTACK_LOG_LEVEL'):
+                level = os.environ['INSTATTACK_LOG_LEVEL']
+                if not isinstance(level, str):
+                    raise RuntimeError('Invalid Level')
 
-        # We used to override partially to check if conditionally_disabled was
-        # set here, but maybe we don't need that anymore?
-        # >>> if not self.conditionally_disabled:
+                self.setLevel(level)
+                self._environ_level_set = True
 
         record = await self._create_record(
             level,

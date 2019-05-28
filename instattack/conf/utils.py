@@ -12,9 +12,10 @@ def validate_log_level(val):
     except TypeError:
         raise ArgumentTypeError("Invalid log level.")
     else:
-        if val.upper() not in settings.LEVELS:
+        try:
+            return settings.LoggingLevels[val.upper()]
+        except KeyError:
             raise ArgumentTypeError("Invalid log level.")
-        return val.upper()
 
 
 def validate_config_filepath(value):
@@ -69,11 +70,6 @@ def validate_config_schema(config):
 
     http://docs.python-cerberus.org/en/stable/schemas.html
     """
-    from instattack import logger
-    log = logger.get_sync(__name__, subname='validate_config_schema')
-
-    log.debug('Validating Schema Config')
-
     def positive_int(**kwargs):
         config = {
             'required': True,
@@ -182,7 +178,6 @@ def validate_config_schema(config):
         }
     }
 
-    # log.info(config['silent_shutdown'])
     validated = v.validate(config)
     if not validated:
         raise ConfigurationError(v.errors)

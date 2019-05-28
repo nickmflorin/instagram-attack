@@ -40,6 +40,10 @@ proxies:
         # The amount of time to wait before using a proxy that raises a 429 too many
         # requests error.
         time_between_request_timeout: 10
+
+        # TODO:
+        # Instead of deleting from pool, mark as invalid so that we do not readd
+        # that proxy at a future date.
         remove_proxy_on_error: False
 
     # Settings Here Only Matter if Collect = True

@@ -2,9 +2,8 @@
 import tortoise
 
 from instattack import logger, settings
-from instattack.exceptions import ERROR_TYPE_CLASSIFICATION
-
 from instattack.src.utils import humanize_list
+from instattack.src.login.exceptions import ERROR_TYPE_CLASSIFICATION
 
 
 class ProxyBrokerMixin(object):
@@ -121,8 +120,25 @@ class ErrorHandlerMixin(object):
 
     @property
     def humanized_errors(self):
-        errors = list(self.errors.keys())
+        all_errors = self.errors.get('all', {})
+        errors = list(all_errors.keys()) or None
         return humanize_list(errors)
+
+    @property
+    def humanized_error_count(self):
+        return f"{self.error_count} (Active: {self.active_error_count})"
+
+    @property
+    def humanized_connection_error_count(self):
+        return f"{self.num_connection_errors} (Active: {self.num_active_connection_errors})"
+
+    @property
+    def humanized_response_error_count(self):
+        return f"{self.num_response_errors} (Active: {self.num_active_response_errors})"
+
+    @property
+    def humanized_ssl_error_count(self):
+        return f"{self.num_ssl_errors} (Active: {self.num_active_ssl_errors})"
 
     def _active_error_count(self, *args):
         count = 0
@@ -139,7 +155,8 @@ class ErrorHandlerMixin(object):
 
     def _error_count(self, *args):
         count = 0
-        for err, ct in self.errors['all'].items():
+        all_errors = self.errors.get('all', {})
+        for err, ct in all_errors.items():
             if len(args) != 0 and err in args:
                 count += ct
             elif len(args) == 0:
@@ -175,26 +192,28 @@ class ErrorHandlerMixin(object):
         return self._num_errors(error_type='ssl', active=True)
 
     @property
-    def num_response_errors(self):
-        """
-        We do not want to include too_many_requests in here because we still
-        want those to be toward front of pool but pulled out based on the
-        time since they were used last.
-        """
-        error_types = list(ERROR_TYPE_CLASSIFICATION['response'])
-        error_types.remove('too_many_requests')
-        return self._error_count(*error_types)
+    def num_invalid_response_errors(self):
+        return self._num_errors(error_type='invalid_response')
 
     @property
-    def num_active_response_errors(self):
-        """
-        We do not want to include too_many_requests in here because we still
-        want those to be toward front of pool but pulled out based on the
-        time since they were used last.
-        """
-        error_types = list(ERROR_TYPE_CLASSIFICATION['response'])
-        error_types.remove('too_many_requests')
-        return self._active_error_count(*error_types)
+    def num_active_invalid_response_errors(self):
+        return self._num_errors(error_type='invalid_response', active=True)
+
+    @property
+    def num_instagram_errors(self):
+        return self._num_errors(error_type='instagram')
+
+    @property
+    def num_active_instagram_errors(self):
+        return self._num_errors(error_type='instagram', active=True)
+
+    @property
+    def num_too_many_requests_errors(self):
+        return self._num_errors(error_type='too_many_requests')
+
+    @property
+    def num_active_too_many_requests_errors(self):
+        return self._num_errors(error_type='too_many_requests', active=True)
 
     def add_error(self, exc, count=1, note_most_recent=True):
 

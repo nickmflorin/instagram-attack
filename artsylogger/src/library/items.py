@@ -15,7 +15,7 @@ class AbstractObj(object):
         self.parent = None
         self.siblings = None
 
-        self.indentation = Indentation(value=indent)
+        self.indentation = Indentation(value=indent or 0)
         self.line_index = line_index or LineIndex.none()
         self.label = label or Label.none()
 
@@ -27,6 +27,9 @@ class AbstractObj(object):
             # Value of Abstract Item is Part Instance
             parts.append(self.value(record, self))
 
+            indentation = self.indentation(record, self)
+            if indentation:
+                return indentation + self._deliminate_parts(parts)
             return self._deliminate_parts(parts)
 
     def add_siblings(self, siblings):
@@ -65,6 +68,10 @@ class AbstractGroup(AbstractObj):
 
             # Value of Abstract Group is Method on Group
             parts.append(self.value(record))
+
+            indentation = self.indentation(record, self)
+            if indentation:
+                return indentation + self._deliminate_parts(parts)
 
             return self._deliminate_parts(parts)
 
@@ -153,7 +160,6 @@ class Line(AbstractGroup):
     @property
     def decorated_parts(self):
         return [
-            self.indentation,
             self.line_index,
             self.label,
         ]

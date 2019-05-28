@@ -7,7 +7,6 @@ from typing import List, Any, Optional
 
 from instattack import settings
 
-from instattack.logger.constants import LoggingLevels
 from instattack.src.proxies.models import Proxy
 
 
@@ -43,12 +42,12 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return LoggingLevels.SUCCESS.message_formatter(string_rep)
+            return settings.LoggingLevels.SUCCESS.message_formatter(string_rep)
         elif self.not_authorized:
-            return LoggingLevels.ERROR.message_formatter(string_rep)
+            return settings.LoggingLevels.ERROR.message_formatter(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
-            return LoggingLevels.DEBUG.format(string_rep)
+            return settings.LoggingLevels.DEBUG.format(string_rep)
 
     @classmethod
     def from_dict(cls, data, proxy=None, password=None):

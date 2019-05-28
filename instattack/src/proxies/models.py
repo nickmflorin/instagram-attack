@@ -4,7 +4,7 @@ from datetime import datetime
 from tortoise import fields
 from tortoise.models import Model
 
-from instattack import logger, settings
+from instattack import settings
 
 from .evaluation import evaluate, ProxyEvaluation
 from .mixins import ErrorHandlerMixin, ProxyBrokerMixin
@@ -170,22 +170,9 @@ class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
         We don't want to reset num_active_requests and active_errors here
         because we save the proxy intermittedly throughout the operation.
         """
-        log = logger.get_async(__name__, subname='save')
-
         if not self.errors:
             self.errors = {'all': {}}
         elif type(self.errors) is dict and 'all' not in self.errors:
             self.errors = {'all': self.errors}
-
-        for key, val in self.errors['all'].items():
-            if key not in settings.ERROR_TRANSLATION.values():
-                if key not in settings.ERROR_TRANSLATION.keys():
-                    log.error(f'Invalid Error Name: {key}... Removing Error')
-                else:
-                    translated = settings.ERROR_TRANSLATION[key]
-                    log.error(f'Unrecognized Error Name: {key}... Translating to {translated}.')
-
-                    self.errors[translated] = self.errors[key]
-                    del self.errors[key]
 
         await super(Proxy, self).save(*args, **kwargs)

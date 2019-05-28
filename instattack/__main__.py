@@ -18,12 +18,13 @@ def main():
     parser.add_argument('--level', default='INFO', type=validate_log_level, dest='level')
     parser.add_argument('--config', default='conf.yml', type=Configuration.validate, dest='config')
 
-    args, unknown = parser.parse_known_args()
+    parsed, unknown = parser.parse_known_args()
 
     loop = asyncio.get_event_loop()
-    os.environ['LEVEL'] = args.level
 
-    config = Configuration(path=args.config)
+    os.environ['INSTATTACK_LOG_LEVEL'] = parsed.level.name
+
+    config = Configuration(path=parsed.config)
 
     # Wait to import from src directory until LEVEL set in os.environ so that
     # loggers are all created with correct level.

@@ -2,10 +2,10 @@ import asyncio
 import aiojobs
 import itertools
 
+from instattack.exceptions import PoolNoProxyError
 from instattack.src.base import HandlerMixin
 
 from .utils import stream_proxies
-from .exceptions import PoolNoProxyError
 
 
 """
