@@ -1,10 +1,11 @@
-Metadata-Version: 1.0
+Metadata-Version: 1.2
 Name: instattack
-Version: 0.0.1
-Summary: Brute Force Attacking Instagram
-Home-page: https://github.com/nickmflorin/instagram-attack
-Author: Nick Florin
+Version: 0.1.0
+Summary: UNKNOWN
+Home-page: UNKNOWN
+Author: nickmflorin
 Author-email: nickmflorin@gmail.com
 License: UNKNOWN
 Description: UNKNOWN
 Platform: UNKNOWN
+Requires-Python: ==3.7.2

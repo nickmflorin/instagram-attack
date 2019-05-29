@@ -1,7 +1,7 @@
 from plumbum import colors
 from enum import Enum
 
-from artsylogger import Format
+from instattack.lib.artsylogger import Format
 
 
 SIMPLE_LOGGER = False

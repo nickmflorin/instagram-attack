@@ -28,7 +28,7 @@ def main():
 
     # Wait to import from src directory until LEVEL set in os.environ so that
     # loggers are all created with correct level.
-    from .run import operator
+    from .app.run import operator
     oper = operator(config)
     oper.start(loop, *unknown)
     loop.close()

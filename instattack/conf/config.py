@@ -5,8 +5,8 @@ import json
 import os
 import yaml
 
-from instattack import logger
-from instattack.exceptions import ConfigurationError
+from instattack.lib import logger
+from instattack.app.exceptions import ConfigurationError
 
 from .utils import validate_config_filepath, validate_config_schema
 

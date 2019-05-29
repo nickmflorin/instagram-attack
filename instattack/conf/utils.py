@@ -3,7 +3,7 @@ from cerberus import Validator
 from plumbum.path import LocalPath, Path
 
 from instattack import settings
-from instattack.exceptions import ConfigurationError
+from instattack.app.exceptions import ConfigurationError
 
 
 def validate_log_level(val):
@@ -157,11 +157,18 @@ def validate_config_schema(config):
                         'remove_proxy_on_error': boolean(default=False),
                         'max_conn': positive_int(max=1000, default=100),
                         'timeout': positive_int(max=50, default=25),
-                        'max_connection_errors': positive_int(max=100),
-                        'max_error_rate': positive_float(max=1.0),
-                        'max_resp_time': positive_float(max=10.0),
+
+                        'max_ssl_errors': positive_int(nullable=True),
+                        'max_connection_errors': positive_int(nullable=True),
+                        'max_timeout_errors': positive_int(nullable=True),
+                        'max_instagram_errors': positive_int(nullable=True),
+                        'max_response_errors': positive_int(nullable=True),
+
+                        'max_error_rate': positive_float(max=1.0, nullable=True),
+                        'max_resp_time': positive_float(max=10.0, nullable=True),
+                        'max_requests': positive_int(nullable=True),
+
                         'error_rate_horizon': positive_int(max=10),
-                        'max_requests': positive_int(),
                         'time_between_request_timeout': positive_int(default=10),
                     }
                 },
