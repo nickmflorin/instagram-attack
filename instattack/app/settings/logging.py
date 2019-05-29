@@ -61,15 +61,15 @@ class RecordAttributes(AttributeFormatter):
 
 
 class LoggingLevels(AttributeFormatter):
-    CRITICAL = (Colors.RED.format(bold=True, wrapper="[!] %s"), 50)
-    ERROR = (Colors.RED.format(bold=True, wrapper="[!] %s"), 40)
+    CRITICAL = (Colors.RED.format(bold=True, wrapper="[☠] %s"), 50)
+    ERROR = (Colors.RED.format(bold=True, wrapper="[✘] %s"), 40)
     WARNING = (Colors.YELLOW.format(bold=False, wrapper="[!] %s"), 30)
 
-    SUCCESS = (Colors.GREEN.format(bold=False, wrapper="[$] %s"), 24)
-    START = (Colors.LIGHT_GREEN.format(bold=False, wrapper="[+] %s"), 23)
-    STOP = (Colors.ALT_RED.format(bold=False, wrapper="[x] %s"), 22)
-    COMPLETE = (Colors.LIGHT_RED.format(bold=False, wrapper="[-] %s"), 21)
-    INFO = (Colors.BLUE.format(bold=False, wrapper="[i] %s"), 20)
+    SUCCESS = (Colors.GREEN.format(bold=False, wrapper="[✔] %s"), 24)
+    START = (Colors.LIGHT_GREEN.format(bold=False, wrapper="☐ %s"), 23)
+    STOP = (Colors.ALT_RED.format(bold=False, wrapper="[✗] %s"), 22)
+    COMPLETE = (Colors.LIGHT_RED.format(bold=False, wrapper="☑ %s"), 21)
+    INFO = (Colors.BLUE.format(bold=False, wrapper="[ⓘ] %s"), 20)
 
     DEBUG = (Colors.GRAY.format(bold=False, wrapper="[ ] %s"), 10)
 

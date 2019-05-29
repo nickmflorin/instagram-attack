@@ -4,12 +4,12 @@ from tortoise import fields
 from tortoise.models import Model
 from tortoise.exceptions import OperationalError
 
-from instattack import settings
+from instattack.app import settings
 from instattack.lib import logger
 from instattack.lib.utils import stream_raw_data, read_raw_data
 
 from instattack.app.exceptions import UserDirDoesNotExist, UserFileDoesNotExist
-from instattack.app.generator import password_gen
+from .generator import password_gen
 
 
 class UserAttempt(Model):
@@ -39,11 +39,12 @@ class User(Model):
     # Successful password attepmt, a little repetitive since we will also
     # have it in the attempts, but just in case for now.
     password = fields.CharField(max_length=100, null=True)
+    date_created = fields.DatetimeField(auto_now_add=True)
 
     FILES = settings.FILES
 
     class Meta:
-        unique_together = ('id', 'username', )
+        unique_together = ('username', )
 
     async def save(self, *args, **kwargs):
         self.setup()

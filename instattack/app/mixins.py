@@ -4,7 +4,7 @@ import contextlib
 from instattack.lib import logger
 
 
-class HandlerMixin(object):
+class LoggerMixin(object):
 
     def create_logger(self, subname, ignore_config=False, sync=False):
         if not sync:

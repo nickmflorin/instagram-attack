@@ -1,4 +1,4 @@
-from ..utils import humanize_list
+from .utils import humanize_list
 from .parts import Indentation, Label, Header, LineIndex, ItemValue
 
 

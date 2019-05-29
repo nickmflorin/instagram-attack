@@ -2,14 +2,14 @@ import asyncio
 import contextlib
 from proxybroker import Broker
 
-from instattack import settings
-from instattack.app.base import HandlerMixin
+from instattack.app import settings
+from instattack.app.mixins import LoggerMixin
 from instattack.lib.utils import cancel_remaining_tasks
 
 from .models import Proxy
 
 
-class ProxyBroker(Broker, HandlerMixin):
+class ProxyBroker(Broker, LoggerMixin):
 
     __name__ = 'Proxy Broker'
     __logconfig__ = 'proxy_broker'

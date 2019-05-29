@@ -1,10 +1,10 @@
-from instattack.app.base import HandlerMixin
+from instattack.app.mixins import LoggerMixin
 
 from .broker import ProxyBroker
 from .pool import ProxyPool
 
 
-class ProxyHandler(HandlerMixin):
+class ProxyHandler(LoggerMixin):
 
     __name__ = "Proxy Handler"
 

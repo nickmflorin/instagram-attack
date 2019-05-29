@@ -1,6 +1,6 @@
 import logging
 
-from instattack import settings
+from instattack.app import settings
 
 from .logger import AsyncLogger, SyncLogger, SimpleAsyncLogger, SimpleSyncLogger
 

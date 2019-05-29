@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import tortoise
 
-from instattack import settings
+from instattack.app import settings
 from instattack.conf import Configuration
 
 from instattack.lib import logger
@@ -251,8 +251,10 @@ class ErrorHandlerMixin(object):
         for key, val in errors.items():
             self.add_error(key, count=val, note_most_recent=False)
 
-    async def handle_success(self, save=True):
+    async def handle_success(self, save=False):
         self.num_requests += 1
+        if save:
+            await self.save()
 
     async def handle_error(self, exc):
         """

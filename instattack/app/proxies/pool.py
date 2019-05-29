@@ -3,7 +3,7 @@ import aiojobs
 import itertools
 
 from instattack.app.exceptions import PoolNoProxyError
-from instattack.app.base import HandlerMixin
+from instattack.app.mixins import LoggerMixin
 
 from .utils import stream_proxies
 
@@ -18,7 +18,7 @@ the desired queues based on priority.
 """
 
 
-class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
+class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
 
     __name__ = 'Proxy Pool'
     __logconfig__ = 'proxy_pool'

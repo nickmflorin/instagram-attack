@@ -99,6 +99,9 @@ class AttributeFormatter(ColorFormatter):
     def __init__(self, *args):
         self.format = args[0]
 
+    def __call__(self, text):
+        return self.format(text)
+
     @property
     def colors(self):
         return self.format.colors

@@ -5,7 +5,7 @@ from dacite import from_dict
 from plumbum import colors
 from typing import List, Any, Optional
 
-from instattack import settings
+from instattack.app import settings
 
 from instattack.app.proxies.models import Proxy
 

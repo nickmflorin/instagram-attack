@@ -1,25 +1,9 @@
 import asyncio
 import inspect
 
-from instattack import settings
 from instattack.lib import logger
 
-
-def task_is_third_party(task):
-    """
-    Need to find a more sustainable way of doing this, this makes
-    sure that we are not raising exceptions for external tasks.
-    """
-    directory = get_task_path(task)
-    return not directory.startswith(settings.APP_DIR)
-
-
-def get_coro_path(coro):
-    return coro.cr_code.co_filename
-
-
-def get_task_path(task):
-    return get_coro_path(task._coro)
+from .paths import task_is_third_party
 
 
 async def ensure_async_generator(iterable):
@@ -43,7 +27,46 @@ def get_remaining_tasks():
     return list(tasks)
 
 
-async def cancel_remaining_tasks(futures=None, raise_exceptions=False, log_exceptions=None, log_tasks=False):
+async def limit_as_completed(coros, batch_size):
+    """
+    Takes a generator yielding coroutines and runs the coroutines concurrently,
+    similarly to asyncio.as_completed(tasks), except that it limits the number
+    of concurrent tasks at any given time, specified by `batch_size`.
+
+    When coroutines complete, and the pool of concurrent tasks drops below the
+    batch_size, coroutines will be added to the batch until there are none left.and
+    """
+    futures = []
+    while len(futures) < batch_size:
+        try:
+            c = await coros.__anext__()
+        except StopAsyncIteration as e:
+            break
+        else:
+            futures.append(asyncio.create_task(c))
+
+    num_tries = 0
+
+    while len(futures) > 0:
+        await asyncio.sleep(0)  # Not sure why this is necessary but it is.
+        for f in futures:
+            if f.done():
+                num_tries += 1
+                if f.exception():
+                    raise f.exception()
+                else:
+                    futures.remove(f)
+                    try:
+                        newc = await coros.__anext__()
+                        futures.append(asyncio.create_task(newc))
+                    except StopAsyncIteration as e:
+                        pass
+                    yield f.result(), num_tries
+
+
+async def cancel_remaining_tasks(futures=None, raise_exceptions=False, log_exceptions=None,
+        log_tasks=False):
+
     log = logger.get_async(__name__, subname='cancel_remaining_tasks')
 
     if not futures:
@@ -74,4 +97,6 @@ async def cancel_remaining_tasks(futures=None, raise_exceptions=False, log_excep
 
     list(map(cancel_task, futures))
     await asyncio.gather(*futures, return_exceptions=True)
+
+    await log.shutdown()
     return futures

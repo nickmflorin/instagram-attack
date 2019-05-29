@@ -3,7 +3,7 @@ import logging
 
 from instattack.lib.artsylogger import (
     colors, Item, Line, Lines, Header, Label, LineIndex, Format)
-from instattack import settings
+from instattack.app import settings
 
 
 def get_record_message(record):

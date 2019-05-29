@@ -1,4 +1,4 @@
-from ..utils import (
+from .utils import (
     get_log_value, is_record_callable, escape_ansi_string, string_format_tuple)
 
 

@@ -2,7 +2,7 @@ import aiologger
 import logging
 import sys
 
-from instattack import settings
+from instattack.app import settings
 from instattack.lib.artsylogger import ArtsyHandlerMixin
 from instattack.lib.utils import relative_to_root
 

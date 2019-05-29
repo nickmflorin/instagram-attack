@@ -3,7 +3,7 @@ import decorator
 import sys
 from yaspin import yaspin
 
-from instattack import settings
+from instattack.app import settings
 
 
 @contextlib.contextmanager

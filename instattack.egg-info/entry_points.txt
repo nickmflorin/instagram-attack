@@ -1,0 +1,4 @@
+
+        [console_scripts]
+        instattack = instattack.main:main
+    

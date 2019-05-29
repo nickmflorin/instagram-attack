@@ -9,7 +9,7 @@ import tortoise
 from cement import App, TestApp, init_defaults
 from cement.core.exc import CaughtSignal
 
-from instattack import settings
+from instattack.app import settings
 from instattack.conf import Configuration
 
 from instattack.lib import logger
@@ -18,9 +18,7 @@ from instattack.lib.utils import (
     cancel_remaining_tasks, start_and_stop, break_after, break_before)
 
 from .app.exceptions import InstattackError
-from .controllers.base import Base
-
-import time
+from .controllers.base import Base, UserController
 
 
 _shutdown = False
@@ -95,8 +93,6 @@ def setup(app):
     @spin_start_and_stop('Setting Up Directories')
     async def setup_directories(loop):
         # Remove __pycache__ Files
-        time.sleep(0.5)
-
         [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
         [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
 
@@ -105,7 +101,6 @@ def setup(app):
 
     @spin_start_and_stop('Setting Up DB')
     async def setup_database(loop):
-        time.sleep(0.5)
         await tortoise.Tortoise.init(config=settings.DB_CONFIG)
         await tortoise.Tortoise.generate_schemas()
 
@@ -114,14 +109,12 @@ def setup(app):
 
         SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
-        time.sleep(0.5)
         loop.set_exception_handler(handle_exception)
         for s in SIGNALS:
             loop.add_signal_handler(s, shutdown_preemptively)
 
     @spin_start_and_stop('Setting Up Logger')
     async def setup_logger(loop):
-        time.sleep(0.5)
         logger.disable_external_loggers(
             'proxybroker',
             'aiosqlite',
@@ -141,7 +134,6 @@ def setup(app):
 
 @spin_start_and_stop('Shutting Down DB')
 async def shutdown_database(loop):
-    time.sleep(0.5)
     await tortoise.Tortoise.close_connections()
 
 
@@ -268,7 +260,8 @@ class Instattack(App):
 
         # Register Handlers
         handlers = [
-            Base
+            Base,
+            UserController
         ]
 
 
@@ -292,7 +285,7 @@ def main():
                 traceback.print_exc()
 
         except InstattackError as e:
-            print('InstattackError > %s' % e.args[0])
+            print('InstattackError > %s' % settings.LoggingLevels.ERROR(str(e)))
             app.exit_code = 1
 
             if app.debug is True:
@@ -303,6 +296,9 @@ def main():
             # Default Cement signals are SIGINT and SIGTERM, exit 0 (non-error)
             print('\n%s' % e)
             app.exit_code = 0
+
+        # finally:
+        #     shutdown(app)
 
 
 if __name__ == '__main__':
