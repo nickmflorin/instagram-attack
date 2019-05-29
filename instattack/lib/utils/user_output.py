@@ -1,5 +1,6 @@
 import contextlib
 import decorator
+import sys
 from yaspin import yaspin
 
 from instattack import settings
@@ -13,6 +14,18 @@ def start_and_stop(text):
         finally:
             spinner.text = settings.Colors.GREEN(text)
             spinner.ok(settings.Colors.GREEN("✔"))
+
+
+@decorator.decorator
+def break_after(func, *args, **kwargs):
+    func(*args, **kwargs)
+    sys.stdout.write("\n")
+
+
+@decorator.decorator
+def break_before(func, *args, **kwargs):
+    sys.stdout.write("\n")
+    func(*args, **kwargs)
 
 
 def spin_start_and_stop(text):

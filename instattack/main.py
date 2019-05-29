@@ -15,7 +15,7 @@ from instattack.conf import Configuration
 from instattack.lib import logger
 from instattack.lib.utils import (
     spin_start_and_stop, get_app_stack_at, task_is_third_party,
-    cancel_remaining_tasks, start_and_stop)
+    cancel_remaining_tasks, start_and_stop, break_after, break_before)
 
 from .app.exceptions import InstattackError
 from .controllers.base import Base
@@ -76,6 +76,8 @@ def handle_exception(loop, context):
     shutdown_preemptively(loop)
 
 
+@break_before
+@break_after
 def setup(app):
     """
     [x] TODO:
@@ -213,6 +215,8 @@ def shutdown_preemptively(loop, signal=None):
     loop.close()
 
 
+@break_before
+@break_after
 def shutdown(app):
     """
     Race conditions can sometimes lead to multiple shutdown attempts, which can
