@@ -1,20 +1,35 @@
 #!/usr/bin/env python3
 import asyncio
+import inspect
+import logging
 import pathlib
+import signal
+import tortoise
 
 from cement import App, TestApp, init_defaults
 from cement.core.exc import CaughtSignal
 
-import tortoise
-
 from instattack import settings
+from instattack.conf import Configuration
+
 from instattack.lib import logger
-from instattack.lib.utils import start_and_stop
+from instattack.lib.utils import (
+    spin_start_and_stop, get_app_stack_at, task_is_third_party,
+    cancel_remaining_tasks, start_and_stop)
 
 from .app.exceptions import InstattackError
 from .controllers.base import Base
 
 import time
+
+# You can log all uncaught exceptions on the main thread by assigning a handler
+# to sys.excepthook.
+# def exception_hook(exc_type, exc_value, exc_traceback):
+#     log = logger.get_sync(__name__)
+#     log.traceback(exc_type, exc_value, exc_traceback)
+
+
+# sys.excepthook = exception_hook
 
 
 # Configuration Defaults
@@ -22,41 +37,179 @@ CONFIG = init_defaults('instattack')
 CONFIG['instattack']['foo'] = 'bar'
 
 
-async def setup_directories(loop):
-    with start_and_stop('Setting Up Directories'):
-        # Remove __pycache__ Files
-        [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
-        [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
+def handle_exception(self, loop, context):
+    """
+    We are having trouble using log.exception() with exc_info=True and seeing
+    the stack trace, so we have a custom log.traceback() method for now.
 
-        if not settings.USER_PATH.exists():
-            settings.USER_PATH.mkdir()
+    >>> self.log.exception(exc, exc_info=True, extra=extra)
 
+    Not sure if we will keep it or not, since it might add some extra
+    customization availabilities, but it works right now.
+    """
+    log = logger.get_sync('handle_exception', sync=True)
+    log.debug('Handling Exception')
 
-async def setup_database(loop):
-    with start_and_stop('Setting Up Database'):
-        time.sleep(1)
-        await tortoise.Tortoise.init(config=settings.DB_CONFIG)
-        await tortoise.Tortoise.generate_schemas()
+    # Unfortunately, the step will only work for exceptions that are caught
+    # at the immediate next stack.  It might make more sense to take the step
+    # out.
+    stack = inspect.stack()
+    frame = get_app_stack_at(stack, step=1)
+
+    # The only benefit including the frame has is that the filename
+    # will not be in the logger, it will be in the last place before the
+    # logger and this statement.
+    try:
+        log.traceback(
+            context['exception'].__class__,
+            context['exception'],
+            context['exception'].__traceback__,
+            extra={'frame': frame}
+        )
+    except BlockingIOError:
+        log.warning('Could Not Output Traceback due to Blocking IO')
+
+    log.debug('Shutting Down in Exception Handler')
+    shutdown_preemptively(loop)
 
 
 def setup(app):
-
+    """
+    [x] TODO:
+    --------
+    Use spinner for overall setup and shutdown methods and use the spinner.write()
+    method to notify of individual tasks in the methods.
+    """
     loop = asyncio.get_event_loop()
+    setup_loop(loop)
+    setup_logger(loop)
+
     loop.run_until_complete(setup_directories(loop))
     loop.run_until_complete(setup_database(loop))
 
-
-async def shutdown_database(loop):
-    with start_and_stop('Shutting Down DB'):
-        time.sleep(1)
-        await tortoise.Tortoise.close_connections()
+    setup_config(loop)
 
 
-def shutdown(app):
+def shutdown_preemptively(loop, signal=None):
+    log = logger.get_sync(__name__, subname='shutdown')
+
+    # if self._shutdown:
+    #     log.warning('Instattack Already Shutdown...')
+    #     return
+    # self._shutdown = True
+
+    if signal:
+        log.warning(f'Received exit signal {signal.name}...')
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(shutdown_database(loop))
     loop.close()
+
+
+def shutdown(app):
+    """
+    [x] TODO:
+    --------
+    Use spinner for overall setup and shutdown methods and use the spinner.write()
+    method to notify of individual tasks in the methods.
+    """
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(shutdown_async_loggers(loop))
+    loop.run_until_complete(shutdown_outstanding_tasks(loop))
+    loop.run_until_complete(shutdown_database(loop))
+    loop.close()
+
+
+def setup_config(loop):
+    # Temporarily Set Path as Hardcoded Value
+    config = Configuration(path="conf.yaml")
+    config.read()
+    config.set()
+
+
+@spin_start_and_stop('Setting Up Directories')
+async def setup_directories(loop):
+    # Remove __pycache__ Files
+    time.sleep(0.5)
+
+    [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
+    [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
+
+    if not settings.USER_PATH.exists():
+        settings.USER_PATH.mkdir()
+
+
+@spin_start_and_stop('Setting Up DB')
+async def setup_database(loop):
+    time.sleep(0.5)
+    await tortoise.Tortoise.init(config=settings.DB_CONFIG)
+    await tortoise.Tortoise.generate_schemas()
+
+
+@spin_start_and_stop('Setting Up Loop')
+def setup_loop(loop):
+
+    SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+
+    time.sleep(0.5)
+    loop.set_exception_handler(handle_exception)
+    for s in SIGNALS:
+        loop.add_signal_handler(s, shutdown_preemptively)
+
+
+@spin_start_and_stop('Setting Up Logger')
+def setup_logger(loop):
+    time.sleep(0.5)
+    logger.disable_external_loggers(
+        'proxybroker',
+        'aiosqlite',
+        'db_client',
+        'progressbar.utils',
+        'tortoise'
+    )
+
+
+@spin_start_and_stop('Shutting Down DB')
+async def shutdown_database(loop):
+    time.sleep(0.5)
+    await tortoise.Tortoise.close_connections()
+
+
+@spin_start_and_stop('Shutting Down Outstanding Tasks')
+async def shutdown_outstanding_tasks(loop):
+    with start_and_stop('Shutting Down Outstanding Tasks') as spinner:
+
+        futures = await cancel_remaining_tasks(
+            raise_exceptions=True,
+            log_tasks=True
+        )
+        if len(futures) != 0:
+            spinner.write(f'> Cancelled {len(futures)} Leftover Tasks')
+
+            log_tasks = futures[:20]
+            for task in log_tasks:
+                if task_is_third_party(task):
+                    spinner.write(f'>> {task._coro.__name__} (Third Party)')
+                else:
+                    spinner.write(f'>> {task._coro.__name__}')
+
+            if len(futures) > 20:
+                spinner.write(">> ...")
+        else:
+            spinner.write(f'> No Leftover Tasks to Cancel')
+
+
+@spin_start_and_stop('Shutting Down Async Loggers')
+async def shutdown_async_loggers(loop):
+
+    loggers = [
+        logging.getLogger(name)
+        for name in logging.root.manager.loggerDict
+    ]
+
+    for lgr in loggers:
+        if isinstance(lgr, logger.AsyncLogger):
+            await lgr.shutdown()
 
 
 class Instattack(App):
