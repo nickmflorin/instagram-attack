@@ -1,0 +1,5 @@
+Current Users
+
+{% for user in users %}
+    {{ user.id }} [{% if user.username == 'nickmflorin' %}X{% else %} {% endif %}] {{ user.username }}
+{% endfor %}

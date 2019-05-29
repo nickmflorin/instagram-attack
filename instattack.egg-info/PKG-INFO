@@ -1,11 +1,73 @@
-Metadata-Version: 1.2
+Metadata-Version: 2.1
 Name: instattack
-Version: 0.1.0
-Summary: UNKNOWN
-Home-page: UNKNOWN
-Author: nickmflorin
+Version: 0.0.1.dev20190529015805
+Summary: Instattack
+Home-page: https://github.com/nickmflorin/instagram-attack
+Author: Nick Florin
 Author-email: nickmflorin@gmail.com
-License: UNKNOWN
-Description: UNKNOWN
+License: unlicensed
+Description: # Instattack
+        
+        ## Installation
+        
+        ```
+        $ pip install -r requirements.txt
+        $ pip install setup.py
+        ```
+        
+        ## Development
+        
+        This project includes a number of helpers in the `Makefile` to streamline common development tasks.
+        
+        ### Environment Setup
+        
+        The following demonstrates setting up and working with a development environment:
+        
+        ```
+        ### Create a Virtual ENV for Development
+        
+        $ make virtualenv
+        $ source env/bin/activate
+        
+        ### Run instatttack CLI Application
+        
+        $ instatttack --help
+        
+        ### Run pytest / coverage
+        
+        $ make test
+        ```
+        
+        ### Releasing to PyPi
+        
+        Before releasing to PyPi, you must configure your login credentials:
+        
+        **~/.pypirc**:
+        
+        ```
+        [pypi]
+        username = YOUR_USERNAME
+        password = YOUR_PASSWORD
+        ```
+        
+        Then use the included helper function via the `Makefile`:
+        
+        ```
+        $ make dist
+        $ make dist-upload
+        ```
+        
+        ## Deployments
+        
+        ### Docker
+        
+        Included is a basic `Dockerfile` for building and distributing `Instattack`,
+        and can be built with the included `make` helper:
+        
+        ```
+        $ make docker
+        $ docker run -it instatttack --help
+        ```
+        
 Platform: UNKNOWN
-Requires-Python: ==3.7.2
+Description-Content-Type: text/markdown

@@ -1,7 +1,6 @@
 from plumbum import colors
-from enum import Enum
 
-from instattack.lib.artsylogger import Format
+from instattack.lib.artsylogger import ColorFormatter, AttributeFormatter
 
 
 SIMPLE_LOGGER = False
@@ -9,76 +8,70 @@ SIMPLE_LOGGER = False
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 
-class FormattedEnum(Enum):
+class Colors(ColorFormatter):
 
-    def __init__(self, format):
-        if isinstance(format, dict):
-            self.format = format['base']
-            self.formats = format
-        else:
-            self.format = format
-            self.formats = {'base': format}
+    GREEN = colors.fg('SpringGreen3')
+    LIGHT_GREEN = colors.fg('DarkOliveGreen3')
 
-    def __call__(self, text):
-        return self.format(text)
+    RED = colors.fg('Red1')
+    ALT_RED = colors.fg('Red1')
+    LIGHT_RED = colors.fg('IndianRed')
 
-    @property
-    def colors(self):
-        return self.format.colors
+    YELLOW = colors.fg('SandyBrown')
+    LIGHT_YELLOW = colors.fg('LightYellow3')
 
-    def format_with_wrapper(self, wrapper, format_with_wrapper=False):
-        return Format(*self.colors,
-            wrapper=wrapper, format_with_wrapper=format_with_wrapper)
+    BLUE = colors.fg('DeepSkyBlue4B')
+    ALT_BLUE = colors.fg('CornflowerBlue')
+    ALT_BLUE_2 = colors.fg('RoyalBlue1')
+
+    GRAY = colors.fg('Grey7')
+    ALT_GRAY = colors.fg('Grey15')
+    LIGHT_GRAY = colors.fg('Grey58')
+    EXTRA_LIGHT_GRAY = colors.fg('Grey58')
+
+    BLACK = colors.black
 
 
-class RecordAttributes(FormattedEnum):
+class RecordAttributes(AttributeFormatter):
 
-    LINE_INDEX = Format(colors.black, colors.bold)
-    DATETIME = Format(colors.fg('LightYellow3'), wrapper="[%s]")
-    MESSAGE = Format(colors.fg('Grey19'))
-    NAME = Format(colors.fg('Grey15'))
-    SUBNAME = Format(colors.fg('Grey7'), colors.bold)
-    OTHER_MESSAGE = Format(colors.fg('Grey30'))
+    LINE_INDEX = Colors.BLACK.format(bold=True)
+    DATETIME = Colors.LIGHT_YELLOW.format(wrapper="[%s]")
+    MESSAGE = Colors.gray(19).format()
+    NAME = Colors.gray(15).format()
+    SUBNAME = Colors.GRAY.format(bold=True)
+    OTHER_MESSAGE = Colors.gray(30).format()
 
     # Exception Messages
-    STATUS_CODE = Format(colors.fg('DarkGray'))
-    METHOD = Format(colors.fg('DarkGray'), colors.bold)
-    REASON = Format(colors.fg('Grey69'))
+    STATUS_CODE = Colors.custom('DarkGray').format()
+    METHOD = Colors.custom('DarkGray', bold=True)
+    REASON = Colors.gray(69).format()
 
     # Context
-    CONTEXT_ATTRIBUTE_1 = Format(colors.fg('CornflowerBlue'))
-    CONTEXT_ATTRIBUTE_2 = Format(colors.fg('Grey15'))
-    CONTEXT_ATTRIBUTE_3 = Format(colors.fg('RoyalBlue1'))
+    CONTEXT_ATTRIBUTE_1 = Colors.ALT_BLUE.format()
+    CONTEXT_ATTRIBUTE_2 = Colors.ALT_GRAY.format()
+    CONTEXT_ATTRIBUTE_3 = Colors.ALT_BLUE_2.format()
 
-    LABEL_1 = Format(colors.fg('Grey7'))
-    LABEL_2 = Format(colors.fg('Grey58'))
+    LABEL_1 = Colors.GRAY.format()
+    LABEL_2 = Colors.LIGHT_GRAY.format()
 
     # Traceback
-    PATHNAME = Format(colors.fg('Grey58'))
-    LINENO = Format(colors.fg('Grey58'), colors.bold)
-    FUNCNAME = Format(colors.fg('Grey78'))
+    PATHNAME = Colors.LIGHT_GRAY.format()
+    LINENO = Colors.LIGHT_GRAY.format(bold=True)
+    FUNCNAME = Colors.EXTRA_LIGHT_GRAY.format()
 
 
-class LoggingLevels(FormattedEnum):
+class LoggingLevels(AttributeFormatter):
+    CRITICAL = (Colors.RED.format(bold=True, wrapper="[!] %s"), 50)
+    ERROR = (Colors.RED.format(bold=True, wrapper="[!] %s"), 40)
+    WARNING = (Colors.YELLOW.format(bold=False, wrapper="[!] %s"), 30)
 
-    CRITICAL = (Format(colors.fg('Red1'), colors.bold,
-        wrapper="[!] %s", format_with_wrapper=True), 50)  # noqa
-    ERROR = (Format(colors.fg('Red1'), colors.bold,
-        wrapper="[!] %s", format_with_wrapper=True), 40)
-    WARNING = (Format(colors.fg('SandyBrown'), colors.bold,
-        wrapper="[!] %s", format_with_wrapper=True), 30)
-    SUCCESS = (Format(colors.fg('SpringGreen3'),
-        wrapper="[$] %s", format_with_wrapper=True), 24)
-    START = (Format(colors.fg('DarkOliveGreen3'),
-        wrapper="[+] %s", format_with_wrapper=True), 23)
-    STOP = (Format(colors.fg('Red3'),
-        wrapper="[x] %s", format_with_wrapper=True), 22)
-    COMPLETE = (Format(colors.fg('IndianRed'),
-        wrapper="[-] %s", format_with_wrapper=True), 21)
-    INFO = (Format(colors.fg('DeepSkyBlue4B'), colors.bold,
-        wrapper="[i] %s", format_with_wrapper=True), 20)
-    DEBUG = (Format(colors.fg('DarkGray'), colors.bold,
-        wrapper="[ ] %s", format_with_wrapper=True), 10)
+    SUCCESS = (Colors.GREEN.format(bold=False, wrapper="[$] %s"), 24)
+    START = (Colors.LIGHT_GREEN.format(bold=False, wrapper="[+] %s"), 23)
+    STOP = (Colors.ALT_RED.format(bold=False, wrapper="[x] %s"), 22)
+    COMPLETE = (Colors.LIGHT_RED.format(bold=False, wrapper="[-] %s"), 21)
+    INFO = (Colors.BLUE.format(bold=False, wrapper="[i] %s"), 20)
+
+    DEBUG = (Colors.GRAY.format(bold=False, wrapper="[ ] %s"), 10)
 
     def __init__(self, format, num):
         self.format = format

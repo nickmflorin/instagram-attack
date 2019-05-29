@@ -1,4 +1,4 @@
-from instattack.app.exceptions import AppException
+from instattack.app.exceptions import InstattackError
 from .utils import (
     get_http_exception_err_no, get_http_exception_request_method, get_http_exception_status_code,
     filtered_array)
@@ -21,7 +21,7 @@ __all__ = (
 )
 
 
-class HttpException(AppException):
+class HttpException(InstattackError):
 
     def __init__(self, exception):
         self.exception = exception

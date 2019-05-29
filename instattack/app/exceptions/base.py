@@ -1,7 +1,4 @@
-class AppException(Exception):
-    """
-    Base exception class for all custom exceptions.
-    """
+class InstattackError(Exception):
 
     def __init__(self, *args):
         if len(args) == 1:
@@ -13,11 +10,11 @@ class AppException(Exception):
         return self.message
 
 
-class ArgumentError(AppException):
+class ArgumentError(InstattackError):
     pass
 
 
-class ConfigurationError(AppException):
+class ConfigurationError(InstattackError):
     def __init__(self, errors):
         self.errors = errors
 
@@ -29,7 +26,7 @@ class ConfigurationError(AppException):
         pass
 
 
-class InternalTimeout(AppException):
+class InternalTimeout(InstattackError):
     """
     Thrown when we have internal logic that might wait on a result over a series
     of attempts and we want to limit the number of attempts or total time
@@ -44,11 +41,11 @@ class InternalTimeout(AppException):
         return 'Timed out after %s seconds; Waiting: %s' % (self.seconds, self.reason)
 
 
-class NoPasswordsError(AppException):
+class NoPasswordsError(InstattackError):
 
     __message__ = 'There are no passwords to try.'
 
 
-class PoolNoProxyError(AppException):
+class PoolNoProxyError(InstattackError):
 
     __message__ = 'No More Proxies in Pool'

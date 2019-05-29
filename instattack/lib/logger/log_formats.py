@@ -100,7 +100,7 @@ CONTEXT_LINES = Lines(
         ),
         Item(
             value='proxy.url',
-            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_1.format_with_wrapper("<%s>"),
+            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_1.format("<%s>"),
         ),
         label=Label(
             constant="Proxy",

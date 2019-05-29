@@ -1,9 +1,9 @@
 from plumbum.path import LocalPath
 
-from .base import AppException
+from .base import InstattackError
 
 
-class InvalidFileLine(AppException):
+class InvalidFileLine(InstattackError):
     def __init__(self, index, line, reason=None):
         self.index = index
         self.line = line
@@ -17,7 +17,7 @@ class InvalidFileLine(AppException):
         return f"Line at index {self.index} is invalid: \n {self.line}"
 
 
-class PathException(AppException):
+class PathException(InstattackError):
 
     def __init__(self, path):
 
@@ -57,7 +57,7 @@ class UserFileDoesNotExist(UserFileException):
 
 # Not currently used only because saving attempts is done via background tasks
 # that are suppressing exceptions.
-class UserAttemptExists(AppException):
+class UserAttemptExists(InstattackError):
 
     def __init__(self, user, attempt):
         self.user = user

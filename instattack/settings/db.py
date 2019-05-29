@@ -9,6 +9,7 @@ DB_PATH = DIR_STR(GET_ROOT() / f"{APP_NAME}.db")
 
 
 DB_URL = f'sqlite:///{DB_PATH}'
+
 DB_CONFIG = {
     'connections': {
         'default': {
