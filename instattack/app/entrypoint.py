@@ -4,14 +4,14 @@ from platform import python_version
 from plumbum import cli
 import tortoise
 
-from instattack.lib import logger
 from instattack.conf import Configuration
 from instattack.app.exceptions import ArgumentError
 
 from .users.models import User
+from .base import HandlerMixin
 
 
-class BaseApplication(cli.Application):
+class BaseApplication(cli.Application, HandlerMixin):
     """
     Used so that we can easily extend Instattack without having to worry about
     overriding the main method.
@@ -23,16 +23,15 @@ class BaseApplication(cli.Application):
     def get_user(self, loop, username):
 
         async def _get_user(username):
-            log = logger.get_async(__name__, subname='get_user')
-
-            try:
-                user = await User.get(username=username)
-            except tortoise.exceptions.DoesNotExist:
-                await log.error(f'User {username} does not exist.')
-                return None
-            else:
-                user.setup()
-                return user
+            async with self.async_logger('get_user') as log:
+                try:
+                    user = await User.get(username=username)
+                except tortoise.exceptions.DoesNotExist:
+                    await log.error(f'User {username} does not exist.')
+                    return None
+                else:
+                    user.setup()
+                    return user
 
         return loop.run_until_complete(_get_user(username))
 

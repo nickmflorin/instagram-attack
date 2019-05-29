@@ -25,12 +25,12 @@ class ProxyHandler(HandlerMixin):
             start_event=self.start_event)
 
     async def stop(self, loop):
-        log = self.create_logger('stop', ignore_config=True)
-        await log.stop('Stopping')
+        async with self.async_logger('stop', ignore_config=True) as log:
+            await log.stop('Stopping')
 
-        if self.pool.should_collect:
-            self.broker.stop(loop)
-        await log.debug('Done Stopping Proxy Handler')
+            if self.pool.should_collect:
+                self.broker.stop(loop)
+            await log.debug('Done Stopping Proxy Handler')
 
     async def run(self, loop):
         """
@@ -46,25 +46,25 @@ class ProxyHandler(HandlerMixin):
         and collection to be more dynamic and adjust, and collection to trigger
         if we are running low on proxies.
         """
-        log = self.create_logger('start', ignore_config=True)
-        await log.start('Starting Proxy Handler')
+        async with self.async_logger('start', ignore_config=True) as log:
+            await log.start('Starting Proxy Handler')
 
-        if self.config['proxies']['prepopulate']:
-            try:
-                await log.debug('Prepopulating Proxy Pool...')
-                await self.pool.prepopulate(loop)
-            except Exception as e:
-                raise e
+            if self.config['proxies']['prepopulate']:
+                try:
+                    await log.debug('Prepopulating Proxy Pool...')
+                    await self.pool.prepopulate(loop)
+                except Exception as e:
+                    raise e
 
-        if self.config['proxies']['collect']:
-            # Pool will set start event when it starts collecting proxies.
-            await self.pool.collect(loop)
-        else:
-            await log.debug('Not Collecting Proxies...')
-            if self.start_event.is_set():
-                raise RuntimeError('Start Event Already Set')
+            if self.config['proxies']['collect']:
+                # Pool will set start event when it starts collecting proxies.
+                await self.pool.collect(loop)
+            else:
+                await log.debug('Not Collecting Proxies...')
+                if self.start_event.is_set():
+                    raise RuntimeError('Start Event Already Set')
 
-            self.start_event.set()
-            await log.info('Setting Start Event', extra={
-                'other': 'Proxy Pool Prepopulated'
-            })
+                self.start_event.set()
+                await log.info('Setting Start Event', extra={
+                    'other': 'Proxy Pool Prepopulated'
+                })

@@ -22,6 +22,9 @@ from .controllers.base import Base
 
 import time
 
+
+_shutdown = False
+
 # You can log all uncaught exceptions on the main thread by assigning a handler
 # to sys.excepthook.
 # def exception_hook(exc_type, exc_value, exc_traceback):
@@ -37,7 +40,7 @@ CONFIG = init_defaults('instattack')
 CONFIG['instattack']['foo'] = 'bar'
 
 
-def handle_exception(self, loop, context):
+def handle_exception(loop, context):
     """
     We are having trouble using log.exception() with exc_info=True and seeing
     the stack trace, so we have a custom log.traceback() method for now.
@@ -80,93 +83,58 @@ def setup(app):
     Use spinner for overall setup and shutdown methods and use the spinner.write()
     method to notify of individual tasks in the methods.
     """
-    loop = asyncio.get_event_loop()
-    setup_loop(loop)
-    setup_logger(loop)
 
+    async def setup_config(loop):
+        # Temporarily Set Path as Hardcoded Value
+        config = Configuration(path="conf.yaml")
+        config.read()
+        config.set()
+
+    @spin_start_and_stop('Setting Up Directories')
+    async def setup_directories(loop):
+        # Remove __pycache__ Files
+        time.sleep(0.5)
+
+        [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
+        [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
+
+        if not settings.USER_PATH.exists():
+            settings.USER_PATH.mkdir()
+
+    @spin_start_and_stop('Setting Up DB')
+    async def setup_database(loop):
+        time.sleep(0.5)
+        await tortoise.Tortoise.init(config=settings.DB_CONFIG)
+        await tortoise.Tortoise.generate_schemas()
+
+    @spin_start_and_stop('Setting Up Loop')
+    async def setup_loop(loop):
+
+        SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
+
+        time.sleep(0.5)
+        loop.set_exception_handler(handle_exception)
+        for s in SIGNALS:
+            loop.add_signal_handler(s, shutdown_preemptively)
+
+    @spin_start_and_stop('Setting Up Logger')
+    async def setup_logger(loop):
+        time.sleep(0.5)
+        logger.disable_external_loggers(
+            'proxybroker',
+            'aiosqlite',
+            'db_client',
+            'progressbar.utils',
+            'tortoise'
+        )
+
+    loop = asyncio.get_event_loop()
+
+    loop.run_until_complete(setup_loop(loop))
+    loop.run_until_complete(setup_logger(loop))
     loop.run_until_complete(setup_directories(loop))
     loop.run_until_complete(setup_database(loop))
-
-    setup_config(loop)
-
-
-def shutdown_preemptively(loop, signal=None):
-    log = logger.get_sync(__name__, subname='shutdown')
-
-    # if self._shutdown:
-    #     log.warning('Instattack Already Shutdown...')
-    #     return
-    # self._shutdown = True
-
-    if signal:
-        log.warning(f'Received exit signal {signal.name}...')
-
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(shutdown_database(loop))
-    loop.close()
-
-
-def shutdown(app):
-    """
-    [x] TODO:
-    --------
-    Use spinner for overall setup and shutdown methods and use the spinner.write()
-    method to notify of individual tasks in the methods.
-    """
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(shutdown_async_loggers(loop))
-    loop.run_until_complete(shutdown_outstanding_tasks(loop))
-    loop.run_until_complete(shutdown_database(loop))
-    loop.close()
-
-
-def setup_config(loop):
-    # Temporarily Set Path as Hardcoded Value
-    config = Configuration(path="conf.yaml")
-    config.read()
-    config.set()
-
-
-@spin_start_and_stop('Setting Up Directories')
-async def setup_directories(loop):
-    # Remove __pycache__ Files
-    time.sleep(0.5)
-
-    [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
-    [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
-
-    if not settings.USER_PATH.exists():
-        settings.USER_PATH.mkdir()
-
-
-@spin_start_and_stop('Setting Up DB')
-async def setup_database(loop):
-    time.sleep(0.5)
-    await tortoise.Tortoise.init(config=settings.DB_CONFIG)
-    await tortoise.Tortoise.generate_schemas()
-
-
-@spin_start_and_stop('Setting Up Loop')
-def setup_loop(loop):
-
-    SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
-
-    time.sleep(0.5)
-    loop.set_exception_handler(handle_exception)
-    for s in SIGNALS:
-        loop.add_signal_handler(s, shutdown_preemptively)
-
-
-@spin_start_and_stop('Setting Up Logger')
-def setup_logger(loop):
-    time.sleep(0.5)
-    logger.disable_external_loggers(
-        'proxybroker',
-        'aiosqlite',
-        'db_client',
-        'progressbar.utils',
-        'tortoise'
-    )
+    loop.run_until_complete(setup_config(loop))
 
 
 @spin_start_and_stop('Shutting Down DB')
@@ -175,7 +143,6 @@ async def shutdown_database(loop):
     await tortoise.Tortoise.close_connections()
 
 
-@spin_start_and_stop('Shutting Down Outstanding Tasks')
 async def shutdown_outstanding_tasks(loop):
     with start_and_stop('Shutting Down Outstanding Tasks') as spinner:
 
@@ -184,24 +151,32 @@ async def shutdown_outstanding_tasks(loop):
             log_tasks=True
         )
         if len(futures) != 0:
-            spinner.write(f'> Cancelled {len(futures)} Leftover Tasks')
+            spinner.write(f'  > Cancelled {len(futures)} Leftover Tasks')
 
             log_tasks = futures[:20]
-            for task in log_tasks:
+            for i, task in enumerate(log_tasks):
                 if task_is_third_party(task):
-                    spinner.write(f'>> {task._coro.__name__} (Third Party)')
+                    spinner.write(f'  >> [{i + 1}] {task._coro.__name__} (Third Party)')
                 else:
-                    spinner.write(f'>> {task._coro.__name__}')
+                    spinner.write(f'  >> [{i + 1}] {task._coro.__name__}')
 
             if len(futures) > 20:
-                spinner.write(">> ...")
+                spinner.write("  >> ...")
         else:
-            spinner.write(f'> No Leftover Tasks to Cancel')
+            spinner.write(f'  > No Leftover Tasks to Cancel')
 
 
 @spin_start_and_stop('Shutting Down Async Loggers')
 async def shutdown_async_loggers(loop):
-
+    """
+    [x] TODO:
+    --------
+    aiologger is still in Beta, and we continue to get warnings about the loggers
+    not being shut down properly with .flush() and .close().  We should probably
+    remove that dependency and just stick to the sync logger, since it does not
+    improve speed by a substantial amount.
+    """
+    # This will return empty list right now.
     loggers = [
         logging.getLogger(name)
         for name in logging.root.manager.loggerDict
@@ -210,6 +185,59 @@ async def shutdown_async_loggers(loop):
     for lgr in loggers:
         if isinstance(lgr, logger.AsyncLogger):
             await lgr.shutdown()
+
+
+def shutdown_preemptively(loop, signal=None):
+    """
+    The shutdown method that is tied to the Application hooks only accepts
+    `app` as an argument, and we need the shutdown method tied to the exception
+    hook to accept `loop` and `signal` - which necessitates the need for an
+    alternate shutdown method.
+    """
+    log = logger.get_sync(__name__, subname='shutdown_preemptively')
+
+    global _shutdown
+    if _shutdown:
+        log.warning('Instattack Already Shutdown...')
+        return
+
+    _shutdown = True
+
+    if signal:
+        log.warning(f'Received exit signal {signal.name}...')
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(shutdown_async_loggers(loop))
+    loop.run_until_complete(shutdown_outstanding_tasks(loop))
+    loop.run_until_complete(shutdown_database(loop))
+    loop.close()
+
+
+def shutdown(app):
+    """
+    Race conditions can sometimes lead to multiple shutdown attempts, which can
+    raise errors due to the loop state.  We check the global _shutdown status to
+    make sure we avoid this and log in case it is avoidable.
+
+    [x] TODO:
+    --------
+    Use spinner for overall setup and shutdown methods and use the spinner.write()
+    method to notify of individual tasks in the methods.
+    """
+    log = logger.get_sync(__name__, subname='shutdown')
+
+    global _shutdown
+    if _shutdown:
+        log.warning('Instattack Already Shutdown...')
+        return
+
+    _shutdown = True
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(shutdown_async_loggers(loop))
+    loop.run_until_complete(shutdown_outstanding_tasks(loop))
+    loop.run_until_complete(shutdown_database(loop))
+    loop.close()
 
 
 class Instattack(App):

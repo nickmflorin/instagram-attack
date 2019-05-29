@@ -5,7 +5,7 @@ from cement.utils.version import get_version_banner
 
 import tortoise
 
-from instattack.lib import logger
+from instattack.app.base import HandlerMixin
 from instattack.app.version import get_version
 from instattack.app.users.models import User
 
@@ -14,7 +14,7 @@ APP_NAME = "Instattack"
 VERSION_BANNER = f"{APP_NAME} {get_version()} {get_version_banner()}"
 
 
-class Base(Controller):
+class Base(Controller, HandlerMixin):
     class Meta:
         label = 'base'
 
@@ -44,16 +44,15 @@ class Base(Controller):
     def get_user(self, loop, username):
 
         async def _get_user(username):
-            log = logger.get_async(__name__, subname='get_user')
-
-            try:
-                user = await User.get(username=username)
-            except tortoise.exceptions.DoesNotExist:
-                await log.error(f'User {username} does not exist.')
-                return None
-            else:
-                user.setup()
-                return user
+            async with self.async_logger('get_user') as log:
+                try:
+                    user = await User.get(username=username)
+                except tortoise.exceptions.DoesNotExist:
+                    await log.error(f'User {username} does not exist.')
+                    return None
+                else:
+                    user.setup()
+                    return user
 
         return loop.run_until_complete(_get_user(username))
 

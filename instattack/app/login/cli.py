@@ -57,21 +57,21 @@ class Login(BaseApplication):
         return 1
 
     async def test_login(self, loop, user, password, config):
-        log = logger.get_async(__name__, subname='test_login')
+        async with self.async_logger('test_login') as log:
 
-        proxy_handler, password_handler = post_handlers(user, config)
+            proxy_handler, password_handler = post_handlers(user, config)
 
-        results = await asyncio.gather(
-            password_handler.attempt_single_login(loop, password),
-            proxy_handler.run(loop),
-        )
+            results = await asyncio.gather(
+                password_handler.attempt_single_login(loop, password),
+                proxy_handler.run(loop),
+            )
 
-        # We might not need to stop proxy handler.
-        await log.debug('Stopping Proxy Handler...')
-        await proxy_handler.stop(loop)
+            # We might not need to stop proxy handler.
+            await log.debug('Stopping Proxy Handler...')
+            await proxy_handler.stop(loop)
 
-        await log.debug('Returning Result')
-        return results[0]
+            await log.debug('Returning Result')
+            return results[0]
 
 
 @EntryPoint.subcommand('attack')
@@ -129,20 +129,20 @@ class Attack(BaseApplication):
     def attack(self, loop, user, config):
 
         async def _attack(loop, user, config):
-            log = logger.get_async(__name__, subname='attack')
+            async with self.async_logger('attack') as log:
 
-            proxy_handler, password_handler = post_handlers(user, config)
+                proxy_handler, password_handler = post_handlers(user, config)
 
-            results = await asyncio.gather(
-                password_handler.attack(loop),
-                proxy_handler.run(loop),
-            )
+                results = await asyncio.gather(
+                    password_handler.attack(loop),
+                    proxy_handler.run(loop),
+                )
 
-            # We might not need to stop proxy handler.
-            await log.debug('Stopping Proxy Handler...')
-            await proxy_handler.stop(loop)
+                # We might not need to stop proxy handler.
+                await log.debug('Stopping Proxy Handler...')
+                await proxy_handler.stop(loop)
 
-            await log.debug('Returning Result')
-            return results[0]
+                await log.debug('Returning Result')
+                return results[0]
 
         return loop.run_until_complete(_attack(loop, user, config))

@@ -50,83 +50,81 @@ class SingleUserApplication(UsersApplication):
 class CleanUsers(UsersApplication):
 
     async def directories(self, loop):
-        log = logger.get_async(__name__, subname='directories')
-
-        async for user in User.all():
-            user.setup()
-            await log.complete(f'Cleaned Directory for User {user.username}.')
+        async with self.async_logger('directories') as log:
+            async for user in User.all():
+                user.setup()
+                await log.complete(f'Cleaned Directory for User {user.username}.')
 
 
 @UserEntryPoint.subcommand('show')
 class ShowUsers(UsersApplication):
 
     async def operation(self, loop):
-        log = logger.get_sync(__name__, subname='operation')
-
-        with log.logging_lines():
-            users = await User.all()
-            for user in users:
-                log.line(user.username)
+        async with self.async_logger('operation') as log:
+            with log.logging_lines():
+                users = await User.all()
+                for user in users:
+                    log.line(user.username)
 
 
 @UserEntryPoint.subcommand('clear')
 class ClearUser(SingleUserApplication):
 
     async def attempts(self, loop, user):
-        log = logger.get_async(__name__, subname='attempts')
-        await log.info(f'Clearing User {user.username} Attempts')
+        async with self.async_logger('attempts') as log:
+            await log.info(f'Clearing User {user.username} Attempts')
 
-        await log.debug('Fetching User Attempts...')
-        attempts = await user.get_attempts(limit=self.limit)
-        await log.debug('User Attempts Retrieved')
+            await log.debug('Fetching User Attempts...')
+            attempts = await user.get_attempts(limit=self.limit)
+            await log.debug('User Attempts Retrieved')
 
-        tasks = []
-        for attempt in attempts:
-            tasks.append(asyncio.create_task(attempt.delete()))
+            tasks = []
+            for attempt in attempts:
+                tasks.append(asyncio.create_task(attempt.delete()))
 
-        await log.start('Deleting Attempts...')
-        await asyncio.gather(*tasks)
-        if len(tasks) == 0:
-            await log.error(f"No attempts to clear for user {user.username}.")
-            return
+            await log.start('Deleting Attempts...')
+            await asyncio.gather(*tasks)
+            if len(tasks) == 0:
+                await log.error(f"No attempts to clear for user {user.username}.")
+                return
 
-        await log.complete(f"Cleared {len(tasks)} attempts for user {user.username}.")
+            await log.complete(f"Cleared {len(tasks)} attempts for user {user.username}.")
 
 
 @UserEntryPoint.subcommand('get')
 class GetUser(SingleUserApplication):
 
     async def passwords(self, loop, user):
-        log = logger.get_async(__name__, subname='passwords')
-        await log.start(f'Getting User {user.username} Passwords')
+        async with self.async_logger('passwords') as log:
+            await log.start(f'Getting User {user.username} Passwords')
 
-        async with log.logging_lines():
-            async for item in user.stream_passwords(limit=self.limit):
-                await log.line(item)
+            async with log.logging_lines():
+                async for item in user.stream_passwords(limit=self.limit):
+                    await log.line(item)
 
     async def alterations(self, loop, user):
-        log = logger.get_async(__name__, subname='alterations')
-        await log.start(f'Getting User {user.username} Alterations')
+        async with self.async_logger('alterations') as log:
+            await log.start(f'Getting User {user.username} Alterations')
 
-        async with log.logging_lines():
-            async for item in user.stream_alterations(limit=self.limit):
-                await log.line(item)
+            async with log.logging_lines():
+                async for item in user.stream_alterations(limit=self.limit):
+                    await log.line(item)
 
     async def numerics(self, loop, user):
-        log = logger.get_async(__name__, subname='numerics')
-        await log.start(f'Getting User {user.username} Numerics')
+        async with self.async_logger('numerics') as log:
+            await log.start(f'Getting User {user.username} Numerics')
 
-        async with log.logging_lines():
-            async for item in user.stream_numerics(limit=self.limit):
-                await log.line(item)
+            async with log.logging_lines():
+                async for item in user.stream_numerics(limit=self.limit):
+                    await log.line(item)
 
     async def attempts(self, loop, user):
-        log = logger.get_async(__name__, subname='attempts')
-        await log.start(f'Getting User {user.username} Attempts')
+        async with self.async_logger('attempts') as log:
+            await log.start(f'Getting User {user.username} Attempts')
 
-        async with log.logging_lines():
-            async for attempt in user.stream_attempts(limit=self.limit):
-                await log.line(attempt)
+            async with log.logging_lines():
+                async for attempt in user.stream_attempts(limit=self.limit):
+                    await log.line(attempt)
 
 
 @UserEntryPoint.subcommand('generate')
@@ -157,27 +155,27 @@ class DeleteUser(BaseApplication):
         return 1
 
     async def delete_user(self, loop, username):
-        log = logger.get_async(__name__, subname='add_user')
 
-        def delete_user_dir(user):
-            log.start('Deleting User Directory...')
-            user.teardown()
-            log.success('User Directory Deleted')
+        async with self.async_logger('add_user') as log:
+            def delete_user_dir(user):
+                log.start('Deleting User Directory...')
+                user.teardown()
+                log.success('User Directory Deleted')
 
-        user = await self.check_if_user_exists(username)
-        if not user:
-            user = User(username=username)
-            if user.directory().exists():
-                log.warning('User does not exist in database.')
-                delete_user_dir(user)
+            user = await self.check_if_user_exists(username)
+            if not user:
+                user = User(username=username)
+                if user.directory().exists():
+                    log.warning('User does not exist in database.')
+                    delete_user_dir(user)
+                else:
+                    raise ArgumentError('User does not exist in database.')
             else:
-                raise ArgumentError('User does not exist in database.')
-        else:
-            log.start('Deleting User from DB...')
-            await user.delete()
-            log.success('User Deleted from DB')
+                log.start('Deleting User from DB...')
+                await user.delete()
+                log.success('User Deleted from DB')
 
-            delete_user_dir(user)
+                delete_user_dir(user)
 
 
 @UserEntryPoint.subcommand('create')
@@ -189,11 +187,12 @@ class AddUser(BaseApplication):
         return 1
 
     async def add_user(self, loop, username):
-        log = logger.get_async(__name__, subname='add_user')
-        user = await self.check_if_user_exists(username)
-        if user:
-            raise ArgumentError('User already exists.')
+        async with self.async_logger('add_user') as log:
 
-        user = await User.create(username=username)
-        user.setup()
-        log.success(f'Successfully created user {user.username}.')
+            user = await self.check_if_user_exists(username)
+            if user:
+                raise ArgumentError('User already exists.')
+
+            user = await User.create(username=username)
+            user.setup()
+            log.success(f'Successfully created user {user.username}.')

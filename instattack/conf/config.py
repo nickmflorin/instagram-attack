@@ -75,8 +75,8 @@ class Configuration(collections.MutableMapping):
 
         with open(self.path, 'r') as ymlfile:
             try:
-                data = yaml.load(ymlfile)
-            except (yaml.YAMLLoadWarning, yaml.scanner.ScannerError) as e:
+                data = yaml.load(ymlfile, Loader=yaml.FullLoader)
+            except yaml.scanner.ScannerError as e:
                 raise ArgumentTypeError(str(e))
 
         validate_config_schema(data)

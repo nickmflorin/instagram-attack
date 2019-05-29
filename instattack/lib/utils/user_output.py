@@ -1,4 +1,5 @@
 import contextlib
+import decorator
 from yaspin import yaspin
 
 from instattack import settings
@@ -22,11 +23,11 @@ def spin_start_and_stop(text):
     --------
     Allow synchronous versions as well.
     """
-    def decorator(func):
-        async def wrapped(*args, **kwargs):
-            with yaspin(text=settings.Colors.GRAY(text), color="red") as spinner:
-                await func(*args, **kwargs)
-                spinner.text = settings.Colors.GREEN(text)
-                spinner.ok(settings.Colors.GREEN("✔"))
-        return wrapped
-    return decorator
+    @decorator.decorator
+    async def decorate(coro, *args, **kwargs):
+        with yaspin(text=settings.Colors.GRAY(text), color="red") as spinner:
+            await coro(*args, **kwargs)
+            spinner.text = settings.Colors.GREEN(text)
+            spinner.ok(settings.Colors.GREEN("✔"))
+
+    return decorate

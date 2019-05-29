@@ -48,24 +48,23 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        log = self.create_logger('prepopulate')
+        async with self.async_logger('prepopulate') as log:
+            await log.start('Prepopulating Proxies')
 
-        await log.start('Prepopulating Proxies')
+            async for proxy in stream_proxies(self.config):
+                proxy.reset()
 
-        async for proxy in stream_proxies(self.config):
-            proxy.reset()
+                evaluation = proxy.evaluate_for_pool(self.config)
+                if evaluation.passed:
+                    await self.put(proxy)
+                    if self.prepopulate_limit and self.qsize() == self.prepopulate_limit:
+                        break
 
-            evaluation = proxy.evaluate_for_pool(self.config)
-            if evaluation.passed:
-                await self.put(proxy)
-                if self.prepopulate_limit and self.qsize() == self.prepopulate_limit:
-                    break
+            if self.qsize() == 0:
+                await log.error('No Proxies to Prepopulate')
+                return
 
-        if self.qsize() == 0:
-            await log.error('No Proxies to Prepopulate')
-            return
-
-        await log.complete(f"Prepopulated {self.qsize()} Proxies")
+            await log.complete(f"Prepopulated {self.qsize()} Proxies")
 
     async def collect(self, loop):
         """
@@ -82,30 +81,29 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         based on the prepopulated limit.
         >>> collect_limit = max(self._maxsize - self.qsize(), 0)
         """
-        log = self.create_logger('collect')
+        async with self.async_logger('collect') as log:
+            await log.start('Collecting Proxies')
 
-        await log.start('Collecting Proxies')
+            scheduler = await aiojobs.create_scheduler(limit=None)
 
-        scheduler = await aiojobs.create_scheduler(limit=None)
+            count = 0
+            collect_limit = 10000  # Arbitrarily high for now.
 
-        count = 0
-        collect_limit = 10000  # Arbitrarily high for now.
+            async for proxy, created in self.broker.collect(loop, save=True, scheduler=scheduler):
+                evaluation = proxy.evaluate_for_pool(self.config)
+                if evaluation.passed:
+                    await self.put(proxy)
 
-        async for proxy, created in self.broker.collect(loop, save=True, scheduler=scheduler):
-            evaluation = proxy.evaluate_for_pool(self.config)
-            if evaluation.passed:
-                await self.put(proxy)
+                    # Set Start Event on First Proxy Retrieved from Broker
+                    if self.start_event and not self.start_event.is_set():
+                        self.start_event.set()
+                        await log.info('Setting Start Event', extra={
+                            'other': 'Broker Started Sending Proxies'
+                        })
 
-                # Set Start Event on First Proxy Retrieved from Broker
-                if self.start_event and not self.start_event.is_set():
-                    self.start_event.set()
-                    await log.info('Setting Start Event', extra={
-                        'other': 'Broker Started Sending Proxies'
-                    })
-
-            if collect_limit and count == collect_limit:
-                break
-            count += 1
+                if collect_limit and count == collect_limit:
+                    break
+                count += 1
 
     async def get(self):
         """
@@ -136,39 +134,37 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         >>>             self._threshold = True
         >>>         ...
         """
-        log = self.create_logger('get')
+        async with self.async_logger('get') as log:
+            try:
+                if self.qsize() <= 20:
+                    await log.warning(f'Running Low on Proxies: {self.qsize()}')
 
-        try:
-            if self.qsize() <= 20:
-                await log.warning(f'Running Low on Proxies: {self.qsize()}')
-
-            # We might not need this timeout, since it might be factored into the
-            # session already.
-            proxy = await asyncio.wait_for(self._get_proxy(), timeout=self.timeout)
-        except asyncio.TimeoutError:
-            raise PoolNoProxyError()
-        else:
-            return proxy
+                # We might not need this timeout, since it might be factored into the
+                # session already.
+                proxy = await asyncio.wait_for(self._get_proxy(), timeout=self.timeout)
+            except asyncio.TimeoutError:
+                raise PoolNoProxyError()
+            else:
+                return proxy
 
     async def _get_proxy(self):
         """
         Retrieves the lowest priority proxy from the queue that is ready to
         be used.
         """
-        log = self.create_logger('get')
+        async with self.async_logger('get') as log:
+            while True:
+                ret = await super(ProxyPool, self).get()
+                proxy = ret[1]
 
-        while True:
-            ret = await super(ProxyPool, self).get()
-            proxy = ret[1]
-
-            evaluation = proxy.evaluate_for_use(self.config)
-            if not evaluation.passed:
-                await log.debug('Cannot Use Proxy from Pool', extra={
-                    'proxy': proxy,
-                    'other': str(evaluation),
-                })
-            else:
-                return proxy
+                evaluation = proxy.evaluate_for_use(self.config)
+                if not evaluation.passed:
+                    await log.debug('Cannot Use Proxy from Pool', extra={
+                        'proxy': proxy,
+                        'other': str(evaluation),
+                    })
+                else:
+                    return proxy
 
     async def check_and_put(self, proxy):
         """
@@ -177,16 +173,15 @@ class ProxyPool(asyncio.PriorityQueue, HandlerMixin):
         quantitative metrics aren't perfect, but we know the proxy has
         successful requests.
         """
-        log = self.create_logger('put')
-
-        evaluation = proxy.evaluate_for_pool(self.config)
-        if not evaluation.passed:
-            await log.warning('Cannot Add Proxy to Pool', extra={
-                'proxy': proxy,
-                'other': str(evaluation),
-            })
-        else:
-            await self.put(proxy)
+        async with self.async_logger('put') as log:
+            evaluation = proxy.evaluate_for_pool(self.config)
+            if not evaluation.passed:
+                await log.warning('Cannot Add Proxy to Pool', extra={
+                    'proxy': proxy,
+                    'other': str(evaluation),
+                })
+            else:
+                await self.put(proxy)
 
     async def put(self, proxy):
         """

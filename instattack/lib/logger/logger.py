@@ -213,6 +213,12 @@ class SimpleAsyncLogger(AsyncLoggerMixin, aiologger.Logger):
         super(SimpleAsyncLogger, self).__init__(name=name)
         self.init()
 
+    async def shutdown(self):
+        for handler in self.handlers:
+            await handler.flush()
+            await handler.close()
+        await super(SimpleAsyncLogger, self).shutdown()
+
     async def _create_record(
         self,
         level,

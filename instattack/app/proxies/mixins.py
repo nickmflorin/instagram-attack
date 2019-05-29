@@ -18,28 +18,27 @@ class ProxyBrokerMixin(object):
         Finds the related Proxy model for a given proxybroker Proxy model
         and returns the instance if present.
         """
-        log = logger.get_async(__name__, subname='find_for_proxybroker')
+        async with cls.async_logger('find_for_proxybroker') as log:
+            try:
+                return await cls.get(
+                    host=broker_proxy.host,
+                    port=broker_proxy.port,
+                )
+            except tortoise.exceptions.DoesNotExist:
+                return None
+            except tortoise.exceptions.MultipleObjectsReturned:
+                all_proxies = await cls.filter(host=broker_proxy.host, port=broker_proxy.port).all()
+                await log.critical(
+                    f'Found {len(all_proxies)} Duplicate Proxies for '
+                    f'{broker_proxy.host} - {broker_proxy.port}.'
+                )
 
-        try:
-            return await cls.get(
-                host=broker_proxy.host,
-                port=broker_proxy.port,
-            )
-        except tortoise.exceptions.DoesNotExist:
-            return None
-        except tortoise.exceptions.MultipleObjectsReturned:
-            all_proxies = await cls.filter(host=broker_proxy.host, port=broker_proxy.port).all()
-            await log.critical(
-                f'Found {len(all_proxies)} Duplicate Proxies for '
-                f'{broker_proxy.host} - {broker_proxy.port}.'
-            )
+                all_proxies = sorted(all_proxies, key=lambda x: x.date_added)
+                for proxy in all_proxies[1:]:
+                    await log.warning('Deleting Duplicate Proxy', extra={'proxy': proxy})
+                    await proxy.delete()
 
-            all_proxies = sorted(all_proxies, key=lambda x: x.date_added)
-            for proxy in all_proxies[1:]:
-                await log.warning('Deleting Duplicate Proxy', extra={'proxy': proxy})
-                await proxy.delete()
-
-            return all_proxies[0]
+                return all_proxies[0]
 
     @classmethod
     def translate_proxybroker_errors(cls, broker_proxy):
