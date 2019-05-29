@@ -36,3 +36,9 @@ class DirDoesNotExist(PathException):
 
     def __str__(self):
         return f'The directory {self.pathname} is missing, was it accidentally deleted?'
+
+
+class DirExists(PathException):
+
+    def __str__(self):
+        return f'The directory {self.pathname} already exists.'

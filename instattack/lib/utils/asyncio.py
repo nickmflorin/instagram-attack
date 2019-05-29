@@ -98,5 +98,4 @@ async def cancel_remaining_tasks(futures=None, raise_exceptions=False, log_excep
     list(map(cancel_task, futures))
     await asyncio.gather(*futures, return_exceptions=True)
 
-    await log.shutdown()
     return futures

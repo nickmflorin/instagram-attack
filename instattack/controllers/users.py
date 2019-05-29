@@ -4,6 +4,7 @@ from cement import ex, Interface
 
 import tortoise
 
+from instattack.app import settings
 from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
 
@@ -239,3 +240,42 @@ class UserController(InstattackController, UserInterface):
             data['users'].append(user.__dict__)
 
         self.app.render(data, 'users.jinja2')
+
+    @ex(help='Clean User Directory for Active and Deleted Users')
+    def clean(self):
+        """
+        First, loops over current users and ensures that their directory
+        and files are present.  Then, looks in the user directory for any
+        users that do not exist anymore and deletes those files.
+        """
+        loop = asyncio.get_event_loop()
+        users = loop.run_until_complete(self._get_users(loop))
+        for user in users:
+            # This really shouldn't happen often, since we do this on save.
+            if not user.directory.exists():
+                user.initialize_directory()
+
+        directory = settings.USER_PATH
+        for user_dir in directory.iterdir():
+            if user_dir.is_file():
+                print(f'Deleting File {user_dir.name}')
+                user_dir.delete()
+            else:
+                # Remove Directory if User Does Not Exist
+                if user_dir.name not in [user.username for user in users]:
+                    print(f'Deleting Leftover Directory for {user_dir.name}')
+                    user_dir.delete()
+                else:
+                    user = [usr for usr in users if usr.username == user_dir.name][0]
+
+                    # Make Sure All Files Present if User Exists
+                    for file in User.FILES:
+                        pt = user.file_path(file)
+                        if not pt.exists() or not pt.is_file():
+                            print(f'File {pt.name} Missing for User {user.username}')
+                            pt.touch()
+
+                    # Make Sure No Other Files Present
+                    for others in user_dir.iterdir():
+                        if not user_dir.is_file() or user_dir.name not in User.FILES:
+                            print(f'Warning: Found Unidentified Item {user_dir.name}')

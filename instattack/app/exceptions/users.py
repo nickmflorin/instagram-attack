@@ -1,5 +1,5 @@
 from .base import InstattackError
-from .io import DirDoesNotExist, PathException
+from .io import PathException
 
 
 class UserError(InstattackError):
@@ -21,15 +21,17 @@ class UserExists(UserError):
     __message__ = "User %s already exists."
 
 
-class UserDirDoesNotExist(DirDoesNotExist):
-    pass
-
-
 class UserFileException(PathException):
 
     def __init__(self, path, user):
         super(UserFileException, self).__init__(path)
         self.user = user
+
+
+class UserFileExists(UserFileException):
+
+    def __str__(self):
+        return f'The file {self.filename} already exists for user {self.user.username}.'
 
 
 class UserFileDoesNotExist(UserFileException):
