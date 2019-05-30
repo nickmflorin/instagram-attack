@@ -2,7 +2,7 @@ import asyncio
 from cement import ex
 from cement.utils.version import get_version_banner
 
-from instattack.app import settings
+from instattack import settings
 from instattack.app.version import get_version
 from instattack.app.attack.handlers import LoginHandler, ProxyHandler
 
@@ -96,14 +96,16 @@ class Base(InstattackController, AttackInterface):
 
         # We might not need to stop proxy handler?
         loop.run_until_complete(proxy_handler.stop(loop))
-        result = results[0]
-        if result.authenticated_result:
-            self.success(result.authenticated_result)
+        if results[0].authenticated_result:
+            self.success(results[0].authenticated_result)
         else:
-            self.failure(result.results[0])
+            self.failure(results[0].results[0])
 
     @ex(help="Perform Attack Attempt", arguments=[
         (['username'], {'help': 'Username'}),
+        (['-l', '--limit'], {'default': 100, 'help': 'Limit the Number of Passwords to Try'}),
+        (['-nl', '--nolimit'],
+            {'action': 'store_true', 'help': 'Do Not Limit the Number of Passwords to Try'})
     ])
     def attack(self):
         """
@@ -118,4 +120,23 @@ class Base(InstattackController, AttackInterface):
 
         Set limit for password limit for attack mode.
         """
-        pass
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+
+        proxy_handler, password_handler = self._attack_handlers(user)
+
+        limit = None
+        if not self.app.pargs.nolimit:
+            limit = int(self.app.pargs.limit)
+
+        results = loop.run_until_complete(asyncio.gather(
+            password_handler.attack(loop, limit=limit),
+            proxy_handler.run(loop),
+        ))
+
+        # We might not need to stop proxy handler?
+        loop.run_until_complete(proxy_handler.stop(loop))
+        if results[0].authenticated_result:
+            self.success(results[0].authenticated_result)
+        else:
+            self.failure('Not Authenticated')

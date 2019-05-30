@@ -2,10 +2,8 @@ import asyncio
 import contextlib
 from proxybroker import Broker
 
-from instattack.app import settings
+from instattack import settings
 from instattack.app.mixins import LoggerMixin
-
-from instattack.lib.utils import cancel_remaining_tasks
 
 from .models import Proxy
 
@@ -97,15 +95,6 @@ class ProxyBroker(Broker, LoggerMixin):
         if not self._stopped:
             self.stop(loop)
             self._stopped = True
-
-        # If we do not do this here, these tasks can raise exceptions in our
-        # shutdown method.
-        await log.debug('Cancelling Proxy Broker Tasks')
-        await cancel_remaining_tasks(
-            futures=self._all_tasks,
-            raise_exceptions=True,
-            log_exceptions=False,
-        )
 
     def stop(self, loop):
         """

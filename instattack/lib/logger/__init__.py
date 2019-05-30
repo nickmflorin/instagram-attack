@@ -1,6 +1,6 @@
 import logging
 
-from instattack.app import settings
+from instattack import settings
 
 from .logger import *  # noqa
 

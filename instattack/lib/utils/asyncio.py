@@ -1,8 +1,6 @@
 import asyncio
 import inspect
 
-from instattack.lib import logger
-
 from .paths import task_is_third_party
 
 

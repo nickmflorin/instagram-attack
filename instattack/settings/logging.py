@@ -74,10 +74,6 @@ class LoggingLevels(AttributeFormatter):
 
     DEBUG = (Colors.GRAY.format(bold=True, wrapper="✂  %s"), 10)
 
-    def __init__(self, format, num):
-        self.format = format
-        self.num = num
-
-    @property
-    def message_formatter(self):
-        return self.format.without_text_decoration().without_wrapping()
+    def __init__(self, *args):
+        self._fmt = args[0]
+        self.num = args[1]

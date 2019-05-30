@@ -23,17 +23,14 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
     __name__ = 'Proxy Pool'
 
     def __init__(self, config, broker, start_event=None):
-        limit = config['proxies']['pool'].get('limit', -1)
-        super(ProxyPool, self).__init__(limit)
+        # We do not want to restrict the size of the Proxy Pool because it can
+        # be detrimental for larger attack sizes.
+        super(ProxyPool, self).__init__(-1)
 
         self.broker = broker
         self.config = config
         self.start_event = start_event
-
         self.timeout = self.config['proxies']['pool']['timeout']
-
-        # Not Using This Right Now
-        self.prepopulate_limit = None
 
         # Tuple Comparison Breaks in Python3 -  The entry count serves as a
         # tie-breaker so that two tasks with the same priority are returned in
@@ -49,7 +46,6 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         dramatically increase speeds.
         """
         log = self.create_logger('prepopulate')
-
         await log.start('Prepopulating Proxies')
 
         async for proxy in stream_proxies(self.config):
@@ -58,8 +54,6 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
             evaluation = proxy.evaluate_for_pool(self.config)
             if evaluation.passed:
                 await self.put(proxy)
-                if self.prepopulate_limit and self.qsize() == self.prepopulate_limit:
-                    break
 
         if self.qsize() == 0:
             await log.error('No Proxies to Prepopulate')
@@ -180,10 +174,11 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
 
         evaluation = proxy.evaluate_for_pool(self.config)
         if not evaluation.passed:
-            await log.warning('Cannot Add Proxy to Pool', extra={
-                'proxy': proxy,
-                'other': str(evaluation),
-            })
+            # await log.warning('Cannot Add Proxy to Pool', extra={
+            #     'proxy': proxy,
+            #     'other': str(evaluation),
+            # })
+            pass
         else:
             await self.put(proxy)
 
@@ -199,6 +194,6 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         the same and priority will be given to proxies placed first.
         """
         count = next(self.proxy_counter)
-        priority = proxy.priority(count)
+        priority = proxy.priority(count, self.config)
         await super(ProxyPool, self).put((priority, proxy))
         return proxy

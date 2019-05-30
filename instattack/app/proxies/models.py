@@ -1,22 +1,17 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 
+import tortoise
 from tortoise import fields
 from tortoise.models import Model
 
-from .evaluation import evaluate, ProxyEvaluation
-from .mixins import ErrorHandlerMixin, ProxyBrokerMixin
+from instattack import settings
+from instattack.lib import logger
+
+from .mixins import EvaluationMixin
 
 
-PROXY_PRIORITY_FIELDS = (
-    (1, 'flattened_error_rate'),
-    (-1, 'num_active_successful_requests'),
-    (-1, 'num_successful_requests'),
-    (1, 'avg_resp_time'),
-)
-
-
-class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
+class Proxy(Model, EvaluationMixin):
 
     id = fields.IntField(pk=True)
     host = fields.CharField(max_length=30)
@@ -30,17 +25,12 @@ class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
 
     num_requests = fields.IntField(default=0)
     num_active_requests = fields.IntField(default=0)
+    last_request_confirmed = fields.BooleanField(default=False)
 
     class Meta:
-        unique_together = (
-            'host',
-            'port',
-        )
+        unique_together = ('host', 'port')
 
-    identifier_fields = (
-        'host',
-        'port',
-    )
+    identifier_fields = ('host', 'port')
 
     @property
     def unique_id(self):
@@ -69,29 +59,6 @@ class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
         scheme = 'http'
         return f"{scheme}://{self.address}/"
 
-    @property
-    def num_successful_requests(self):
-        return self.num_requests - self.error_count
-
-    @property
-    def num_active_successful_requests(self):
-        return self.num_active_requests - self.active_error_count
-
-    @property
-    def num_failed_requests(self):
-        return self.num_requests - self.num_successful_requests
-
-    @property
-    def num_active_failed_requests(self):
-        return self.num_active_requests - self.num_active_successful_requests
-
-    @property
-    def time_since_used(self):
-        if self.last_used:
-            delta = datetime.now() - self.last_used
-            return delta.total_seconds()
-        return 0.0
-
     def reset(self):
         """
         Reset values that are meant to only be used during time proxy is active
@@ -99,61 +66,178 @@ class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
         """
         self.num_active_requests = 0
         self.active_errors = {'all': {}}
+        self.last_request_confirmed = False
 
     def update_time(self):
         self.last_used = datetime.now()
 
-    @property
-    def priority_values(self):
+    def priority_values(self, config):
+        err_rate = config['proxies']['pool']['limits'].get('error_rate', {})
+        horizon = err_rate.get('horizon')
+
+        PROXY_PRIORITY_VALUES = (
+            (-1, self.last_request_confirmed),
+            (-1, self._num_requests(active=False, success=True)),
+            (1, self._error_rate(active=False, horizon=horizon)),
+            (1, self.avg_resp_time),
+        )
+
         return [
-            field[0] * getattr(self, field[1])
-            for field in PROXY_PRIORITY_FIELDS
+            field[0] * field[1]
+            for field in PROXY_PRIORITY_VALUES
         ]
 
-    def priority(self, count):
-        priority = self.priority_values
+    def priority(self, count, config):
+        priority = self.priority_values(config)
         priority.append(count)
         return tuple(priority)
 
-    def evaluate_for_pool(self, config):
+    def add_error(self, exc, count=1, note_most_recent=True):
+
+        self.errors.setdefault('all', {})
+        self.errors['all'].setdefault(exc.__subtype__, 0)
+        self.errors['all'][exc.__subtype__] += count
+
+        self.active_errors.setdefault('all', {})
+        self.active_errors['all'].setdefault(exc.__subtype__, 0)
+        self.active_errors['all'][exc.__subtype__] += count
+
+        if note_most_recent:
+            self.errors['most_recent'] = exc.__subtype__
+            self.active_errors['most_recent'] = exc.__subtype__
+
+    def include_errors(self, errors):
+        for key, val in errors.items():
+            self.add_error(key, count=val, note_most_recent=False)
+
+    async def handle_success(self, save=False):
+        self.num_requests += 1
+        if save:
+            await self.save()
+
+    async def handle_error(self, exc):
         """
-        Called before a proxy is put into the Pool.
+        [1] Fatal Error:
+        ---------------
+        If `remove_invalid_proxy` is set to True and this error occurs,
+        the proxy will be removed from the database.
+        If `remove_invalid_proxy` is False, the proxy will just be noted
+        with the error and the proxy will not be put back in the pool.
 
-        Allows us to disregard or completely ignore proxies without having
-        to delete them from DB.
+        Since we will not delete directly from this method (we need config)
+        we will just note the error.
 
-        [x] TODO:
-        --------
-        Incorporate limit on certain errors or exclusion of proxy based on certain
-        errors in general.
+        [2] Inconclusive Error:
+        ----------------------
+        Proxy will not be noted with the error and the proxy will be put
+        back in pool.
 
-        Make it so that we can return the evaluations and also indicate
-        that it is okay or not okay for the pool.
+        [3] Semi-Fatal Error:
+        --------------------
+        Regardless of the value of `remove_invalid_proxy`, the  proxy
+        will be noted with the error and the proxy will be removed from
+        the pool.
+
+        [4] General Error:
+        -----------------
+        Proxy will be noted with error but put back in the pool.
         """
-        evaluation = evaluate(self, config)
-        return evaluation
+        self.num_requests += 1
+        self.add_error(exc)
 
-    def evaluate_for_use(self, config):
+    @classmethod
+    async def find_for_proxybroker(cls, broker_proxy):
         """
-        Called before a proxy is returned from the Pool.  This is where we want to
-        evaluate things that would not prevent a proxy from going into the pool,
-        but just from being pulled out at that moment.
-
-        This should incorporate timing aspects and things of that nature.
-        Can include more custom logic indicating the desired use of the
-        proxy than we can do with the priority alone.
+        Finds the related Proxy model for a given proxybroker Proxy model
+        and returns the instance if present.
         """
+        log = logger.get_async(__name__, subname='find_for_proxybroker')
 
-        # TODO: We should only restrict time since last used if the last request was
-        # a too many request error.
-        time_since_used = config['proxies']['pool']['time_between_request_timeout']
+        try:
+            return await cls.get(
+                host=broker_proxy.host,
+                port=broker_proxy.port,
+            )
+        except tortoise.exceptions.DoesNotExist:
+            return None
+        except tortoise.exceptions.MultipleObjectsReturned:
+            all_proxies = await cls.filter(host=broker_proxy.host, port=broker_proxy.port).all()
+            await log.warning(
+                f'Found {len(all_proxies)} Duplicate Proxies for '
+                f'{broker_proxy.host} - {broker_proxy.port}.',
+                extra={
+                    'other': f'Deleting {len(all_proxies) - 1} Duplicates...'
+                }
+            )
 
-        if (self.active_errors.get('most_recent') and
-                self.active_errors['most_recent'] == 'too_many_requests'):
-            evaluation = evaluate(self, time_since_used=time_since_used)
-            return evaluation
+            all_proxies = sorted(all_proxies, key=lambda x: x.date_added)
+            for proxy in all_proxies[1:]:
+                await log.warning('Deleting Duplicate Proxy', extra={'proxy': proxy})
+                await proxy.delete()
+
+            return all_proxies[0]
+
+    @classmethod
+    def translate_proxybroker_errors(cls, broker_proxy):
+        log = logger.get_sync(__name__, subname='translate_proxybroker_errors')
+
+        errors = {}
+        for err, count in broker_proxy.stat['errors'].__dict__.items():
+            if err in settings.PROXY_BROKER_ERROR_TRANSLATION:
+                errors[settings.PROXY_BROKER_ERROR_TRANSLATION[err]] = count
+            else:
+                log.warning(f'Unexpected Proxy Broker Error: {err}.')
+                errors[err] = count
+        return errors
+
+    async def update_from_proxybroker(self, broker_proxy, save=False):
+        errors = self.translate_proxybroker_errors(broker_proxy)
+
+        self.include_errors(errors)
+        self.num_requests += broker_proxy.stat['requests']
+
+        # Only do this for as long as we are not measuring this value ourselves.
+        # When we start measuring ourselves, we are not going to want to
+        # overwrite it.
+        self.avg_resp_time = broker_proxy.avg_resp_time
+        if save:
+            await self.save()
+
+    @classmethod
+    async def create_from_proxybroker(cls, broker_proxy, save=False):
+        from .models import Proxy
+
+        proxy = Proxy(
+            host=broker_proxy.host,
+            port=broker_proxy.port,
+            avg_resp_time=broker_proxy.avg_resp_time,
+            errors=cls.translate_proxybroker_errors(broker_proxy),
+            num_requests=broker_proxy.stat['requests'],
+        )
+        if save:
+            await proxy.save()
+        return proxy
+
+    @classmethod
+    async def update_or_create_from_proxybroker(cls, broker_proxy, save=False):
+        """
+        Finds the possibly related Proxy instance for a proxybroker Proxy instance
+        and updates it with relevant info from the proxybroker instance if
+        present, otherwise it will create a new Proxy instance using the information
+        from the proxybroker instance.
+
+        TODO
+        ----
+        Figure out a way to translate proxybroker errors to our error system so
+        they can be reconciled.
+        """
+        proxy = await cls.find_for_proxybroker(broker_proxy)
+        if proxy:
+            await proxy.update_from_proxybroker(broker_proxy, save=save)
+            return proxy, False
         else:
-            return ProxyEvaluation(reasons=[])
+            proxy = await cls.create_from_proxybroker(broker_proxy, save=save)
+            return proxy, True
 
     async def save(self, *args, **kwargs):
         """

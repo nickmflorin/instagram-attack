@@ -1,6 +1,6 @@
 from cement import Controller
 
-from instattack.app import settings
+from instattack import settings
 from instattack.lib.utils import break_before
 
 

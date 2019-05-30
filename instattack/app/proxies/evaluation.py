@@ -5,32 +5,13 @@ from typing import List, Any
 from instattack.lib.utils import humanize_list
 
 
-PROXY_FORMAL_ATTRS = {
-    'num_active_requests': 'Num. Active Requests',
-    'flattened_error_rate': 'Flat. Error Rate',
-    'avg_resp_time': 'Avg. Response Time',
-    'time_since_used': 'Time Since Used',
-    'num_connection_errors': 'Num. Connection Errors',
-    'num_response_errors': 'Num. Invalid Response Errors',
-    'num_ssl_errors': 'Num. SSL Connection Errors',
-    'num_instagram_errors': 'Num. Instagram Identified Errors',
-    'num_timeout_errors': 'Num. Timeout Errors',
-}
-
-
 @dataclass
 class AttributeEvaluation:
 
-    attr: str
+    name: str
     relative_value: Any
     value: Any
-
     comparison: str = ">"
-    name: str = field(init=False, repr=True)
-    strict: bool = False
-
-    def __post_init__(self):
-        self.name = PROXY_FORMAL_ATTRS[self.attr]
 
     def __str__(self):
         return f"{self.name} {self.value} {self.comparison} {self.relative_value}"
@@ -54,8 +35,157 @@ class ProxyEvaluation:
         else:
             return humanize_list([str(reason) for reason in self.reasons])
 
+    def merge(self, *evaluations):
+        for evaluation in evaluations:
+            for reason in evaluation.reasons:
+                self.add(reason)
 
-def evaluate(proxy, config):
+
+def evaluate_errors(proxy, config):
+
+    errors = config['proxies']['pool']['limits'].get('errors', {})
+
+    max_params = [
+        ('all', (), ),
+        ('connection', ('connection', )),
+        ('response', ('response', )),
+        ('ssl', ('ssl', )),
+        ('timeout', ('timeout', )),
+        ('instagram', ('instagram', )),
+    ]
+
+    evaluations = ProxyEvaluation(reasons=[])
+
+    for param_set in max_params:
+        config_errors = errors.get(param_set[0])
+        if config_errors:
+            config_active_errors = config_errors.get('active')
+            if config_active_errors:
+                actual_active_errors = proxy._num_errors(*param_set[1], active=True)
+
+                if actual_active_errors > config_active_errors:
+                    reason = AttributeEvaluation(
+                        value=actual_active_errors,
+                        relative_value=config_active_errors,
+                        name=f"{param_set[0]} Active Errors".title(),
+                    )
+                    evaluations.add(reason)
+
+            config_hist_errors = config_errors.get('historical')
+            if config_hist_errors:
+                actual_hist_errors = proxy._num_errors(*param_set[1], active=False)
+
+                if actual_hist_errors > config_hist_errors:
+                    reason = AttributeEvaluation(
+                        value=actual_hist_errors,
+                        relative_value=config_hist_errors,
+                        name=f"{param_set[0]} Historical Errors".title(),
+                    )
+                    evaluations.add(reason)
+    return evaluations
+
+
+def evaluate_requests(proxy, config):
+
+    requests = config['proxies']['pool']['limits'].get('requests', {})
+
+    max_params = [
+        ('all', (None, ), ),
+        ('success', (True, )),
+        ('fail', (False, )),
+    ]
+
+    evaluations = ProxyEvaluation(reasons=[])
+
+    for param_set in max_params:
+        config_requests = requests.get(param_set[0])
+        if config_requests:
+
+            config_active_requests = config_requests.get('active')
+            if config_active_requests:
+                actual_active_requests = proxy._num_requests(active=True, success=param_set[1])
+
+                if param_set[0] == 'success':
+                    if actual_active_requests < config_active_requests:
+                        reason = AttributeEvaluation(
+                            value=actual_active_requests,
+                            relative_value=config_active_requests,
+                            name=f"{param_set[0]} Active Requests".title(),
+                            comparison="<"
+                        )
+                        evaluations.add(reason)
+                else:
+                    if actual_active_requests > config_active_requests:
+                        reason = AttributeEvaluation(
+                            value=actual_active_requests,
+                            relative_value=config_active_requests,
+                            name=f"{param_set[0]} Active Requests".title(),
+                        )
+                        evaluations.add(reason)
+
+            config_hist_requests = config_requests.get('historical')
+            if config_hist_requests:
+                actual_hist_requests = proxy._num_requests(active=False, success=param_set[1])
+
+                if param_set[0] == 'success':
+                    if actual_hist_requests < config_hist_requests:
+                        reason = AttributeEvaluation(
+                            value=actual_hist_requests,
+                            relative_value=config_hist_requests,
+                            name=f"{param_set[0]} Historical Requests".title(),
+                            comparison="<"
+                        )
+                        evaluations.add(reason)
+                    else:
+                        if actual_hist_requests < config_hist_requests:
+                            reason = AttributeEvaluation(
+                                value=actual_hist_requests,
+                                relative_value=config_hist_requests,
+                                name=f"{param_set[0]} Historical Requests".title(),
+                            )
+                            evaluations.add(reason)
+
+    return evaluations
+
+
+def evaluate_error_rate(proxy, config):
+
+    evaluations = ProxyEvaluation(reasons=[])
+
+    # Not sure why we only need to include the instattack key here?
+    config = config['proxies']['pool']['limits']
+
+    if config.get('error_rate'):
+        config_error_rate = config['error_rate']
+        horizon = config_error_rate.get('horizon')
+
+        config_active_rate = config_error_rate.get('active')
+        if config_active_rate:
+            actual_active_rate = proxy._error_rate(active=True, horizon=horizon)
+
+            if actual_active_rate > config_active_rate:
+                reason = AttributeEvaluation(
+                    value=actual_active_rate,
+                    relative_value=config_active_rate,
+                    name=f"Active Error Rate".title(),
+                )
+                evaluations.add(reason)
+
+        config_hist_rate = config_error_rate.get('historical')
+        if config_hist_rate:
+            actual_hist_rate = proxy._error_rate(active=False, horizon=horizon)
+
+            if actual_hist_rate > config_hist_rate:
+                reason = AttributeEvaluation(
+                    value=actual_hist_rate,
+                    relative_value=config_hist_rate,
+                    name=f"Historical Error Rate".title(),
+                )
+                evaluations.add(reason)
+    return evaluations
+
+
+def evaluate_for_pool(proxy, config):
     """
     Determines if the proxy meets the provided standards.
 
@@ -75,29 +205,50 @@ def evaluate(proxy, config):
     the proxy has very good metrics (i.e. is very successful but was used
     a lot or has a higher response time).
     """
-    config = config['proxies']['pool']
+
     evaluations = ProxyEvaluation(reasons=[])
 
-    max_params = (
-        ('max_requests', 'num_active_requests'),
-        ('max_resp_time', 'avg_resp_time'),
-        ('max_error_rate', 'flattened_error_rate'),
-        ('max_response_errors', 'num_response_errors'),
-        ('max_instagram_errors', 'num_instagram_errors'),
-        ('max_timeout_errors', 'num_timeout_errors'),
-        ('max_connection_errors', 'num_connection_errors'),
-        ('max_ssl_errors', 'num_ssl_errors'),
-    )
+    request_eval = evaluate_requests(proxy, config)
+    errors_eval = evaluate_errors(proxy, config)
+    error_rate_eval = evaluate_error_rate(proxy, config)
 
-    for param_set in max_params:
-        value = getattr(proxy, param_set[1])
-        relative_value = config.get(param_set[0])
-        if relative_value:
-            if value > relative_value:
-                evaluations.add(AttributeEvaluation(
-                    value=value,
-                    relative_value=relative_value,
-                    attr=param_set[1]
-                ))
+    evaluations.merge(request_eval, errors_eval, error_rate_eval)
+
+    config = config['proxies']['pool']['limits']
+    evaluations = ProxyEvaluation(reasons=[])
+
+    # Will Have to be Included in evaluate_from_pool When We Start Manually Calculating
+    if config.get('resp_time'):
+        if proxy.avg_resp_time > config['resp_time']:
+            reason = AttributeEvaluation(
+                value=actual_hist_requests,
+                relative_value=config_hist_requests,
+                name="Avg. Response Time".title(),
+            )
+            evaluations.add(reason)
+
+    return evaluations
+
+
+def evaluate_from_pool(proxy, config):
+
+    config = config['proxies']['pool']['limits']
+    evaluations = ProxyEvaluation(reasons=[])
+
+    request_eval = evaluate_requests(proxy, config)
+    errors_eval = evaluate_errors(proxy, config)
+    error_rate_eval = evaluate_error_rate(proxy, config)
+
+    if (proxy.active_errors.get('most_recent') and
+            proxy.active_errors['most_recent'] == 'too_many_requests'):
+        if proxy.time_since_used < config['too_many_requests_delay']:
+
+            reason = AttributeEvaluation(
+                value=proxy.time_since_used,
+                relative_value=config['too_many_requests_delay'],
+                name="Time Between 429 Requests".title(),
+                comparison="<"
+            )
+            evaluations.add(reason)
 
     return evaluations

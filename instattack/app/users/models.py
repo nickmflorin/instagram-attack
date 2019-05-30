@@ -4,7 +4,7 @@ from tortoise import fields
 from tortoise.models import Model
 from tortoise.exceptions import OperationalError
 
-from instattack.app import settings
+from instattack import settings
 from instattack.lib import logger
 from instattack.lib.utils import stream_raw_data, read_raw_data
 
@@ -202,8 +202,6 @@ class User(Model):
                 attempt.num_attempts += 1
                 await attempt.save()
                 log.debug(f'Updated Attempt {attempt.password} for User {self.username}.')
-            else:
-                log.debug(f'Saved New Attempt {attempt.password} for User {self.username}.')
 
         except OperationalError:
             if try_attempt <= settings.USER_MAX_SAVE_ATTEMPT_TRIES:

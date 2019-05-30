@@ -68,6 +68,9 @@ class ColorFormatter(Enum):
     def format(self, **kwargs):
         return self._adjust_format(**kwargs)
 
+    def without_text_decoration(self):
+        return self._fmt.without_text_decoration()
+
     def _adjust_format(self, bold=False, wrapper=None, format_with_wrapper=True):
         fmt = self._fmt.copy()
         if bold:
@@ -97,10 +100,7 @@ class ColorFormatter(Enum):
 class AttributeFormatter(ColorFormatter):
 
     def __init__(self, *args):
-        self.format = args[0]
-
-    def __call__(self, text):
-        return self.format(text)
+        self._fmt = args[0]
 
     @property
     def colors(self):

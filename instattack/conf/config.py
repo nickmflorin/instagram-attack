@@ -6,6 +6,7 @@ import os
 import yaml
 
 from instattack.lib import logger
+from instattack import settings
 from instattack.app.exceptions import ConfigurationError
 
 from .utils import validate_config_filepath, validate_config_schema
@@ -20,11 +21,11 @@ class Configuration(collections.MutableMapping):
 
     env_key = 'INSTATTACK_CONFIG'
 
-    def __init__(self, data=None, top_level=False, path=None):
+    def __init__(self, data=None, top_level=False, filename=None):
 
         self.store = dict()
-        self.path = path
-        if self.path:
+        self.filename = filename
+        if self.filename:
             self.read()
         else:
             self.update(data or {}, top_level=top_level)
@@ -68,12 +69,13 @@ class Configuration(collections.MutableMapping):
         return cls(data, top_level=True)
 
     def read(self):
-        if not self.path:
+        if not self.filename:
             raise RuntimeError('Configuration must be provided a path in order to validate.')
 
-        self.path = validate_config_filepath(self.path)
+        path = os.path.join(settings.ROOT_DIR, 'config', self.filename)
+        path = validate_config_filepath(path)
 
-        with open(self.path, 'r') as ymlfile:
+        with open(path, 'r') as ymlfile:
             try:
                 data = yaml.load(ymlfile, Loader=yaml.FullLoader)
             except yaml.scanner.ScannerError as e:

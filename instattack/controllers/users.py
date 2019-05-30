@@ -4,7 +4,7 @@ import tortoise
 
 from instattack.lib.utils import start_and_stop
 
-from instattack.app import settings
+from instattack import settings
 from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
 

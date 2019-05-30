@@ -3,7 +3,7 @@ import decorator
 import sys
 
 from instattack.lib import logger, yaspin
-from instattack.app import settings
+from instattack import settings
 
 
 class DisableLogger():

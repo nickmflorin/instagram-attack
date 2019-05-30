@@ -5,7 +5,7 @@ import os
 import sys
 import traceback
 
-from instattack.app import settings
+from instattack import settings
 
 from .utils import is_log_file, is_site_package_file
 from .handlers import (
@@ -13,6 +13,7 @@ from .handlers import (
 
 
 __all__ = (
+    '_enabled',
     'enable',
     'disable',
     'SyncLogger',
@@ -21,7 +22,7 @@ __all__ = (
     'SimpleSyncLogger',
 )
 
-_enabled = False
+_enabled = True
 
 
 def disable():

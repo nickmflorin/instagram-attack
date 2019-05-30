@@ -10,7 +10,7 @@ import warnings
 from cement import App, TestApp, init_defaults
 from cement.core.exc import CaughtSignal
 
-from instattack.app import settings
+from instattack import settings
 from instattack.conf import Configuration
 
 from instattack.lib import logger
@@ -38,7 +38,6 @@ _shutdown = False
 
 # Configuration Defaults
 CONFIG = init_defaults('instattack')
-CONFIG['instattack']['foo'] = 'bar'
 
 
 def handle_exception(loop, context):
@@ -77,6 +76,13 @@ def handle_exception(loop, context):
     shutdown_preemptively(loop)
 
 
+def ensure_logger_enabled(app):
+    log = logger.get_sync(__name__, subname='ensure_logger_enabled')
+    if not logger._enabled:
+        log.warning('Logger Should be Enabled Before App Start')
+        logger.enable()
+
+
 def setup_config(app):
     """
     [x] TODO:
@@ -91,9 +97,12 @@ def setup_config(app):
     """
 
     # Temporarily Set Path as Hardcoded Value
-    config = Configuration(path="conf.yaml")
+    config = Configuration(filename="instattack.yml")
     config.read()
-    print('Setting Up Configuration')
+
+    # Right now, we don't need to worry about the other potential top level
+    # attributes.
+    config = config['instattack']
     app.config.merge(config.serialize())
 
 
@@ -270,6 +279,7 @@ class Instattack(App):
         hooks = [
             ('pre_setup', setup),
             ('post_setup', setup_config),
+            ('pre_run', ensure_logger_enabled),
             ('post_run', shutdown),
         ]
 
@@ -289,6 +299,7 @@ class InstattackTest(TestApp, Instattack):
 
 def main():
     with Instattack() as app:
+
         try:
             app.run()
 
@@ -313,35 +324,6 @@ def main():
             print('\n%s' % e)
             app.exit_code = 0
 
-        # finally:
-        #     shutdown(app)
-
 
 if __name__ == '__main__':
     main()
-
-
-# def main():
-#     from instattack.conf import Configuration
-#     from instattack.conf.utils import validate_log_level
-
-#     # We have to retrieve the --level at the top level and then use it to set
-#     # the environment variable - which is in turn used to configure the loggers.
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('--level', default='INFO', type=validate_log_level, dest='level')
-#     parser.add_argument('--config', default='conf.yml', type=Configuration.validate, dest='config')
-
-#     parsed, unknown = parser.parse_known_args()
-
-#     loop = asyncio.get_event_loop()
-
-#     os.environ['INSTATTACK_LOG_LEVEL'] = parsed.level.name
-
-#     config = Configuration(path=parsed.config)
-
-#     # Wait to import from src directory until LEVEL set in os.environ so that
-#     # loggers are all created with correct level.
-#     from .app.run import operator
-#     oper = operator(config)
-#     oper.start(loop, *unknown)
-#     loop.close()

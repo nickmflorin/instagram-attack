@@ -2,8 +2,8 @@ from datetime import datetime
 import logging
 
 from instattack.lib.artsylogger import (
-    colors, Item, Line, Lines, Header, Label, LineIndex, Format)
-from instattack.app import settings
+    Item, Line, Lines, Header, Label, LineIndex)
+from instattack import settings
 
 
 def get_record_message(record):
@@ -18,30 +18,29 @@ def get_record_time(record):
 
 
 def get_level_formatter(without_text_decoration=False, without_wrapping=False):
+    """
+    TODO:
+    ----
+    This can probably be simplified now that we have a new general framework for
+    the format object.
+    """
     def _level_formatter(record):
-        if getattr(record, 'color', None):
-            if without_text_decoration:
-                return Format(record.color)
-            else:
-                return Format(record.color, colors.bold)
+        fmt = record.level.format()
+
+        if without_text_decoration and without_wrapping:
+            return fmt.without_text_decoration().without_wrapping()
+        elif without_text_decoration:
+            return fmt.without_text_decoration()
+        elif without_wrapping:
+            return fmt.without_wrapping()
         else:
-            format = record.level.format
-            if without_text_decoration:
-                format = format.without_text_decoration()
-            if without_wrapping:
-                format = format.without_wrapping()
-            return format
+            return fmt
     return _level_formatter
 
 
 def get_message_formatter(record):
-
-    if getattr(record, 'level_format', None):
-        return record.level_format.message_formatter
-    elif getattr(record, 'color', None):
-        return Format(record.color)
-    else:
-        return record.level.message_formatter
+    fmt = record.level.format()
+    return fmt.without_text_decoration().without_wrapping()
 
 
 SIMPLE_FORMATTER = logging.Formatter(
@@ -100,7 +99,7 @@ CONTEXT_LINES = Lines(
         ),
         Item(
             value='proxy.url',
-            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_1.format("<%s>"),
+            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_1.format(wrapper="<%s>"),
         ),
         label=Label(
             constant="Proxy",
@@ -232,7 +231,7 @@ LOG_FORMAT_STRING = Lines(
         length=25,
         label=Label(
             value='level.name',
-            format=get_level_formatter(without_text_decoration=False),
+            format=get_level_formatter(),
             delimiter=None,
         ),
         format=get_level_formatter(without_wrapping=True, without_text_decoration=True),

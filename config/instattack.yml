@@ -1,133 +1,132 @@
 ### Instattack Configuration Settings
 ---
 
-log:
-    operator: "DEBUG"
-    proxy_broker: "INFO"
-    login_attempts: "DEBUG"
-    proxy_pool: "DEBUG"
-
 instattack:
 
     ### Toggle application level debug (does not toggle framework debugging)
     # debug: false
 
-    ### Where external (third-party) plugins are loaded from
+    # Where external (third-party) plugins are loaded from
     # plugin_dir: /var/lib/instatttack/plugins/
 
-    ### Where all plugin configurations are loaded from
+    # Where all plugin configurations are loaded from
     # plugin_config_dir: /etc/instatttack/plugins.d/
 
-    ### Where external templates are loaded from
+    # Where external templates are loaded from
     # template_dir: /var/lib/instatttack/templates/
 
-    ### The log handler label
+    # The log handler label
     # log_handler: colorlog
 
-    ### The output handler label
+    # The output handler label
     # output_handler: jinja2
 
-login:
-    # limit: 100
-    batch_size: 20
+    attack:
+        # The number of concurrent passwords to try at the same time.
+        batch_size: 20
 
-    attempts:
-        batch_size: 15
+        attempts:
+            # The number of concurrent requests to make for each password.
+            batch_size: 15
 
-    connection:
-        limit_per_host: 0
-        timeout: 10
-        limit: 200
+        connection:
+            limit_per_host: 0
+            timeout: 10
+            limit: 200
 
-proxies:
+    proxies:
+        collect: False
+        pool:
+            # The maximum amount of time to wait for a proxy from the queue before failing.
+            timeout: 25
+            limits:
+                # The maximum response time in seconds. If proxy.avg_resp_time exceeds this
+                # value, proxy will be removed from the pool.
+                # TODO: Allow Historical & Current
+                resp_time: null
+                time_since_used: 5.0
 
-    collect: False
-    prepopulate: True
-    pool:
+                # The amount of time to wait before using a proxy that raises a 429 too many
+                # requests error.
+                too_many_requests_delay: 10
 
-        # The maximum amount of time to wait for a proxy from the queue before failing.
-        timeout: 25
+                # The maxmium number of allowed requests for each proxy per attack, before
+                # being removed from pool.  For LARGER attacks, this should probably be
+                # negated, since we do not want to discard good proxies.
+                requests:
+                    all:
+                        historical: null
+                        active: null
+                    success:
+                        historical: null
+                        active: null
+                    fail:
+                        historical: null
+                        active: null
 
-        # The maximum response time in seconds. If proxy.avg_resp_time exceeds this
-        # value, proxy will be removed from the pool.
-        max_resp_time: null
+                # The maximum overall error rate for a proxy to be put into or used from
+                # the pool.
+                # TODO: Start Measuring Historical & Active
+                error_rate:
+                    historical: null
+                    active: null
+                    # The minimum number of requests required before error rate is non-zero.
+                    horizon: 5
 
-        # The maximum number of allowed errors for a proxy before being
-        # removed from the pool or not included in pool to begin with.
-        max_connection_errors: 2
-        max_response_errors: 2
-        max_timeout_errors: 2
-        max_instagram_errors: 2
-        max_ssl_errors: 2
+                # The maximum number of allowed errors for a proxy before being
+                # removed from the pool or not included in pool to begin with.
+                errors:
+                    all:
+                        historical: 2
+                        active: 1
+                    connection:
+                        historical: 1
+                        active: 1
+                    response:
+                        historical: 1
+                        active: 1
+                    instagram:
+                        historical: 1
+                        active: 1
+                    ssl:
+                        historical: 1
+                        active: 1
+                    timeout:
+                        historical: 1
+                        active: 1
 
-        # We probably don't need to specify active limits since we will initially
-        # filter the pool by those with limits less than the specified above and
-        # not put back in pool if those limits are breached.
+        # Settings Here Only Matter if Collect = True
+        # Do we want to add a limit to the broker collection?
+        broker:
+            # The maximum number of concurrent checks of proxies
+            max_conn: 200
 
-        # max_active_instagram_errors: 2
-        # max_active_ssl_errors: 2
-        # max_active_timeout_errors: 2
-        # max_active_response_errors: 2
-        # max_active_connection_errors: 2
+            # The maximum number of attempts to check a proxy
+            # Note that the lower the value of max_tries, the faster the broker will return
+            # proxies, but they will not contain as much information to gauge their
+            # relative reliability and speed.
+            max_tries: 2
 
-        # The maximum overall error rate for a proxy to be put into or used from
-        # the pool.
-        max_error_rate: null
-
-        # The minimum number of requests that a proxy can be used for (overall/saved)
-        # before the error_rate starts becoming a factor.
-        error_rate_horizon: 5
-
-        # The maxmium number of allowed requests for each proxy per attack, before
-        # being removed from pool.
-        max_requests: 10
-
-        # The amount of time to wait before using a proxy that raises a 429 too many
-        # requests error.
-        time_between_request_timeout: 10
-
-        # TODO:
-        # Instead of deleting from pool, mark as invalid so that we do not readd
-        # that proxy at a future date.
-
-        # We are probably not using this anymore.
-        # remove_proxy_on_error: False
-
-    # Settings Here Only Matter if Collect = True
-    broker:
-
-        # The maximum number of concurrent checks of proxies
-        max_conn: 200
-
-        # The maximum number of attempts to check a proxy
-        # Note that the lower the value of max_tries, the faster the broker will return
-        # proxies, but they will not contain as much information to gauge their
-        # relative reliability and speed.
-        max_tries: 2
-
-        # Maximum amount of time to wait for broker to return a proxy before failing.
-        timeout: 5
-
-        # Not sure if we are going to allow a limit parameter yet.
-        # limit: 2000
+            # Maximum amount of time to wait for broker to return a proxy before failing.
+            timeout: 5
 
 
-log.colorlog:
+# log.colorlog:
 
-    ### Where the log file lives (no log file by default)
+    # Where the log file lives (no log file by default)
     # file: null
 
-    ### The level for which to log.  One of: info, warning, error, fatal, debug
+    # The level for which to log.  One of: info, warning, error, fatal, debug
     # level: info
 
-    ### Whether or not to log to console
+    # Whether or not to log to console
     # to_console: true
 
-    ### Whether or not to rotate the log file when it reaches `max_bytes`
+    # Whether or not to rotate the log file when it reaches `max_bytes`
     # rotate: false
 
-    ### Max size in bytes that a log file can grow until it is rotated.
+    # Max size in bytes that a log file can grow until it is rotated.
     # max_bytes: 512000
 
-    ### The maximun number of log files to maintain when rotating
+    # The maximun number of log files to maintain when rotating
     # max_files: 4

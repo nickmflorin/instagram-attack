@@ -1,5 +1,8 @@
 import aiofiles
 
+from instattack.lib import logger
+from instattack.app.exceptions import InvalidFileLine
+
 
 def read_raw_data(filepath, limit=None):
     """
@@ -17,17 +20,16 @@ def read_raw_data(filepath, limit=None):
             break
         yield line
     """
-    from instattack.app.exceptions import InvalidFileLine
+    log = logger.get_sync(__name__, subname='read_raw_data')
 
     count = 0
-
     lines = []
     with open(filepath) as f:
         for line in f.readlines():
             line = line.replace("\n", "")
             if line == "":
                 exc = InvalidFileLine(i, val)  # noqa
-                # log.error(exc) Don't Log Empty Lines for Now
+                log.warning(exc)
             else:
                 if not limit or count < limit:
                     lines.append(line)
@@ -53,7 +55,7 @@ async def stream_raw_data(filepath, limit=None):
             break
         yield line
     """
-    from instattack.app.exceptions import InvalidFileLine
+    log = logger.get_async(__name__, subname='read_raw_data')
 
     count = 0
     async with aiofiles.open(filepath) as f:
@@ -61,7 +63,7 @@ async def stream_raw_data(filepath, limit=None):
             line = line.replace("\n", "")
             if line == "":
                 exc = InvalidFileLine(i, val)  # noqa
-                # log.error(exc) Don't Log Empty Lines for Now
+                await log.warning(exc)
             else:
                 if not limit or count < limit:
                     yield line

@@ -5,7 +5,7 @@ from dacite import from_dict
 from plumbum import colors
 from typing import List, Any, Optional
 
-from instattack.app import settings
+from instattack import settings
 from instattack.app.proxies.models import Proxy
 
 
@@ -124,7 +124,9 @@ class InstagramResults:
 
     @property
     def authenticated_result(self):
-        return [res for res in self.results if res.authorized][0]
+        auth_results = [res for res in self.results if res.authorized]
+        if len(auth_results) != 0:
+            return auth_results[0]
 
     def add(self, result):
         self.results.append(result)

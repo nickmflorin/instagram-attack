@@ -1,6 +1,6 @@
 import re
 
-from instattack.app import settings
+from instattack import settings
 
 
 async def get_token(session):
