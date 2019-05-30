@@ -1,5 +1,4 @@
 import aiologger
-import contextlib
 import logging
 import inspect
 import os
@@ -11,6 +10,28 @@ from instattack.app import settings
 from .utils import is_log_file, is_site_package_file
 from .handlers import (
     SIMPLE_SYNC_HANDLERS, SYNC_HANDLERS, SIMPLE_ASYNC_HANDLERS, ASYNC_HANDLERS)
+
+
+__all__ = (
+    'enable',
+    'disable',
+    'SyncLogger',
+    'SimpleAsyncLogger',
+    'AsyncLogger',
+    'SimpleSyncLogger',
+)
+
+_enabled = False
+
+
+def disable():
+    global _enabled
+    _enabled = False
+
+
+def enable():
+    global _enabled
+    _enabled = True
 
 
 for level in settings.LoggingLevels:
@@ -102,29 +123,6 @@ class SyncLoggerMixin(LoggerMixin):
         })
         self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
 
-    def bare(self, msg, color='darkgray', *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra'].update({'color': color, 'bare': True})
-        self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
-
-    @contextlib.contextmanager
-    def logging_lines(self):
-        self.line_index = 0
-        try:
-            sys.stdout.write('\n')
-            yield self
-        finally:
-            sys.stdout.write('\n')
-            self.line_index = 0
-
-    def line(self, item, color='darkgray'):
-        self.bare(item, color=color, extra={'line_index': self.line_index + 1})
-        self.line_index += 1
-
-    def line_by_line(self, lines, color='darkgray'):
-        with self.logging_lines():
-            [self.line(line, color=color) for line in lines]
-
 
 class AsyncLoggerMixin(SyncLoggerMixin):
 
@@ -152,29 +150,6 @@ class AsyncLoggerMixin(SyncLoggerMixin):
             kwargs['extra']['frame_correction'] = 1
             return await self._log(settings.LoggingLevels.COMPLETE.num, msg, args, **kwargs)
 
-    async def bare(self, msg, color='darkgray', *args, **kwargs):
-        kwargs.setdefault('extra', {})
-        kwargs['extra'].update({'color': color, 'bare': True})
-        return await self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
-
-    @contextlib.asynccontextmanager
-    async def logging_lines(self):
-        self.line_index = 0
-        try:
-            sys.stdout.write('\n')
-            yield self
-        finally:
-            sys.stdout.write('\n')
-            self.line_index = 0
-
-    async def line(self, item, color='darkgray'):
-        await self.bare(item, color=color, extra={'line_index': self.line_index + 1})
-        self.line_index += 1
-
-    async def line_by_line(self, lines, color='darkgray'):
-        async with self.logging_lines():
-            [await self.line(line, color=color) for line in lines]
-
 
 class SimpleSyncLogger(SyncLoggerMixin, logging.Logger):
 
@@ -183,6 +158,11 @@ class SimpleSyncLogger(SyncLoggerMixin, logging.Logger):
     def __init__(self, name):
         logging.Logger.__init__(self, name)
         self.init()
+
+    def _log(self, *args, **kwargs):
+        global _enabled
+        if _enabled:
+            return super(SimpleSyncLogger, self)._log(*args, **kwargs)
 
 
 class SyncLogger(SimpleSyncLogger):
@@ -269,33 +249,34 @@ class SimpleAsyncLogger(AsyncLoggerMixin, aiologger.Logger):
         stack_info=False,
         caller=None,
     ):
+        global _enabled
+        if _enabled:
+            # Until we come up with a better way of ensuring ths LEVEL in os.environ
+            # before loggers are imported - this will at least make sure the level
+            # is always right.
+            if not self._environ_level_set:
+                if os.environ.get('INSTATTACK_LOG_LEVEL'):
+                    level = os.environ['INSTATTACK_LOG_LEVEL']
+                    if not isinstance(level, str):
+                        raise RuntimeError('Invalid Level')
 
-        # Until we come up with a better way of ensuring ths LEVEL in os.environ
-        # before loggers are imported - this will at least make sure the level
-        # is always right.
-        if not self._environ_level_set:
-            if os.environ.get('INSTATTACK_LOG_LEVEL'):
-                level = os.environ['INSTATTACK_LOG_LEVEL']
-                if not isinstance(level, str):
-                    raise RuntimeError('Invalid Level')
+                    self.setLevel(level)
+                    self._environ_level_set = True
 
-                self.setLevel(level)
-                self._environ_level_set = True
+            # We used to override to check if conditionally_disabled was set here, but
+            # maybe we don't need that anymore?
+            # >>> if not self.conditionally_disabled:
 
-        # We used to override to check if conditionally_disabled was set here, but
-        # maybe we don't need that anymore?
-        # >>> if not self.conditionally_disabled:
-
-        record = await self._create_record(
-            level,
-            msg,
-            args,
-            exc_info=exc_info,
-            extra=extra,
-            stack_info=stack_info,
-            caller=caller,
-        )
-        await self.handle(record)
+            record = await self._create_record(
+                level,
+                msg,
+                args,
+                exc_info=exc_info,
+                extra=extra,
+                stack_info=stack_info,
+                caller=caller,
+            )
+            await self.handle(record)
 
 
 class AsyncLogger(SimpleAsyncLogger):

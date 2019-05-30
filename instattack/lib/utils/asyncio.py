@@ -27,7 +27,7 @@ def get_remaining_tasks():
     return list(tasks)
 
 
-async def limit_as_completed(coros, batch_size):
+async def limit_as_completed(coros, batch_size, stop_event):
     """
     Takes a generator yielding coroutines and runs the coroutines concurrently,
     similarly to asyncio.as_completed(tasks), except that it limits the number
@@ -47,7 +47,7 @@ async def limit_as_completed(coros, batch_size):
 
     num_tries = 0
 
-    while len(futures) > 0:
+    while len(futures) > 0 and not stop_event.is_set():
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
         for f in futures:
             if f.done():
@@ -61,41 +61,38 @@ async def limit_as_completed(coros, batch_size):
                         futures.append(asyncio.create_task(newc))
                     except StopAsyncIteration as e:
                         pass
-                    yield f.result(), num_tries
+                    yield f.result(), num_tries, futures
 
 
-async def cancel_remaining_tasks(futures=None, raise_exceptions=False, log_exceptions=None,
-        log_tasks=False):
+async def cancel_remaining_tasks(futures=None):
 
-    log = logger.get_async(__name__, subname='cancel_remaining_tasks')
-
-    if not futures:
-        log.debug('Collecting Default Tasks')
-        futures = asyncio.Task.all_tasks()
-
+    futures = futures or asyncio.Task.all_tasks()
     futures = [
         task for task in futures
         if task is not asyncio.tasks.Task.current_task()
     ]
 
-    def cancel_task(task):
-        if not task.cancelled():
-            if task.done():
-                if task.exception():
-                    # Need to find a more sustainable way of doing this, this makes
-                    # sure that we are not raising exceptions for external tasks.
+    async def cancel_task(task):
+        if not task.done():
+            if not task.cancelled():
+                # We have to wrap this in a try-except because of race conditions
+                # where the task might be completed by the time we get to this
+                # point.
+                try:
+                    task.cancel()
+                except asyncio.CancelledError:
+                    pass
+                else:
                     if not task_is_third_party(task):
-                        if raise_exceptions:
-                            raise task.exception()
-                        elif log_exceptions:
-                            log.warning(task.exception())
-            else:
-                task.cancel()
+                        raise task.exception()
+        else:
+            if task.exception():
+                # Need to find a more sustainable way of doing this, this makes
+                # sure that we are not raising exceptions for external tasks.
                 if not task_is_third_party(task):
-                    if log_tasks:
-                        log.debug(f'Cancelled Task {task}')
+                    raise task.exception()
 
-    list(map(cancel_task, futures))
-    await asyncio.gather(*futures, return_exceptions=True)
+    coros = [cancel_task(task) for task in futures]
+    await asyncio.gather(*coros, return_exceptions=True)
 
     return futures

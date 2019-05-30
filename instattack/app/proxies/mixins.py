@@ -7,7 +7,8 @@ from instattack.conf import Configuration
 from instattack.lib import logger
 from instattack.lib.utils import humanize_list
 
-from instattack.app.login.exceptions import ERROR_TYPE_CLASSIFICATION
+
+log = logger.get_async(__name__)
 
 
 class ProxyBrokerMixin(object):
@@ -18,27 +19,29 @@ class ProxyBrokerMixin(object):
         Finds the related Proxy model for a given proxybroker Proxy model
         and returns the instance if present.
         """
-        async with cls.async_logger('find_for_proxybroker') as log:
-            try:
-                return await cls.get(
-                    host=broker_proxy.host,
-                    port=broker_proxy.port,
-                )
-            except tortoise.exceptions.DoesNotExist:
-                return None
-            except tortoise.exceptions.MultipleObjectsReturned:
-                all_proxies = await cls.filter(host=broker_proxy.host, port=broker_proxy.port).all()
-                await log.critical(
-                    f'Found {len(all_proxies)} Duplicate Proxies for '
-                    f'{broker_proxy.host} - {broker_proxy.port}.'
-                )
+        try:
+            return await cls.get(
+                host=broker_proxy.host,
+                port=broker_proxy.port,
+            )
+        except tortoise.exceptions.DoesNotExist:
+            return None
+        except tortoise.exceptions.MultipleObjectsReturned:
+            all_proxies = await cls.filter(host=broker_proxy.host, port=broker_proxy.port).all()
+            await log.warning(
+                f'Found {len(all_proxies)} Duplicate Proxies for '
+                f'{broker_proxy.host} - {broker_proxy.port}.',
+                extra={
+                    'other': f'Deleting {len(all_proxies) - 1} Duplicates...'
+                }
+            )
 
-                all_proxies = sorted(all_proxies, key=lambda x: x.date_added)
-                for proxy in all_proxies[1:]:
-                    await log.warning('Deleting Duplicate Proxy', extra={'proxy': proxy})
-                    await proxy.delete()
+            all_proxies = sorted(all_proxies, key=lambda x: x.date_added)
+            for proxy in all_proxies[1:]:
+                await log.warning('Deleting Duplicate Proxy', extra={'proxy': proxy})
+                await proxy.delete()
 
-                return all_proxies[0]
+            return all_proxies[0]
 
     @classmethod
     def translate_proxybroker_errors(cls, broker_proxy):
@@ -122,8 +125,14 @@ class ErrorHandlerMixin(object):
         Figure out how to not require the configuration to be reloaded for these
         property parameters.
         """
-        config = Configuration.load()
-        error_rate_horizon = config['proxies']['pool']['error_rate_horizon']
+
+        # We are not storing configuration as an environment variable anymore, so
+        # we have to investigate another way to do this.  For now, we will just use
+        # a constant.
+        # config = Configuration.load()
+        # error_rate_horizon = config['proxies']['pool']['error_rate_horizon']
+
+        error_rate_horizon = 5
         if self.num_requests >= error_rate_horizon:
             return float(self.num_failed_requests) / self.num_requests
         return 0.0
@@ -180,7 +189,7 @@ class ErrorHandlerMixin(object):
     def _num_errors(self, error_type=None, active=False):
         error_types = ()
         if error_type:
-            error_types = ERROR_TYPE_CLASSIFICATION[error_type]
+            error_types = settings.ERROR_TYPE_CLASSIFICATION[error_type]
         if active:
             return self._active_error_count(*error_types)
         return self._error_count(*error_types)

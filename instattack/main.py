@@ -5,6 +5,7 @@ import logging
 import pathlib
 import signal
 import tortoise
+import warnings
 
 from cement import App, TestApp, init_defaults
 from cement.core.exc import CaughtSignal
@@ -18,8 +19,10 @@ from instattack.lib.utils import (
     cancel_remaining_tasks, start_and_stop, break_after, break_before)
 
 from .app.exceptions import InstattackError
-from .controllers.base import Base, UserController
+from .controllers.base import Base, UserController, ProxyController
 
+
+warnings.simplefilter('ignore')
 
 _shutdown = False
 
@@ -74,6 +77,26 @@ def handle_exception(loop, context):
     shutdown_preemptively(loop)
 
 
+def setup_config(app):
+    """
+    [x] TODO:
+    ---------
+    There is probably and most likely a better way to do this.  We can also set
+    default config settings for specific handlers.
+
+    >>> from cement.ext.ext_yaml import YamlConfigHandler
+    >>> ins = YamlConfigHandler()
+    >>> ins._setup(app)
+    >>> ins.parse_file("/repos/instagram-attack/config/instattack.yml")
+    """
+
+    # Temporarily Set Path as Hardcoded Value
+    config = Configuration(path="conf.yaml")
+    config.read()
+    print('Setting Up Configuration')
+    app.config.merge(config.serialize())
+
+
 @break_before
 @break_after
 def setup(app):
@@ -83,13 +106,6 @@ def setup(app):
     Use spinner for overall setup and shutdown methods and use the spinner.write()
     method to notify of individual tasks in the methods.
     """
-
-    async def setup_config(loop):
-        # Temporarily Set Path as Hardcoded Value
-        config = Configuration(path="conf.yaml")
-        config.read()
-        config.set()
-
     @spin_start_and_stop('Setting Up Directories')
     async def setup_directories(loop):
         # Remove __pycache__ Files
@@ -124,12 +140,10 @@ def setup(app):
         )
 
     loop = asyncio.get_event_loop()
-
     loop.run_until_complete(setup_loop(loop))
     loop.run_until_complete(setup_logger(loop))
     loop.run_until_complete(setup_directories(loop))
     loop.run_until_complete(setup_database(loop))
-    loop.run_until_complete(setup_config(loop))
 
 
 @spin_start_and_stop('Shutting Down DB')
@@ -140,19 +154,19 @@ async def shutdown_database(loop):
 async def shutdown_outstanding_tasks(loop):
     with start_and_stop('Shutting Down Outstanding Tasks') as spinner:
 
-        futures = await cancel_remaining_tasks(
-            raise_exceptions=True,
-            log_tasks=True
-        )
+        futures = await cancel_remaining_tasks()
         if len(futures) != 0:
-            spinner.write(f'  > Cancelled {len(futures)} Leftover Tasks')
+            spinner.write(f'Cancelled {len(futures)} Leftover Tasks')
+
+            spinner.indent()
+            spinner.number()
 
             log_tasks = futures[:20]
             for i, task in enumerate(log_tasks):
                 if task_is_third_party(task):
-                    spinner.write(f'  >> [{i + 1}] {task._coro.__name__} (Third Party)')
+                    spinner.write(f'{task._coro.__name__} (Third Party)')
                 else:
-                    spinner.write(f'  >> [{i + 1}] {task._coro.__name__}')
+                    spinner.write(f'{task._coro.__name__}')
 
             if len(futures) > 20:
                 spinner.write("  >> ...")
@@ -248,20 +262,22 @@ class Instattack(App):
         extensions = ['yaml', 'colorlog', 'jinja2']
 
         config_handler = 'yaml'
-        config_file_suffix = '.yml'
+        config_file_suffix = '.yaml'
 
         log_handler = 'colorlog'  # Set the Log Handler
         output_handler = 'jinja2'  # Set the Output Handler
 
         hooks = [
             ('pre_setup', setup),
+            ('post_setup', setup_config),
             ('post_run', shutdown),
         ]
 
         # Register Handlers
         handlers = [
             Base,
-            UserController
+            UserController,
+            ProxyController,
         ]
 
 

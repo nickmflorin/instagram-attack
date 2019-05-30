@@ -125,7 +125,7 @@ class User(Model):
             await log.warning(f'User Directory for {self.username} Does Not Exist')
             self.directory.mkdir()
 
-        filepath = self.file_path(filename, strict=True)
+        filepath = self.file_path(filename)
         if not filepath:
             await log.warning(f"File {filepath.name} Does Not Exist.")
             filepath.touch()
@@ -143,7 +143,7 @@ class User(Model):
             log.warning(f'User Directory for {self.username} Does Not Exist')
             self.directory.mkdir()
 
-        filepath = self.file_path(filename, strict=True)
+        filepath = self.file_path(filename)
         if not filepath:
             log.warning(f"File {filepath.name} Does Not Exist.")
             filepath.touch()

@@ -1,14 +1,17 @@
 import asyncio
 import collections
 
-from instattack.app import settings
 from instattack.lib import logger
-from instattack.lib.utils import limit_as_completed
+from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
+
+from instattack.app import settings
 from instattack.app.exceptions import PoolNoProxyError
 
-from .models import InstagramResult, InstagramResultError
+from .models import InstagramResult
 from .exceptions import (
-    HTTP_RESPONSE_ERRORS, HTTP_REQUEST_ERRORS, find_request_error, find_response_error)
+    InstagramResultError,
+    HTTP_RESPONSE_ERRORS, HTTP_REQUEST_ERRORS,
+    find_request_error, find_response_error)
 
 
 async def login(
@@ -48,9 +51,6 @@ async def login(
     >>>     else:
     >>>         raise e
     """
-    # TODO: Restrict Logging Based on Config
-    log = logger.get_async(__name__, subname='login')
-
     proxy.update_time()
     result = None
 
@@ -114,7 +114,6 @@ async def login(
                 await proxy.save()
 
     except asyncio.CancelledError:
-        await log.debug('Request Cancelled')
         pass
 
     except HTTP_RESPONSE_ERRORS as e:
@@ -134,10 +133,7 @@ async def login(
     if proxy_pool:
         await proxy_pool.check_and_put(proxy)
 
-    if scheduler:
-        await scheduler.spawn(proxy.save())
-    else:
-        await proxy.save()
+    await scheduler.spawn(proxy.save())
     return result
 
 
@@ -157,7 +153,6 @@ async def attempt(
     request that returns a valid result.
     """
 
-    # TODO: Restrict Logging Based on Config
     log = logger.get_async(__name__, subname='attempt')
     proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
 
@@ -202,8 +197,18 @@ async def attempt(
     # Wait for start event to signal that we are ready to start making
     # requests with the proxies.
     gen = generate_login_attempts()
-    async for result, num_tries in limit_as_completed(gen, batch_size):
+
+    # Stop Event: Notifies limit_as_completed to stop creating additional tasks
+    # so that we can cancel the leftover ones.
+    stop_event = asyncio.Event()
+
+    async for result, num_tries, current_tasks in limit_as_completed(gen, batch_size, stop_event):
         if result is not None:
+            stop_event.set()
+
+            # TODO: Maybe Put in Scheduler
+            await cancel_remaining_tasks(futures=current_tasks)
+
             await log.complete(
                 f'Done Attempting Login with {password} '
                 f'After {num_tries} Attempt(s)',

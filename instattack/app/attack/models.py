@@ -6,7 +6,6 @@ from plumbum import colors
 from typing import List, Any, Optional
 
 from instattack.app import settings
-
 from instattack.app.proxies.models import Proxy
 
 

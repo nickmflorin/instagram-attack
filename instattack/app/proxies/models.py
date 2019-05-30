@@ -146,14 +146,11 @@ class Proxy(Model, ProxyBrokerMixin, ErrorHandlerMixin):
 
         # TODO: We should only restrict time since last used if the last request was
         # a too many request error.
-        time_since_used = config.get('min_time_between_proxy')
+        time_since_used = config['proxies']['pool']['time_between_request_timeout']
 
         if (self.active_errors.get('most_recent') and
                 self.active_errors['most_recent'] == 'too_many_requests'):
-            evaluation = evaluate(
-                self,
-                time_since_used=time_since_used,
-            )
+            evaluation = evaluate(self, time_since_used=time_since_used)
             return evaluation
         else:
             return ProxyEvaluation(reasons=[])

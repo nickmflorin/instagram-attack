@@ -61,7 +61,7 @@ class ColorFormatter(Enum):
 
     def __call__(self, text, **kwargs):
         if kwargs:
-            fmt = self._adjust_format(**kwargs)
+            fmt = self.format(**kwargs)
             return fmt(text)
         return self._fmt(text)
 

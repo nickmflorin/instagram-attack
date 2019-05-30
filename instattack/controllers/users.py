@@ -1,48 +1,15 @@
 import asyncio
-
 from cement import ex, Interface
-
 import tortoise
+
+from instattack.lib.utils import start_and_stop
 
 from instattack.app import settings
 from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
 
 from .abstract import InstattackController
-
-
-# @UserEntryPoint.subcommand('clean')
-# class CleanUsers(UsersApplication):
-
-#     async def directories(self, loop):
-#         async with self.async_logger('directories') as log:
-#             async for user in User.all():
-#                 user.setup()
-#                 await log.complete(f'Cleaned Directory for User {user.username}.')
-
-
-# @UserEntryPoint.subcommand('clear')
-# class ClearUser(SingleUserApplication):
-
-#     async def attempts(self, loop, user):
-#         async with self.async_logger('attempts') as log:
-#             await log.info(f'Clearing User {user.username} Attempts')
-
-#             await log.debug('Fetching User Attempts...')
-#             attempts = await user.get_attempts(limit=self.limit)
-#             await log.debug('User Attempts Retrieved')
-
-#             tasks = []
-#             for attempt in attempts:
-#                 tasks.append(asyncio.create_task(attempt.delete()))
-
-#             await log.start('Deleting Attempts...')
-#             await asyncio.gather(*tasks)
-#             if len(tasks) == 0:
-#                 await log.error(f"No attempts to clear for user {user.username}.")
-#                 return
-
-#             await log.complete(f"Cleared {len(tasks)} attempts for user {user.username}.")
+from .utils import username_command
 
 
 class UserInterface(Interface):
@@ -82,78 +49,6 @@ class UserInterface(Interface):
             raise UserDoesNotExist(username)
 
 
-class ShowUserDataController(InstattackController, UserInterface):
-
-    class Meta:
-        label = 'user_data'
-        stacked_on = 'users'
-        stacked_type = 'nested'
-
-        interfaces = [
-            UserInterface,
-        ]
-
-    @ex(
-        help='Show User Base Passwords',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
-    def passwords(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-        passwords = user.get_passwords()
-
-        data = {'title': 'Passwords', 'data': passwords}
-        self.app.render(data, 'user_data.jinja2')
-
-    @ex(
-        help='Show User Base Alterations',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
-    def alterations(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-        alterations = user.get_alterations()
-
-        data = {'title': 'Alterations', 'data': alterations}
-        self.app.render(data, 'user_data.jinja2')
-
-    @ex(
-        help='Show User Numeric Alterations',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
-    def numerics(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-        numerics = user.get_numerics()
-
-        data = {'title': 'User Numeric Alterations', 'data': numerics}
-        self.app.render(data, 'user_data.jinja2')
-
-    @ex(
-        help='Show User Historical Password Atttempts',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
-    def attempts(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-        attempts = loop.run_until_complete(user.get_attempts())
-
-        data = {'title': 'User Attempts', 'data': attempts}
-        self.app.render(data, 'user_data.jinja2')
-
-
 class UserController(InstattackController, UserInterface):
 
     class Meta:
@@ -165,16 +60,7 @@ class UserController(InstattackController, UserInterface):
             UserInterface,
         ]
 
-        handlers = [
-            ShowUserDataController
-        ]
-
-    @ex(
-        help='Create a New User',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
+    @username_command(help="Create a New User")
     def create(self):
         username = self.app.pargs.username
 
@@ -193,12 +79,7 @@ class UserController(InstattackController, UserInterface):
         }}
         self.app.render(data, 'user.jinja2')
 
-    @ex(
-        help='Delete User',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
+    @username_command(help="Delete a User")
     def delete(self):
         username = self.app.pargs.username
 
@@ -207,12 +88,7 @@ class UserController(InstattackController, UserInterface):
 
         self.success(f"User {username} Successfully Deleted")
 
-    @ex(
-        help='Display Information for User',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ],
-    )
+    @username_command(help='Display Information for User')
     def get(self):
         username = self.app.pargs.username
 
@@ -231,7 +107,7 @@ class UserController(InstattackController, UserInterface):
         self.app.render(data, 'user.jinja2')
 
     @ex(help='Display All Users')
-    def get_all(self):
+    def show(self):
         data = {'users': []}
 
         loop = asyncio.get_event_loop()
@@ -241,13 +117,87 @@ class UserController(InstattackController, UserInterface):
 
         self.app.render(data, 'users.jinja2')
 
-    @ex(help='Clean User Directory for Active and Deleted Users')
+    @username_command(help="Show User Base Passwords")
+    def show_passwords(self):
+
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        passwords = user.get_passwords()
+
+        data = {'title': 'Passwords', 'data': passwords}
+        self.app.render(data, 'user_data.jinja2')
+
+    @username_command(help="Show User Base Alterations")
+    def show_alterations(self):
+
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        alterations = user.get_alterations()
+
+        data = {'title': 'Alterations', 'data': alterations}
+        self.app.render(data, 'user_data.jinja2')
+
+    @username_command(help="Show User Numeric Alterations")
+    def show_numerics(self):
+
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        numerics = user.get_numerics()
+
+        data = {'title': 'User Numeric Alterations', 'data': numerics}
+        self.app.render(data, 'user_data.jinja2')
+
+    @username_command(help="Show User Historical Password Atttempts")
+    def show_attempts(self):
+
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        attempts = loop.run_until_complete(user.get_attempts())
+
+        data = {'title': 'User Attempts', 'data': attempts}
+        self.app.render(data, 'user_data.jinja2')
+
+    @username_command(help="Clear User Attempts")
+    def clear_attempts(self):
+
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+
+        with start_and_stop(f"Clearing User {self.app.pargs.username} Attempts") as spinner:
+            spinner.write("> Gathering Attempts...")
+            attempts = loop.run_until_complete(user.get_attempts())
+
+            if len(attempts) == 0:
+                spinner.write("> No Attempts to Clear")
+
+            else:
+                spinner.write(f"> Clearing {len(attempts)} Attempts...")
+                tasks = []
+                for attempt in attempts:
+                    tasks.append(asyncio.create_task(attempt.delete()))
+
+                loop.run_until_complete(asyncio.gather(*tasks))
+
+    @ex(
+        help='Clean User Directory for Active and Deleted Users',
+        arguments=[(
+            ['-s', '--safe'], {'action': 'store_true'}
+        )]
+    )
     def clean(self):
         """
         First, loops over current users and ensures that their directory
         and files are present.  Then, looks in the user directory for any
         users that do not exist anymore and deletes those files.
         """
+        def print_action(action, label=None, directory=None):
+            message = f"{action} ({label})" if label else action
+            if directory:
+                message += f" in Directory {directory}."
+            else:
+                message += "."
+            print(message)
+
         loop = asyncio.get_event_loop()
         users = loop.run_until_complete(self._get_users(loop))
         for user in users:
@@ -258,13 +208,16 @@ class UserController(InstattackController, UserInterface):
         directory = settings.USER_PATH
         for user_dir in directory.iterdir():
             if user_dir.is_file():
-                print(f'Deleting File {user_dir.name}')
-                user_dir.delete()
+                print_action(user_dir.name, 'Deleting File')
+                print('Deleting File', label=user_dir.name, directory=settings.USER_PATH)
+                if not self.app.pargs.safe:
+                    user_dir.delete()
             else:
                 # Remove Directory if User Does Not Exist
                 if user_dir.name not in [user.username for user in users]:
-                    print(f'Deleting Leftover Directory for {user_dir.name}')
-                    user_dir.delete()
+                    print('Deleting Leftover Directory', label=user_dir.name)
+                    if not self.app.pargs.safe:
+                        user_dir.delete()
                 else:
                     user = [usr for usr in users if usr.username == user_dir.name][0]
 
@@ -273,9 +226,35 @@ class UserController(InstattackController, UserInterface):
                         pt = user.file_path(file)
                         if not pt.exists() or not pt.is_file():
                             print(f'File {pt.name} Missing for User {user.username}')
-                            pt.touch()
+                            if not self.app.pargs.safe:
+                                pt.touch()
 
                     # Make Sure No Other Files Present
-                    for others in user_dir.iterdir():
-                        if not user_dir.is_file() or user_dir.name not in User.FILES:
-                            print(f'Warning: Found Unidentified Item {user_dir.name}')
+                    for other in user_dir.iterdir():
+                        if other.is_file():
+                            if other.suffix != '.txt':
+                                print_action(
+                                    f"Deleting File w Invalid Format {other.suffix}",
+                                    label=other.name,
+                                    directory=user_dir.name
+                                )
+                                if not self.app.pargs.safe:
+                                    other.delete()
+                            else:
+                                other_name = other.name.split('.txt')[0]
+                                if other_name not in settings.FILES:
+                                    print_action(
+                                        f"Deleting Invalid File",
+                                        label=other.name,
+                                        directory=user_dir.name
+                                    )
+                                    if not self.app.pargs.safe:
+                                        other.delete()
+                        else:
+                            print_action(
+                                f'Deleting Invalid Sub-Directory',
+                                label=other.name,
+                                directory=user_dir.name,
+                            )
+                            if not self.app.pargs.safe:
+                                other.delete()

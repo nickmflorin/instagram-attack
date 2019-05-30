@@ -2,7 +2,7 @@ import logging
 
 from instattack.app import settings
 
-from .logger import AsyncLogger, SyncLogger, SimpleAsyncLogger, SimpleSyncLogger
+from .logger import *  # noqa
 
 
 def disable_external_loggers(*args):

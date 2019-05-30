@@ -4,6 +4,7 @@ from proxybroker import Broker
 
 from instattack.app import settings
 from instattack.app.mixins import LoggerMixin
+
 from instattack.lib.utils import cancel_remaining_tasks
 
 from .models import Proxy
@@ -12,16 +13,17 @@ from .models import Proxy
 class ProxyBroker(Broker, LoggerMixin):
 
     __name__ = 'Proxy Broker'
-    __logconfig__ = 'proxy_broker'
 
     def __init__(self, config, limit=None):
 
         self._stopped = False
+        self._started = False
         self.config = config
 
         # ProxyBroker needs a numeric limit unfortunately... if we do not set it,
         # it will be arbitrarily high.
-        self.limit = limit or config['proxies']['broker'].get('limit', 10000)
+        # TODO: Tie this in with the limit for the pool in some way.
+        self.limit = int(limit or config['proxies']['broker'].get('limit', 10000))
         self._proxies = asyncio.Queue()
 
         super(ProxyBroker, self).__init__(
@@ -34,76 +36,76 @@ class ProxyBroker(Broker, LoggerMixin):
 
     @contextlib.asynccontextmanager
     async def session(self, loop):
-        async with self.async_logger('session', ignore_config=True) as log:
-            await log.start('Opening Broker Session')
+        log = self.create_logger('session')
+
+        await log.debug('Opening Broker Session')
+        try:
             await self.start(loop)
-            try:
-                yield self
-            finally:
-                await log.complete('Closing Broker Session')
-                await self.shutdown(loop)
+            yield self
+        finally:
+            await log.debug('Closing Broker Session')
+            await self.shutdown(loop)
 
     async def start(self, loop):
-        async with self.async_logger('start') as log:
-            await log.start(f'Starting Broker with Limit = {self.limit}')
+        log = self.create_logger('start')
+        await log.start(f'Starting Broker with Limit = {self.limit}')
 
-            self._started = True
+        self._started = True
 
-            await self.find(
-                limit=self.limit,
-                post=True,
-                countries=settings.PROXY_COUNTRIES,
-                types=settings.PROXY_TYPES,
-            )
+        await self.find(
+            limit=self.limit,
+            post=True,
+            countries=settings.PROXY_COUNTRIES,
+            types=settings.PROXY_TYPES,
+        )
 
     async def collect(self, loop, save=False):
-        async with self.async_logger('collect') as log:
+        log = self.create_logger('collect')
 
-            if self._started:
-                raise RuntimeError('Broker should not be started before collect method.')
+        if self._started:
+            raise RuntimeError('Broker should not be started before collect method.')
 
-            async with self.session(loop):
-                while True:
-                    proxy = await self._proxies.get()
-                    if proxy:
-                        # [x] TODO:
-                        # Eventually maybe spawn off save into scheduler, although
-                        # scheduler is acting weirdly now and swallowing exceptions.
-                        proxy, created = await Proxy.update_or_create_from_proxybroker(
-                            proxy,
-                            save=save
-                        )
-                        if self.log_proxies:
-                            await log.debug('Broker Returned Proxy', extra={'proxy': proxy})
-                        yield proxy, created
-                    else:
-                        await log.warning('Null Proxy Returned from Broker... Stopping')
-                        break
+        async with self.session(loop):
+            while True:
+                proxy = await self._proxies.get()
+                if proxy:
+                    # [x] TODO:
+                    # Eventually maybe spawn off save into scheduler, although
+                    # scheduler is acting weirdly now and swallowing exceptions.
+                    proxy, created = await Proxy.update_or_create_from_proxybroker(
+                        proxy,
+                        save=save
+                    )
+                    yield proxy, created
+                else:
+                    await log.debug('Null Proxy Returned from Broker... Stopping')
+                    break
 
     async def shutdown(self, loop):
         """
         Cannot override stop() method, because stop() method must remain synchronous
         since ProxyBroker package attaches signal handlers to it.
         """
-        async with self.async_logger('shutdown') as log:
-            await log.stop('Shutting Down Proxy Broker')
+        log = self.create_logger('shutdown')
 
-            self._proxies.put_nowait(None)
+        await log.stop('Shutting Down Proxy Broker')
 
-            # I think this is throwing an error because ProxyBroker is also stopping
-            # it on their own terms.
-            if not self._stopped:
-                self.stop(loop)
-                self._stopped = True
+        self._proxies.put_nowait(None)
 
-            # If we do not do this here, these tasks can raise exceptions in our
-            # shutdown method.
-            await log.debug('Cancelling Proxy Broker Tasks')
-            await cancel_remaining_tasks(
-                futures=self._all_tasks,
-                silence_exceptions=True,
-                log_exceptions=False,
-            )
+        # I think this is throwing an error because ProxyBroker is also stopping
+        # it on their own terms.
+        if not self._stopped:
+            self.stop(loop)
+            self._stopped = True
+
+        # If we do not do this here, these tasks can raise exceptions in our
+        # shutdown method.
+        await log.debug('Cancelling Proxy Broker Tasks')
+        await cancel_remaining_tasks(
+            futures=self._all_tasks,
+            raise_exceptions=True,
+            log_exceptions=False,
+        )
 
     def stop(self, loop):
         """
@@ -115,8 +117,11 @@ class ProxyBroker(Broker, LoggerMixin):
         We still use the logic in the original Proxy Broker stop method so we do
         not need to call super().
         """
+        log = self.create_logger('stop', sync=True)
         if self._stopped:
             raise RuntimeError('Proxy Broker Already Stopped')
+
+        log.start(f'Stopping {self.__name__}')
 
         # We tried doing this in this manner so that all of the connections/tasks
         # will be closed for the broker when stop() is completed, so they are
@@ -129,3 +134,5 @@ class ProxyBroker(Broker, LoggerMixin):
         if self._server:
             self._server.stop()
             self._server = None
+
+        log.complete(f'Stopped {self.__name__}')

@@ -1,19 +1,29 @@
 import contextlib
 import decorator
 import sys
-from yaspin import yaspin
 
+from instattack.lib import logger, yaspin
 from instattack.app import settings
 
 
+class DisableLogger():
+
+    def __enter__(self):
+        logger.disable()
+
+    def __exit__(self, a, b, c):
+        logger.enable()
+
+
 @contextlib.contextmanager
-def start_and_stop(text):
-    with yaspin(text=settings.Colors.GRAY(text), color="red") as spinner:
-        try:
-            yield spinner
-        finally:
-            spinner.text = settings.Colors.GREEN(text)
-            spinner.ok(settings.Colors.GREEN("✔"))
+def start_and_stop(text, numbered=False):
+    with DisableLogger():
+        with yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered) as spinner:
+            try:
+                yield spinner
+            finally:
+                spinner.text = settings.Colors.GREEN(text)
+                spinner.ok(settings.Colors.GREEN("✔"))
 
 
 @decorator.decorator
@@ -28,7 +38,7 @@ def break_before(func, *args, **kwargs):
     func(*args, **kwargs)
 
 
-def spin_start_and_stop(text):
+def spin_start_and_stop(text, numbered=False):
     """
     By Default: Asynchronous
 
@@ -38,9 +48,11 @@ def spin_start_and_stop(text):
     """
     @decorator.decorator
     async def decorate(coro, *args, **kwargs):
-        with yaspin(text=settings.Colors.GRAY(text), color="red") as spinner:
+        logger.disable()
+        with yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered) as spinner:
             await coro(*args, **kwargs)
             spinner.text = settings.Colors.GREEN(text)
             spinner.ok(settings.Colors.GREEN("✔"))
+        logger.enable()
 
     return decorate

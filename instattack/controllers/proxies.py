@@ -1,132 +1,112 @@
 import asyncio
-from plumbum import cli
+from cement import Interface
 
-from instattack.lib.utils import save_iteratively, save_concurrently
+from instattack.lib.utils import (
+    save_iteratively, save_concurrently, start_and_stop)
 
-from instattack.app.entrypoint import EntryPoint, BaseApplication, SelectOperatorApplication
+from instattack.app.mixins import LoggerMixin
 
-from .models import Proxy
-from .broker import ProxyBroker
-from .utils import scrape_proxies
+from instattack.app.proxies.models import Proxy
+from instattack.app.proxies.broker import ProxyBroker
+from instattack.app.proxies.utils import scrape_proxies
 
-
-@EntryPoint.subcommand('proxies')
-class ProxyEntryPoint(BaseApplication):
-    pass
-
-
-class ProxyApplicationMixin(object):
-
-    concurrent = cli.Flag("--concurrent", default=False)
-
-    async def log_save_results(self, created, updated):
-        async with self.async_logger('log_save_results') as log:
-
-            if len(created) != 0:
-                await log.success(f'Created {len(created)} Proxies')
-            if len(updated) != 0:
-                await log.success(f'Updated {len(updated)} Proxies')
-            if len(updated) == 0 and len(created) == 0:
-                await log.error('No Proxies to Update or Create')
-
-    async def save_proxies(self, iterable, update_duplicates=False, ignore_duplicates=True):
-        async with self.async_logger('save_proxies') as log:
-            if self.concurrent:
-                log.debug('Saving Concurrently')
-                created, updated = await save_concurrently(
-                    iterable,
-                    ignore_duplicates=ignore_duplicates,
-                    update_duplicates=update_duplicates,
-                )
-            else:
-                log.debug('Saving Iteratively')
-                created, updated = await save_iteratively(
-                    iterable,
-                    ignore_duplicates=ignore_duplicates,
-                    update_duplicates=update_duplicates,
-                )
-
-            await self.log_save_results(created, updated)
+from .abstract import InstattackController
+from .utils import proxy_command
 
 
-class BaseProxy(BaseApplication, ProxyApplicationMixin):
+class ProxyInterface(Interface, LoggerMixin):
 
-    __group__ = 'Proxy Pool'
+    class Meta:
+        interface = 'user'
 
-    def main(self):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.operation(loop))
-
-
-@ProxyEntryPoint.subcommand('clean')
-class ProxyClean(SelectOperatorApplication, ProxyApplicationMixin):
-
-    async def errors(self, loop):
-        to_save = []
-        async for proxy in Proxy.all():
-            # Regular errors are translated on save currently.
-            proxy.active_errors = {}
-            to_save.append(proxy)
-
-        await self.save_proxies(to_save, update_duplicates=True, ignore_duplicates=True)
-
-
-@ProxyEntryPoint.subcommand('clear')
-class ProxyClear(SelectOperatorApplication, ProxyApplicationMixin):
-
-    async def history(self, loop):
-        to_save = []
-        async for proxy in Proxy.all():
-            # Regular errors are translated on save currently.
-            proxy.errors = {}
-            proxy.active_errors = {}
-            proxy.num_requests = 0
-            to_save.append(proxy)
-
-        await self.save_proxies(to_save, update_duplicates=True, ignore_duplicates=True)
+    async def _save_proxies(self, iterable, update_duplicates=False, ignore_duplicates=True):
+        if self.app.pargs.concurrent:
+            created, updated = await save_concurrently(
+                iterable,
+                ignore_duplicates=ignore_duplicates,
+                update_duplicates=update_duplicates,
+            )
+        else:
+            created, updated = await save_iteratively(
+                iterable,
+                ignore_duplicates=ignore_duplicates,
+                update_duplicates=update_duplicates,
+            )
+        return created, updated
 
 
-@ProxyEntryPoint.subcommand('scrape')
-class ProxyScrape(BaseProxy):
+class ProxyController(InstattackController, ProxyInterface):
 
-    limit = cli.SwitchAttr("--limit", int, mandatory=False,
-        help="Limit the number of proxies to collect.")
+    class Meta:
+        label = 'proxies'
+        stacked_on = 'base'
+        stacked_type = 'nested'
 
-    async def operation(self, loop):
-        async with self.async_logger('operation') as log:
+        interfaces = [
+            ProxyInterface,
+        ]
 
-            message = 'Scraping Proxies...'
-            if self.limit:
-                message = f'Scraping Proxies w Limit = {self.limit}'
-            await log.start(message)
+    @proxy_command(help="Clear Historical Error and Request History of Proxies")
+    def clear_history(self):
 
+        async def _clear_history():
+            to_save = []
+            async for proxy in Proxy.all():
+                # Regular errors are translated on save currently.
+                if proxy.errors != {} or proxy.active_errors != {} or proxy.num_requests != 0:
+                    proxy.errors = {}
+                    proxy.active_errors = {}
+                    proxy.num_requests = 0
+                    to_save.append(proxy)
+            return to_save
+
+        with start_and_stop("Clearing Proxy History") as spinner:
+            loop = asyncio.get_event_loop()
+            to_save = loop.run_until_complete(_clear_history())
+
+            spinner.write(f"> Updating {len(to_save)} Proxies")
+            loop.run_until_complete(self._save_proxies(
+                to_save, update_duplicates=True, ignore_duplicates=True
+            ))
+
+    @proxy_command(help="Scrape Proxies and Save to DB", limit=True)
+    def scrape(self):
+
+        with start_and_stop("Scraping Proxies") as spinner:
             proxies = scrape_proxies(limit=self.limit)
-            await log.complete(f'Scraped {len(proxies)} Proxies')
 
-            await self.save_proxies(proxies)
+            spinner.write(f"> Saving {len(proxies)} Scraped Proxies")
+            loop = asyncio.get_event_loop()
+            created, updated = loop.run_until_complete(self._save_proxies(proxies))
 
+            spinner.write(f"> Created {len(created)} Proxies")
+            spinner.write(f"> Updated {len(updated)} Proxies")
 
-@ProxyEntryPoint.subcommand('collect')
-class ProxyCollect(BaseProxy):
+    @proxy_command(help="Collect Proxies w/ ProxyBroker and Save to DB", limit=True)
+    def collect(self):
 
-    limit = cli.SwitchAttr("--limit", int, mandatory=True,
-        help="Limit the number of proxies to collect.")
+        async def _collect(broker):
+            updated = []
+            created = []
+            async for proxy, was_created in broker.collect(loop, save=False):
+                if was_created:
+                    created.append(proxy)
+                else:
+                    updated.append(proxy)
+            return updated, created
 
-    async def operation(self, loop):
+        with start_and_stop("Collecting Proxies") as spinner:
 
-        config = self.config()
-        broker = ProxyBroker(
-            config['proxies']['broker'],
-            limit=self.limit,
-        )
+            broker = ProxyBroker(
+                self.app.config,
+                limit=self.app.pargs.limit,
+            )
 
-        updated = []
-        created = []
-        async for proxy, was_created in broker.collect(loop, save=False):
-            if was_created:
-                created.append(proxy)
-            else:
-                updated.append(proxy)
+            loop = asyncio.get_event_loop()
+            updated, created = loop.run_until_complete(_collect(broker))
 
-        await self.save_proxies(created, update_duplicates=True)
-        await self.save_proxies(updated, update_duplicates=True)
+            spinner.write(f"> Creating {len(created)} Proxies")
+            loop.run_until_complete(self._save_proxies(created, update_duplicates=True))
+
+            spinner.write(f"> Updating {len(updated)} Proxies")
+            loop.run_until_complete(self._save_proxies(updated, update_duplicates=True))

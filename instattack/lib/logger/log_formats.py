@@ -7,7 +7,7 @@ from instattack.app import settings
 
 
 def get_record_message(record):
-    from instattack.app.login.exceptions.utils import get_http_exception_message
+    from instattack.app.attack.exceptions.utils import get_http_exception_message
     if isinstance(record.msg, Exception):
         return get_http_exception_message(record.msg)
     return record.msg
@@ -232,7 +232,8 @@ LOG_FORMAT_STRING = Lines(
         length=25,
         label=Label(
             value='level.name',
-            format=get_level_formatter(without_text_decoration=True),
+            format=get_level_formatter(without_text_decoration=False),
+            delimiter=None,
         ),
         format=get_level_formatter(without_wrapping=True, without_text_decoration=True),
     )
