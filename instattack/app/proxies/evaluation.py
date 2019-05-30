@@ -152,7 +152,6 @@ def evaluate_error_rate(proxy, config):
 
     evaluations = ProxyEvaluation(reasons=[])
 
-    # Not sure why we only need to include the instattack key here?
     config = config['proxies']['pool']['limits']
 
     if config.get('error_rate'):
@@ -232,12 +231,13 @@ def evaluate_for_pool(proxy, config):
 
 def evaluate_from_pool(proxy, config):
 
-    config = config['proxies']['pool']['limits']
     evaluations = ProxyEvaluation(reasons=[])
 
     request_eval = evaluate_requests(proxy, config)
     errors_eval = evaluate_errors(proxy, config)
     error_rate_eval = evaluate_error_rate(proxy, config)
+
+    config = config['proxies']['pool']['limits']
 
     if (proxy.active_errors.get('most_recent') and
             proxy.active_errors['most_recent'] == 'too_many_requests'):

@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 import logging
+import os
 import pathlib
 import signal
 import tortoise
@@ -37,7 +38,7 @@ _shutdown = False
 
 
 # Configuration Defaults
-CONFIG = init_defaults('instattack')
+# CONFIG = init_defaults('instattack')
 
 
 def handle_exception(loop, context):
@@ -97,13 +98,13 @@ def setup_config(app):
     """
 
     # Temporarily Set Path as Hardcoded Value
-    config = Configuration(filename="instattack.yml")
-    config.read()
+    # config = Configuration(filename="instattack.yml")
+    # config.read()
 
-    # Right now, we don't need to worry about the other potential top level
-    # attributes.
-    config = config['instattack']
-    app.config.merge(config.serialize())
+    # # Right now, we don't need to worry about the other potential top level
+    # # attributes.
+    # # config = config['instattack']
+    # app.config.merge(config.serialize())
 
 
 @break_before
@@ -259,20 +260,31 @@ def shutdown(app):
     loop.close()
 
 
+CONFIG = init_defaults('instattack', 'log.logging')
+# Have to Figure Out How to Tie in Cement Logger with Our Logger
+CONFIG['log.logging']['level'] = 'info'
+
+
 class Instattack(App):
 
     class Meta:
         label = 'instattack'
 
-        config_defaults = CONFIG  # Configuration Defaults
+        # Default configuration dictionary.
+        # config_defaults = CONFIG
+        config_dirs = [os.path.join(settings.ROOT_DIR, 'config')]
+        config_files = ['instattack.yml']
+        config_section = 'instattack'
+
         exit_on_close = True  # Call sys.exit() on Close
 
         # Laod Additional Framework Extensions
         extensions = ['yaml', 'colorlog', 'jinja2']
 
         config_handler = 'yaml'
-        config_file_suffix = '.yaml'
+        config_file_suffix = '.yml'
 
+        # Have to Figure Out How to Tie in Cement Logger with Our Logger
         log_handler = 'colorlog'  # Set the Log Handler
         output_handler = 'jinja2'  # Set the Output Handler
 
@@ -299,7 +311,6 @@ class InstattackTest(TestApp, Instattack):
 
 def main():
     with Instattack() as app:
-
         try:
             app.run()
 

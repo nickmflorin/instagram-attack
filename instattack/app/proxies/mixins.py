@@ -42,6 +42,23 @@ class HumanizedMetrics(object):
 
 class EvaluationMixin(HumanizedMetrics):
 
+    def hold(self, config):
+        """
+        If the Proxy just resulted in a num_requests error, we don't want to
+        put back in the Pool immediately because it will have a high priority
+        and will likely slow down the retrieval of subsequent proxies because
+        it cannot be used just yet.
+
+        Instead, we put in an array to hold onto until it is ready to be used.
+        """
+        config = config['proxies']['pool']['limits']
+
+        if (self.active_errors.get('most_recent') and
+                self.active_errors['most_recent'] == 'too_many_requests'):
+            if self.time_since_used < config['too_many_requests_delay']:
+                return True
+        return False
+
     def _num_requests(self, active=False, success=None):
         if success is False:
             return self._num_errors(active=active)

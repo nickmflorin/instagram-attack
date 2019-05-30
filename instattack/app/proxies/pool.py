@@ -32,10 +32,17 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         self.start_event = start_event
         self.timeout = self.config['proxies']['pool']['timeout']
 
+        self.lock = asyncio.Lock()
+
+        # Proxies that we want to wait for a little while until we put back
+        # in the queue.
+        self.on_hold = []
+
         # Tuple Comparison Breaks in Python3 -  The entry count serves as a
         # tie-breaker so that two tasks with the same priority are returned in
         # the order they were added.
         self.proxy_counter = itertools.count()
+        self.last_logged_qsize = None
 
     async def prepopulate(self, loop):
         """
@@ -101,6 +108,10 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
                 break
             count += 1
 
+    @property
+    def num_proxies(self):
+        return self.qsize() + len(self.on_hold)
+
     async def get(self):
         """
         Remove and return the lowest priority proxy in the pool. Raise KeyError
@@ -132,16 +143,36 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         """
         log = self.create_logger('get')
         try:
-            if self.qsize() <= 20:
-                await log.warning(f'Running Low on Proxies: {self.qsize()}')
+            if self.num_proxies <= 20:
+                if not self.last_logged_qsize or self.last_logged_qsize != self.num_proxies:
+                    self.last_logged_qsize = self.num_proxies
+                    await log.warning(f'Running Low on Proxies: {self.num_proxies}')
 
-            # We might not need this timeout, since it might be factored into the
-            # session already.
+            # [x] TODO:
+            # We do not necessarily want to raise the error immediatley if the
+            # queue is empty, since more proxies may be in the process of being added
+            # or about to be added, but we should kick start collection here if we
+            # are running low.
             proxy = await asyncio.wait_for(self._get_proxy(), timeout=self.timeout)
         except asyncio.TimeoutError:
             raise PoolNoProxyError()
         else:
             return proxy
+
+    async def _get_from_hold(self):
+        """
+        [x] TODO:
+        --------
+        Another option to the .hold() methodology might be to have a confirmed
+        queue and an unconfirmed queue, where the priority for the confirmed
+        queue emphasizes only time since used, which is not a priority value of
+        the unconfirmed queue.
+        """
+        for proxy in self.on_hold:
+            hold = proxy.hold(self.config)
+            if not hold:
+                self.on_hold.remove(proxy)
+                return proxy
 
     async def _get_proxy(self):
         """
@@ -150,7 +181,14 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         """
         log = self.create_logger('get')
 
+        # [x] TODO:
+        # This can sometimes drag on for awhile toward the end, we need to figure
+        # out how to fix that...
         while True:
+            proxy = await self._get_from_hold()
+            if proxy:
+                return proxy
+
             ret = await super(ProxyPool, self).get()
             proxy = ret[1]
 
@@ -166,21 +204,30 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
     async def check_and_put(self, proxy):
         """
         [!] IMPORTANT:
+        -------------
         Sometimes we might want to still add the proxy even if the
         quantitative metrics aren't perfect, but we know the proxy has
-        successful requests.
+        successful requests -> Reason for Strict Parameter
+
+        [x] TODO:
+        --------
+        Another option to the .hold() methodology might be to have a confirmed
+        queue and an unconfirmed queue, where the priority for the confirmed
+        queue emphasizes only time since used, which is not a priority value of
+        the unconfirmed queue.
         """
-        log = self.create_logger('put')
+        log = self.create_logger('get')
 
         evaluation = proxy.evaluate_for_pool(self.config)
-        if not evaluation.passed:
-            # await log.warning('Cannot Add Proxy to Pool', extra={
-            #     'proxy': proxy,
-            #     'other': str(evaluation),
-            # })
-            pass
+        if evaluation.passed:
+            if proxy.hold(self.config):
+                async with self.lock:
+                    await log.debug('Putting Proxy in Hold')
+                    self.on_hold.append(proxy)
+            else:
+                await self.put(proxy)
         else:
-            await self.put(proxy)
+            log.debug('Discarding Proxy')
 
     async def put(self, proxy):
         """

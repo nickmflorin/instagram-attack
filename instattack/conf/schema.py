@@ -152,7 +152,7 @@ Schema = {
         'type': 'dict',
         'schema': {
             'attack': AttackSchema,
-            'proxies': ProxySchema
+            'proxies': ProxySchema,
         }
     }
 }

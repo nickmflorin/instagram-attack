@@ -2,7 +2,7 @@ import asyncio
 
 from tortoise import fields
 from tortoise.models import Model
-from tortoise.exceptions import OperationalError
+from tortoise.exceptions import OperationalError, DoesNotExist
 
 from instattack import settings
 from instattack.lib import logger
@@ -170,6 +170,14 @@ class User(Model):
     async def stream_numerics(self, limit=None):
         async for item in self.stream_data(settings.NUMERICS, limit=limit):
             yield item
+
+    async def was_authenticated(self, limit=None):
+        try:
+            await UserAttempt.get(user=self, success=True)
+        except DoesNotExist:
+            return False
+        else:
+            return True
 
     async def get_attempts(self, limit=None):
         attempts = await UserAttempt.filter(user=self).all()

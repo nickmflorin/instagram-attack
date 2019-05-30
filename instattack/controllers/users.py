@@ -157,26 +157,28 @@ class UserController(InstattackController, UserInterface):
         data = {'title': 'User Attempts', 'data': attempts}
         self.app.render(data, 'user_data.jinja2')
 
-    @username_command(help="Clear User Attempts")
+    @ex(help="Clear Historical Password Attempts", arguments=[
+        (['username'], {'help': 'Username'}),
+    ])
     def clear_attempts(self):
 
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-
-        with start_and_stop(f"Clearing User {self.app.pargs.username} Attempts") as spinner:
+        async def _clear_attempts(loop, user, spinner):
             spinner.write("> Gathering Attempts...")
-            attempts = loop.run_until_complete(user.get_attempts())
+            attempts = await user.get_attempts()
 
             if len(attempts) == 0:
                 spinner.write("> No Attempts to Clear")
 
             else:
                 spinner.write(f"> Clearing {len(attempts)} Attempts...")
-                tasks = []
                 for attempt in attempts:
-                    tasks.append(asyncio.create_task(attempt.delete()))
+                    await attempt.delete()
 
-                loop.run_until_complete(asyncio.gather(*tasks))
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+
+        with start_and_stop(f"Clearing User {self.app.pargs.username} Attempts") as spinner:
+            loop.run_until_complete(_clear_attempts(loop, user, spinner))
 
     @ex(
         help='Clean User Directory for Active and Deleted Users',

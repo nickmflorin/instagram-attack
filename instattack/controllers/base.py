@@ -23,14 +23,14 @@ class AttackInterface(UserInterface):
         auth_result_found = asyncio.Event()
 
         proxy_handler = ProxyHandler(
-            self.app.config,
+            self.app.config['instattack'],
             user=user,
             start_event=start_event,
             stop_event=auth_result_found,
         )
 
         password_handler = LoginHandler(
-            self.app.config,
+            self.app.config['instattack'],
             proxy_handler,
             user=user,
             start_event=start_event,
@@ -122,6 +122,12 @@ class Base(InstattackController, AttackInterface):
         """
         loop = asyncio.get_event_loop()
         user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+
+        # TODO: Add Option for Continuing Attack Regardless
+        was_authenticated = loop.run_until_complete(user.was_authenticated())
+        if was_authenticated:
+            self.failure('User was already authenticated.')
+            return
 
         proxy_handler, password_handler = self._attack_handlers(user)
 

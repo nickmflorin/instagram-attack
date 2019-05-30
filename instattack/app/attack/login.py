@@ -1,7 +1,5 @@
 import asyncio
-import collections
 
-from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
 from instattack import settings
@@ -47,7 +45,6 @@ async def login(
     >>>     else:
     >>>         raise e
     """
-    log = logger.get_async(__name__, subname='login')
 
     proxy.update_time()
     result = None
@@ -143,10 +140,6 @@ async def attempt(
     current fetches to the batch_size.  Will return when it finds the first
     request that returns a valid result.
     """
-
-    log = logger.get_async(__name__, subname='attempt')
-    proxies_count = collections.Counter()  # Indexed by Proxy Unique ID
-
     async def generate_login_attempts():
         """
         Generates coroutines for each password to be attempted and yields
@@ -161,15 +154,6 @@ async def attempt(
             if not proxy:
                 raise PoolNoProxyError()
 
-            if proxy.unique_id in proxies_count:
-                log.warning(
-                    f'Already Used Proxy {proxies_count[proxy.unique_id]} Times.',
-                    extra={'proxy': proxy}
-                )
-
-            # We are going to want to use these to display information
-            # later...
-            proxies_count[proxy.unique_id] += 1
             yield login(
                 loop,
                 request_context,
@@ -193,14 +177,6 @@ async def attempt(
         if result is not None:
             stop_event.set()
 
-            # TODO: Maybe Put in Scheduler
+            # TODO: Maybe Put in Scheduler - We also might not need to do this.
             await cancel_remaining_tasks(futures=current_tasks)
-
-            password = request_context['password']
-            await log.complete(
-                f'Done Attempting Login with {password} '
-                f'After {num_tries} Attempt(s)',
-                extra={
-                    'other': result
-                })
-            return result
+            return result, num_tries
