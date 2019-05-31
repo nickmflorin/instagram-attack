@@ -1,6 +1,12 @@
+import asyncio
 from datetime import datetime
 
+from instattack.app.proxies.broker import ProxyBroker
+from instattack.app.proxies.pool import ProxyPool
 from instattack.app.proxies.models import Proxy
+
+from instattack.main import InstattackTest
+
 
 ERRORS = {
     'all': {
@@ -20,6 +26,39 @@ ACTIVE_ERRORS = {
     },
     'most_recent': 'response',
 }
+
+TEST_PROXIES = [
+    Proxy(
+        host="0.0.0.0",
+        port=1080,
+        errors=ERRORS,
+        active_errors=ACTIVE_ERRORS,
+        num_requests=9,
+        num_active_requests=3,
+        avg_resp_time=3.1,
+        date_added=datetime(2018, 1, 1)
+    ),
+    Proxy(
+        host="0.0.0.1",
+        port=1080,
+        errors=ERRORS,
+        active_errors=ACTIVE_ERRORS,
+        num_requests=9,
+        num_active_requests=3,
+        avg_resp_time=3.1,
+        date_added=datetime(2018, 1, 1)
+    ),
+    Proxy(
+        host="0.0.0.2",
+        port=1080,
+        errors=ERRORS,
+        active_errors=ACTIVE_ERRORS,
+        num_requests=9,
+        num_active_requests=3,
+        avg_resp_time=3.1,
+        date_added=datetime(2018, 1, 1)
+    ),
+]
 
 
 def test_num_requests():
@@ -61,3 +100,20 @@ def test_num_errors():
     assert proxy._num_errors('connection', active=True) == 1
     assert proxy._num_errors(active=True) == 2
     assert proxy._num_errors(active=False) == 7
+
+
+def test_pool():
+    argv = ['attack']
+    with InstattackTest(argv=argv) as app:
+        import ipdb; ipdb.set_trace()
+        async def _test_pool(loop):
+
+            broker = ProxyBroker(app.config['instattack'], limit=None)
+            pool = ProxyPool(app.config, broker, start_event=asyncio.Event())
+            pool.hold.extend(TEST_PROXIES)
+            proxy = pool._get_from_hold()
+            import ipdb; ipdb.set_trace()
+
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(_test_pool(loop))

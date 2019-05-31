@@ -264,6 +264,15 @@ CONFIG = init_defaults('instattack', 'log.logging')
 # Have to Figure Out How to Tie in Cement Logger with Our Logger
 CONFIG['log.logging']['level'] = 'info'
 
+CONFIG_DIRS = [os.path.join(settings.ROOT_DIR, 'config')]
+CONFIG_FILES = ['instattack.yml']
+CONFIG_SECTION = 'instattack'
+
+EXTENSIONS = ['yaml', 'colorlog', 'jinja2']
+CONFIG_HANDLER = 'yaml'
+CONFIG_FILE_SUFFIX = '.yml'
+
+EXIT_ON_CLOSE = True
 
 class Instattack(App):
 
@@ -272,17 +281,17 @@ class Instattack(App):
 
         # Default configuration dictionary.
         # config_defaults = CONFIG
-        config_dirs = [os.path.join(settings.ROOT_DIR, 'config')]
-        config_files = ['instattack.yml']
-        config_section = 'instattack'
+        config_dirs = CONFIG_DIRS
+        config_files = CONFIG_FILES
+        config_section = CONFIG_SECTION
 
-        exit_on_close = True  # Call sys.exit() on Close
+        exit_on_close = EXIT_ON_CLOSE  # Call sys.exit() on Close
 
         # Laod Additional Framework Extensions
-        extensions = ['yaml', 'colorlog', 'jinja2']
+        extensions = EXTENSIONS
 
-        config_handler = 'yaml'
-        config_file_suffix = '.yml'
+        config_handler = CONFIG_HANDLER
+        config_file_suffix = CONFIG_FILE_SUFFIX
 
         # Have to Figure Out How to Tie in Cement Logger with Our Logger
         log_handler = 'colorlog'  # Set the Log Handler
