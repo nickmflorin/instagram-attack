@@ -40,5 +40,5 @@ def scrape_proxies(limit=None):
 
 
 async def stream_proxies(config):
-    async for proxy in Proxy.filter().all():
+    async for proxy in Proxy.all():
         yield proxy

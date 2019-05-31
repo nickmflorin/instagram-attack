@@ -1,5 +1,4 @@
 {{ title }}
-
 {% for element in data %}
-    {{ element }}
-{% endfor %}
+[{{loop.index}}] {{ element }}
+{%- endfor %}

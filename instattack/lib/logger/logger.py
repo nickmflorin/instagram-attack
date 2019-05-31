@@ -5,7 +5,7 @@ import os
 import sys
 import traceback
 
-from instattack import settings
+from instattack.config import settings
 
 from .utils import is_log_file, is_site_package_file
 from .handlers import (

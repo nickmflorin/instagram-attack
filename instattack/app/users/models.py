@@ -4,7 +4,7 @@ from tortoise import fields
 from tortoise.models import Model
 from tortoise.exceptions import OperationalError, DoesNotExist
 
-from instattack import settings
+from instattack.config import settings
 from instattack.lib import logger
 from instattack.lib.utils import stream_raw_data, read_raw_data
 
@@ -209,7 +209,6 @@ class User(Model):
                 attempt.success = success
                 attempt.num_attempts += 1
                 await attempt.save()
-                log.debug(f'Updated Attempt {attempt.password} for User {self.username}.')
 
         except OperationalError:
             if try_attempt <= settings.USER_MAX_SAVE_ATTEMPT_TRIES:
@@ -237,7 +236,7 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        log = logger.get_async(__name__, subname='get_new_attempts')
+        log = logger.get_sync(__name__, subname='get_new_attempts')
 
         current_attempts = await self.get_attempts()
         current_attempts = [attempt.password for attempt in current_attempts]
@@ -248,7 +247,7 @@ class User(Model):
             generated.append(item)
 
         if len(generator.duplicates) != 0:
-            await log.warning(
+            log.warning(
                 f'There Were {len(generator.duplicates)} '
                 'Duplicates Removed from Generated Passwords')
 

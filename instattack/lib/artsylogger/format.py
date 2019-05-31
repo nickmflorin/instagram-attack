@@ -39,6 +39,10 @@ class Format(object):
         self.wrapper = wrapper
         self.format_with_wrapper = format_with_wrapper
 
+    def remove_wrapper(self):
+        self.wrapper = None
+        self.format_with_wrapper = False
+
     def without_text_decoration(self):
         undecorated = [c for c in self.colors
             if c not in [colors.underline, colors.bold]]
@@ -49,9 +53,7 @@ class Format(object):
         )
 
     def without_wrapping(self):
-        return Format(
-            *self.colors
-        )
+        return Format(*self.colors)
 
 
 class ColorFormatter(Enum):
@@ -77,6 +79,8 @@ class ColorFormatter(Enum):
             fmt.make_bold()
         if wrapper:
             fmt.add_wrapper(wrapper, format_with_wrapper=format_with_wrapper)
+        else:
+            fmt.remove_wrapper()
         return fmt
 
     @property

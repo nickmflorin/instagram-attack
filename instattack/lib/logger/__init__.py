@@ -1,6 +1,6 @@
 import logging
 
-from instattack import settings
+from instattack.config import settings
 
 from .logger import *  # noqa
 

@@ -4,6 +4,10 @@ import inspect
 from .paths import task_is_third_party
 
 
+def isCoroutine(func):
+    return asyncio.iscoroutinefunction(func)
+
+
 async def ensure_async_generator(iterable):
     if inspect.isasyncgen(iterable):
         async for proxy in iterable:

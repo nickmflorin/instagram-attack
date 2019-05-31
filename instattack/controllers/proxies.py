@@ -47,6 +47,29 @@ class ProxyController(InstattackController, ProxyInterface):
         ]
 
     @proxy_command(help="Clear Historical Error and Request History of Proxies")
+    def migrate_history(self):
+
+        async def _migrate_history():
+            to_save = []
+            async for proxy in Proxy.all():
+                proxy.active_errors = {}
+                if proxy.errors:
+                    proxy.errors = proxy.errors['all']
+                    if proxy.errors.get('most_recent'):
+                        proxy.last_error = proxy.errors['most_recent']
+                to_save.append(proxy)
+            return to_save
+
+        with start_and_stop("Migrating Proxy History") as spinner:
+            loop = asyncio.get_event_loop()
+            to_save = loop.run_until_complete(_migrate_history())
+
+            spinner.write(f"> Updating {len(to_save)} Proxies")
+            loop.run_until_complete(self._save_proxies(
+                to_save, update_duplicates=True, ignore_duplicates=True
+            ))
+
+    @proxy_command(help="Clear Historical Error and Request History of Proxies")
     def clear_history(self):
 
         async def _clear_history():

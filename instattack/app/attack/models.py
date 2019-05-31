@@ -5,7 +5,7 @@ from dacite import from_dict
 from plumbum import colors
 from typing import List, Any, Optional
 
-from instattack import settings
+from instattack.config import settings
 from instattack.app.proxies.models import Proxy
 
 
@@ -41,9 +41,9 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return settings.LoggingLevels.SUCCESS.message_formatter(string_rep)
+            return settings.LoggingLevels.SUCCESS.format(wrapper=None)(string_rep)
         elif self.not_authorized:
-            return settings.LoggingLevels.ERROR.message_formatter(string_rep)
+            return settings.LoggingLevels.ERROR.format(wrapper=None)(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
             return settings.LoggingLevels.DEBUG.format(string_rep)

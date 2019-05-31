@@ -1,6 +1,6 @@
 from plumbum.path import LocalPath
 
-from instattack import settings
+from instattack.config import settings
 
 
 def get_app_stack_at(stack, step=1):

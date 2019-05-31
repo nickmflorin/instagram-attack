@@ -1,7 +1,7 @@
 from collections import Counter
 from yaspin.core import Yaspin
 
-from instattack import settings
+from instattack.config import settings
 
 
 class CustomYaspin(Yaspin):

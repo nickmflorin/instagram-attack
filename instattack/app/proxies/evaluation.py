@@ -43,7 +43,7 @@ class ProxyEvaluation:
 
 def evaluate_errors(proxy, config):
 
-    errors = config['proxies']['pool']['limits'].get('errors', {})
+    errors = config = config['instattack']['proxies']['limits'].get('errors', {})
 
     max_params = [
         ('all', (), ),
@@ -87,7 +87,7 @@ def evaluate_errors(proxy, config):
 
 def evaluate_requests(proxy, config):
 
-    requests = config['proxies']['pool']['limits'].get('requests', {})
+    requests = config = config['instattack']['proxies']['limits'].get('requests', {})
 
     max_params = [
         ('all', (None, ), ),
@@ -152,7 +152,7 @@ def evaluate_error_rate(proxy, config):
 
     evaluations = ProxyEvaluation(reasons=[])
 
-    config = config['proxies']['pool']['limits']
+    config = config['instattack']['proxies']['limits']
 
     if config.get('error_rate'):
         config_error_rate = config['error_rate']
@@ -213,7 +213,7 @@ def evaluate_for_pool(proxy, config):
 
     evaluations.merge(request_eval, errors_eval, error_rate_eval)
 
-    config = config['proxies']['pool']['limits']
+    config = config['instattack']['proxies']['limits']
     evaluations = ProxyEvaluation(reasons=[])
 
     # Will Have to be Included in evaluate_from_pool When We Start Manually Calculating
@@ -237,16 +237,19 @@ def evaluate_from_pool(proxy, config):
     errors_eval = evaluate_errors(proxy, config)
     error_rate_eval = evaluate_error_rate(proxy, config)
 
-    config = config['proxies']['pool']['limits']
+    config = config['instattack']['proxies']['limits']
 
     if (proxy.active_errors.get('most_recent') and
-            proxy.active_errors['most_recent'] == 'too_many_requests'):
+            proxy.active_errors['most_recent'] in (
+                'too_many_requests'
+                'too_many_open_connections',
+    )):
         if proxy.time_since_used < config['too_many_requests_delay']:
 
             reason = AttributeEvaluation(
                 value=proxy.time_since_used,
                 relative_value=config['too_many_requests_delay'],
-                name="Time Between 429 Requests".title(),
+                name="Time Between 429 or 503 Requests".title(),
                 comparison="<"
             )
             evaluations.add(reason)

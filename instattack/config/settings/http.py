@@ -2,12 +2,6 @@
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
 
-URLS = {
-    'GET': INSTAGRAM_URL,
-    'POST': INSTAGRAM_LOGIN_URL
-}
-
-
 VERSION = 18
 RELEASE = 4.3
 MFG = "Xiaomi"
@@ -23,7 +17,6 @@ USERAGENT = (
 HEADER = {
     'Referer': 'https://www.instagram.com/',
     "User-Agent": USERAGENT,
-    # 'Content-Type': 'application/x-www-form-urlencoded',
 }
 
 

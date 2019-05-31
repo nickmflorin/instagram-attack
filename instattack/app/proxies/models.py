@@ -5,7 +5,7 @@ import tortoise
 from tortoise import fields
 from tortoise.models import Model
 
-from instattack import settings
+from instattack.config import settings
 from instattack.lib import logger
 
 from .mixins import EvaluationMixin
@@ -26,6 +26,7 @@ class Proxy(Model, EvaluationMixin):
     num_requests = fields.IntField(default=0)
     num_active_requests = fields.IntField(default=0)
     last_request_confirmed = fields.BooleanField(default=False)
+    last_error = fields.CharField(max_length=15, null=True)
 
     class Meta:
         unique_together = ('host', 'port')
@@ -65,14 +66,14 @@ class Proxy(Model, EvaluationMixin):
         and in pool.
         """
         self.num_active_requests = 0
-        self.active_errors = {'all': {}}
-        self.last_request_confirmed = False
+        self.active_errors = {}
+        self.last_active_error = None
 
     def update_time(self):
         self.last_used = datetime.now()
 
     def priority_values(self, config):
-        err_rate = config['proxies']['pool']['limits'].get('error_rate', {})
+        err_rate = config['instattack']['proxies']['limits'].get('error_rate', {})
         horizon = err_rate.get('horizon')
 
         PROXY_PRIORITY_VALUES = (
@@ -92,58 +93,39 @@ class Proxy(Model, EvaluationMixin):
         priority.append(count)
         return tuple(priority)
 
-    def add_error(self, exc, count=1, note_most_recent=True):
+    def set_recent_error(self, exc, historical=True, active=False):
+        error_attr = {
+            (True, False): ('last_error',),
+            (False, True): ('last_active_error',),
+            (True, True): ('last_error', 'last_active_error',),
+        }
+        attrs = error_attr[(historical, active)]
+        for attr in attrs:
+            setattr(self, attr, exc.__subtype__)
 
-        self.errors.setdefault('all', {})
-        self.errors['all'].setdefault(exc.__subtype__, 0)
-        self.errors['all'][exc.__subtype__] += count
+    def add_error(self, exc, count=1, historical=True, active=False, recent=False):
+        error_attr = {
+            (True, False): ('errors',),
+            (False, True): ('active_errors',),
+            (True, True): ('errors', 'active_errors',),
+        }
+        attrs = error_attr[(historical, active)]
+        for attr in attrs:
+            errors = getattr(self, attr)
+            errors.setdefault(exc.__subtype__, 0)
+            errors[exc.__subtype__] += count
 
-        self.active_errors.setdefault('all', {})
-        self.active_errors['all'].setdefault(exc.__subtype__, 0)
-        self.active_errors['all'][exc.__subtype__] += count
-
-        if note_most_recent:
-            self.errors['most_recent'] = exc.__subtype__
-            self.active_errors['most_recent'] = exc.__subtype__
+        if recent:
+            self.set_recent_error(exc, historical=historical, active=active)
 
     def include_errors(self, errors):
         for key, val in errors.items():
-            self.add_error(key, count=val, note_most_recent=False)
-
-    async def handle_success(self, save=False):
-        self.num_requests += 1
-        if save:
-            await self.save()
-
-    async def handle_error(self, exc):
-        """
-        [1] Fatal Error:
-        ---------------
-        If `remove_invalid_proxy` is set to True and this error occurs,
-        the proxy will be removed from the database.
-        If `remove_invalid_proxy` is False, the proxy will just be noted
-        with the error and the proxy will not be put back in the pool.
-
-        Since we will not delete directly from this method (we need config)
-        we will just note the error.
-
-        [2] Inconclusive Error:
-        ----------------------
-        Proxy will not be noted with the error and the proxy will be put
-        back in pool.
-
-        [3] Semi-Fatal Error:
-        --------------------
-        Regardless of the value of `remove_invalid_proxy`, the  proxy
-        will be noted with the error and the proxy will be removed from
-        the pool.
-
-        [4] General Error:
-        -----------------
-        Proxy will be noted with error but put back in the pool.
-        """
-        self.num_requests += 1
-        self.add_error(exc)
+            self.add_error(
+                key,
+                count=val,
+                active=True,
+                historical=True,
+            )
 
     @classmethod
     async def find_for_proxybroker(cls, broker_proxy):
@@ -239,14 +221,11 @@ class Proxy(Model, EvaluationMixin):
             proxy = await cls.create_from_proxybroker(broker_proxy, save=save)
             return proxy, True
 
-    async def save(self, *args, **kwargs):
+    async def save(self, reset=True, *args, **kwargs):
         """
         We don't want to reset num_active_requests and active_errors here
         because we save the proxy intermittedly throughout the operation.
         """
-        if not self.errors:
-            self.errors = {'all': {}}
-        elif type(self.errors) is dict and 'all' not in self.errors:
-            self.errors = {'all': self.errors}
-
+        if reset:
+            self.reset()
         await super(Proxy, self).save(*args, **kwargs)

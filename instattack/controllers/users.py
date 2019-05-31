@@ -4,7 +4,7 @@ import tortoise
 
 from instattack.lib.utils import start_and_stop
 
-from instattack import settings
+from instattack.config import settings
 from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
 
@@ -47,6 +47,14 @@ class UserInterface(Interface):
             return await User.get(username=username)
         except tortoise.exceptions.DoesNotExist:
             raise UserDoesNotExist(username)
+
+    def get_user(self, username):
+        return self.loop.run_until_complete(self._get_user(self.app.pargs.username))
+
+    def user_authenticated(self, user):
+        if isinstance(user, str):
+            user = self.get_user(user)
+        return self.loop.run_until_complete(user.was_authenticated())
 
 
 class UserController(InstattackController, UserInterface):
@@ -117,7 +125,12 @@ class UserController(InstattackController, UserInterface):
 
         self.app.render(data, 'users.jinja2')
 
-    @username_command(help="Show User Base Passwords")
+    @ex(
+        help='Show User Base Passwords',
+        arguments=[
+            (['username'], {'help': 'Username'}),
+        ]
+    )
     def show_passwords(self):
 
         loop = asyncio.get_event_loop()
@@ -127,7 +140,12 @@ class UserController(InstattackController, UserInterface):
         data = {'title': 'Passwords', 'data': passwords}
         self.app.render(data, 'user_data.jinja2')
 
-    @username_command(help="Show User Base Alterations")
+    @ex(
+        help='Show User Base Alterations',
+        arguments=[
+            (['username'], {'help': 'Username'}),
+        ]
+    )
     def show_alterations(self):
 
         loop = asyncio.get_event_loop()
@@ -137,7 +155,12 @@ class UserController(InstattackController, UserInterface):
         data = {'title': 'Alterations', 'data': alterations}
         self.app.render(data, 'user_data.jinja2')
 
-    @username_command(help="Show User Numeric Alterations")
+    @ex(
+        help='Show User Numeric Alterations',
+        arguments=[
+            (['username'], {'help': 'Username'}),
+        ]
+    )
     def show_numerics(self):
 
         loop = asyncio.get_event_loop()
@@ -147,14 +170,47 @@ class UserController(InstattackController, UserInterface):
         data = {'title': 'User Numeric Alterations', 'data': numerics}
         self.app.render(data, 'user_data.jinja2')
 
-    @username_command(help="Show User Historical Password Atttempts")
+    @ex(
+        help='Show User Historical Password Atttempts',
+        arguments=[
+            (['username'], {'help': 'Username'}),
+        ]
+    )
     def show_attempts(self):
 
         loop = asyncio.get_event_loop()
         user = loop.run_until_complete(self._get_user(self.app.pargs.username))
         attempts = loop.run_until_complete(user.get_attempts())
 
-        data = {'title': 'User Attempts', 'data': attempts}
+        data = {
+            'title': 'User Attempts',
+            'data': [attempt.password for attempt in attempts]
+        }
+        self.app.render(data, 'user_data.jinja2')
+
+    @ex(
+        help='Generate Potential Password Atttempts',
+        arguments=[
+            (['username'], {'help': 'Username'}),
+            (['-l', '--limit'], {'default': None, 'type': int})
+        ]
+    )
+    def generate_attempts(self):
+
+        loop = asyncio.get_event_loop()
+        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        attempts = loop.run_until_complete(
+            user.get_new_attempts(loop, limit=self.app.pargs.limit)
+        )
+
+        if len(attempts) == 0:
+            self.failure('No Attempts to Generate')
+            return
+
+        data = {
+            'title': 'Potential User Attempts',
+            'data': attempts
+        }
         self.app.render(data, 'user_data.jinja2')
 
     @ex(help="Clear Historical Password Attempts", arguments=[

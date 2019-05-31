@@ -2,7 +2,7 @@ import asyncio
 from cement import ex
 from cement.utils.version import get_version_banner
 
-from instattack import settings
+from instattack.config import settings
 from instattack.app.version import get_version
 from instattack.app.attack.handlers import LoginHandler, ProxyHandler
 
@@ -17,22 +17,20 @@ VERSION_BANNER = f"{APP_NAME} {get_version()} {get_version_banner()}"
 
 class AttackInterface(UserInterface):
 
-    def _attack_handlers(self, user):
+    def _attack_handlers(self):
 
         start_event = asyncio.Event()
         auth_result_found = asyncio.Event()
 
         proxy_handler = ProxyHandler(
-            self.app.config['instattack'],
-            user=user,
+            self.loop,
             start_event=start_event,
             stop_event=auth_result_found,
         )
 
         password_handler = LoginHandler(
-            self.app.config['instattack'],
+            self.loop,
             proxy_handler,
-            user=user,
             start_event=start_event,
             stop_event=auth_result_found,
         )
@@ -84,18 +82,18 @@ class Base(InstattackController, AttackInterface):
         Set collect flag to default to False unless specified for login and
         attack modes.
         """
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        user = self.get_user(self.app.pargs.username)
+        setattr(self.loop, 'user', user)
 
-        proxy_handler, password_handler = self._attack_handlers(user)
+        proxy_handler, password_handler = self._attack_handlers()
 
-        results = loop.run_until_complete(asyncio.gather(
-            password_handler.attempt_single_login(loop, self.app.pargs.password),
-            proxy_handler.run(loop),
+        results = self.loop.run_until_complete(asyncio.gather(
+            password_handler.attempt_single_login(self.app.pargs.password),
+            proxy_handler.run(),
         ))
 
         # We might not need to stop proxy handler?
-        loop.run_until_complete(proxy_handler.stop(loop))
+        self.loop.run_until_complete(proxy_handler.stop())
         if results[0].authenticated_result:
             self.success(results[0].authenticated_result)
         else:
@@ -120,29 +118,34 @@ class Base(InstattackController, AttackInterface):
 
         Set limit for password limit for attack mode.
         """
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+        user = self.get_user(self.app.pargs.username)
+        setattr(self.loop, 'user', user)
 
         # TODO: Add Option for Continuing Attack Regardless
-        was_authenticated = loop.run_until_complete(user.was_authenticated())
+        was_authenticated = self.user_authenticated(user)
         if was_authenticated:
             self.failure('User was already authenticated.')
             return
 
-        proxy_handler, password_handler = self._attack_handlers(user)
+        proxy_handler, password_handler = self._attack_handlers()
 
         limit = None
         if not self.app.pargs.nolimit:
             limit = int(self.app.pargs.limit)
 
-        results = loop.run_until_complete(asyncio.gather(
-            password_handler.attack(loop, limit=limit),
-            proxy_handler.run(loop),
-        ))
-
-        # We might not need to stop proxy handler?
-        loop.run_until_complete(proxy_handler.stop(loop))
-        if results[0].authenticated_result:
-            self.success(results[0].authenticated_result)
+        try:
+            results = self.loop.run_until_complete(asyncio.gather(
+                password_handler.attack(limit=limit),
+                proxy_handler.run(),
+            ))
+        except Exception as e:
+            self.loop.run_until_complete(password_handler.finish_attack())
+            self.loop.run_until_complete(proxy_handler.stop())
+            raise e
         else:
-            self.failure('Not Authenticated')
+            # We might not need to stop proxy handler?
+            self.loop.run_until_complete(proxy_handler.stop())
+            if results[0].authenticated_result:
+                self.success(results[0].authenticated_result)
+            else:
+                self.failure('Not Authenticated')

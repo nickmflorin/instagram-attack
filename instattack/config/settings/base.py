@@ -2,6 +2,7 @@ from plumbum.path import LocalPath
 
 
 APP_NAME = 'instattack'
+APP_FORMAL_NAME = APP_NAME.title()
 
 
 def DIR_STR(path):

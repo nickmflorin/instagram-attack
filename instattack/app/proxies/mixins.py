@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
 
-from instattack import settings
+from instattack.config import settings
 from instattack.lib.utils import humanize_list
 
 from .evaluation import evaluate_for_pool, evaluate_from_pool
@@ -51,10 +51,13 @@ class EvaluationMixin(HumanizedMetrics):
 
         Instead, we put in an array to hold onto until it is ready to be used.
         """
-        config = config['proxies']['pool']['limits']
+        config = config['instattack']['proxies']['limits']
 
         if (self.active_errors.get('most_recent') and
-                self.active_errors['most_recent'] == 'too_many_requests'):
+                self.active_errors['most_recent'] in (
+                    'too_many_requests',
+                    'too_many_open_connections',
+        )):
             if self.time_since_used < config['too_many_requests_delay']:
                 return True
         return False

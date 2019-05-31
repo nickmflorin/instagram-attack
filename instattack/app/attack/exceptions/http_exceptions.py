@@ -7,7 +7,7 @@ from .utils import (
 __all__ = (
     'HttpResponseError',
     'HttpRequestError',
-    'HttpFileDescriptorError',
+    'HttpTooManyOpenConnections',
     'HttpSSLError',
     'HttpConnectionError',
     'HttpTimeoutError',
@@ -18,10 +18,14 @@ __all__ = (
     'HttpServerConnectionError',
     'InvalidResponseJson',
     'InstagramResultError',
+    'HttpProxyClientError',
 )
 
 
 class HttpException(InstattackError):
+
+    __message__ = None
+    __partial__ = False
 
     def __init__(self, exception):
         self.exception = exception
@@ -55,6 +59,7 @@ class HttpException(InstattackError):
             f"{self.__class__.__name__}({self.exception.__class__.__name__}):",
             self.request_method,
             ("[%s]", self.status_code),
+            self.__message__,
         ))
         if self.errno and self.errno != self.status_code:
             parts += ("Err No: %s", self.errno)
@@ -62,14 +67,6 @@ class HttpException(InstattackError):
 
 
 class HttpRequestError(HttpException):
-    pass
-
-
-# We shouldn't really need this unless we are running over large numbers
-# of requests... so keep for now.
-class HttpFileDescriptorError(HttpRequestError):
-    # We Don't Need to Worry About Type or Subtype Since This will be Inconclusive
-    # and Will Not be Stored on Proxy Model
     pass
 
 
@@ -95,6 +92,11 @@ class HttpProxyConnectionError(HttpConnectionError):
     __subtype__ = 'proxy_connection'
 
 
+class HttpProxyClientError(HttpConnectionError):
+    __subtype__ = 'proxy_client'
+    __type__ = 'client'
+
+
 class HttpServerConnectionError(HttpConnectionError):
     __subtype__ = 'server_connection'
 
@@ -110,11 +112,22 @@ class HttpProxyAuthError(HttpResponseError):
     [403]
 
     It is tough to see with aiohttp if this is being raised in raise_for_status()
-    or if it is being raised as a request error, but either way we will treat
-    as a request error for now.
+    or if it is being raised as a request error.
     """
     status_code = 403
     __subtype__ = 'proxy_auth'
+    __type__ = 'client'
+
+
+class HttpTooManyOpenConnections(HttpRequestError):
+    """
+    [503]
+    """
+    __message__ = 'Too many open connections'
+    __subtype__ = 'too_many_open_connections'
+    __partial__ = True
+
+    status_code = 503
 
 
 class HttpTooManyRequestsError(HttpResponseError):
@@ -122,11 +135,11 @@ class HttpTooManyRequestsError(HttpResponseError):
     [429]
 
     It is tough to see with aiohttp if this is being raised in raise_for_status()
-    or if it is being raised as a request error, but either way we will treat
-    as a request error for now.
+    or if it is being raised as a request error.
     """
     __subtype__ = 'too_many_requests'
-    __type__ = 'too_many_requests'
+    __partial__ = True
+
     status_code = 429
 
 

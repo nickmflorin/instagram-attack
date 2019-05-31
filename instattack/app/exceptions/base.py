@@ -14,18 +14,6 @@ class ArgumentError(InstattackError):
     pass
 
 
-class ConfigurationError(InstattackError):
-    def __init__(self, errors):
-        self.errors = errors
-
-    def __str__(self):
-        return "%s" % self.errors
-
-    def humanize_errors(self):
-        # TODO
-        pass
-
-
 class InternalTimeout(InstattackError):
     """
     Thrown when we have internal logic that might wait on a result over a series

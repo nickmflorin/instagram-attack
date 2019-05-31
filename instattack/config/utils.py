@@ -2,9 +2,9 @@ from argparse import ArgumentTypeError
 from cerberus import Validator
 from plumbum.path import LocalPath, Path
 
-from instattack import settings
-from instattack.app.exceptions import ConfigurationError
+from . import settings
 
+from .exceptions import ConfigurationError
 from .schema import Schema
 
 
