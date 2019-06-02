@@ -1,53 +1,4 @@
-def positive_int(required=True, **kwargs):
-    config = {
-        'required': required,
-        'type': 'integer',
-        'min': 0,
-    }
-    config.update(**kwargs)
-    return config
-
-
-def positive_float(required=True, **kwargs):
-    config = {
-        'required': required,
-        'type': 'float',
-        'min': 0.0,
-    }
-    config.update(**kwargs)
-    return config
-
-
-def boolean(required=True, **kwargs):
-    config = {
-        'required': required,
-        'type': 'boolean'
-    }
-    config.update(**kwargs)
-    return config
-
-
-def log_level(**kwargs):
-    to_level = lambda v: v.upper()  # noqa
-    config = {
-        'required': True,
-        'type': 'string',
-        # 'coerce': (str, to_level),
-    }
-    config.update(**kwargs)
-    return config
-
-
-def limit(required=False):
-    config = {
-        'required': required,
-        'type': 'dict',
-        'schema': {
-            'historical': positive_int(required=False, nullable=True),
-            'active': positive_int(required=False, nullable=True),
-        }
-    }
-    return config
+from .utils import limit, boolean, positive_int, positive_float
 
 
 LimitsSchema = {
@@ -91,6 +42,31 @@ LimitsSchema = {
     }
 }
 
+TimeoutSchema = {
+    'required': True,
+    'type': 'dict',
+    'schema': {
+        # TODO: Add validation rule that the default start amount must be greater
+        # than or equal to the increment.
+        'too_many_requests': {
+            'required': True,
+            'type': 'dict',
+            'schema': {
+                'increment': positive_int(max=60, default=10),
+                'start': positive_int(max=60, default=10),
+            }
+        },
+        'too_many_open_connections': {
+            'required': True,
+            'type': 'dict',
+            'schema': {
+                'increment': positive_int(max=60, default=10),
+                'start': positive_int(max=60, default=10),
+            }
+        },
+    }
+}
+
 
 PoolSchema = {
     'required': True,
@@ -98,7 +74,6 @@ PoolSchema = {
     'schema': {
         'collect': boolean(),
         'timeout': positive_int(max=25),
-        'save_method': {'oneof_regex': ['conclusively', 'iteratively']},
     }
 }
 
@@ -112,29 +87,70 @@ BrokerSchema = {
     },
 }
 
-
 ProxySchema = {
     'required': True,
     'type': 'dict',
     'schema': {
-        'pool': PoolSchema,
-        'broker': BrokerSchema,
-        'limits': LimitsSchema
+        'limits': LimitsSchema,
+        'timeouts': TimeoutSchema,
+        'save_method': {'oneof_regex': ['end', 'live']},
     }
 }
 
-AttackSchema = {
+PasswordsSchema = {
     'required': True,
     'type': 'dict',
     'schema': {
         'batch_size': positive_int(max=100),
-        'attempts': {
+        'generator': {
             'required': True,
             'type': 'dict',
             'schema': {
-                'batch_size': positive_int(max=100),
+                'numerics': {
+                    'required': True,
+                    'type': 'dict',
+                    'schema': {
+                        'before': boolean(default=False),
+                        'after': boolean(default=True),
+                        'birthday': {
+                            'required': True,
+                            'type': 'dict',
+                            'schema': {
+                                'provided': boolean(default=True),
+                                'all': boolean(default=False),
+                                # TODO: Make these required if `all` is set to True.
+                                # Also, want to validate as a valid year.
+                                'start_year': positive_int(nullable=True, required=False),
+                                'end_year': positive_int(nullable=True, required=False)
+                            }
+                        }
+                    }
+                },
+                'alterations': {
+                    'required': True,
+                    'type': 'dict',
+                    'schema': {
+                        'before': boolean(default=False),
+                        'after': boolean(default=True),
+                    }
+                },
+                # [x] TODO: This will still allow lists with strings or other
+                # non-integers in them.
+                'capitalize_at_indices': {
+                    'type': ['integer', 'list'],
+                    'schema': {'type': ['integer', 'list']}
+                }
             }
         }
+    }
+}
+
+AttemptsSchema = {
+    'required': True,
+    'type': 'dict',
+    'schema': {
+        'batch_size': positive_int(max=100),
+        'save_method': {'oneof_regex': ['end', 'live']},
     }
 }
 
@@ -153,65 +169,26 @@ LoggingSchema = {
     'type': dict,
     'schema': {
         'level': {
+            'required': True,
             'type': 'string',
-            'required': False,
-            'default': 'info',
-            'oneof_regex': ['debug', 'info', 'warning', 'error', 'critical']
+            'anyof': [
+                {'regex': 'debug'},
+                {'regex': 'info'},
+                {'regex': 'warning'},
+                {'regex': 'error'},
+                {'regex': 'critical'},
+            ]
         },
         'request_errors': boolean(default=False, required=False)
     }
 }
 
 Schema = {
-    'instattack': {
-        'required': True,
-        'type': 'dict',
-        'schema': {
-            'attack': {
-                'required': True,
-                'type': 'dict',
-                'schema': {
-                    'batch_size': positive_int(max=100),
-                    'attempts': {
-                        'required': True,
-                        'type': 'dict',
-                        'schema': {
-                            'batch_size': positive_int(max=100),
-                        }
-                    }
-                }
-            },
-            'proxies': {
-                'required': True,
-                'type': 'dict',
-                'schema': {
-                    'pool': PoolSchema,
-                    'broker': BrokerSchema,
-                    'limits': LimitsSchema
-                }
-            },
-            'connection': {
-                'required': True,
-                'type': 'dict',
-                'schema': {
-                    'limit_per_host': positive_int(max=100, default=10),
-                    'timeout': positive_int(max=20, default=10),
-                    'limit': positive_int(max=200, default=100),  # Might want to raise max higher.
-                }
-            },
-            # 'log.logging': {
-            #     'required': True,
-            #     'type': dict,
-            #     'schema': {
-            #         'level': {
-            #             'type': 'string',
-            #             'required': False,
-            #             'default': 'info',
-            #             'oneof_regex': ['debug', 'info', 'warning', 'error', 'critical']
-            #         },
-            #         'request_errors': boolean(default=False, required=False)
-            #     }
-            # }
-        }
-    }
+    'passwords': PasswordsSchema,
+    'attempts': AttemptsSchema,
+    'proxies': ProxySchema,
+    'pool': PoolSchema,
+    'broker': BrokerSchema,
+    'connection': ConnectionSchema,
+    # 'log.logging': LoggingSchema,
 }

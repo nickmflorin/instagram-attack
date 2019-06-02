@@ -3,7 +3,7 @@ import asyncio
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
-from instattack.config import settings
+from instattack.config import settings, config
 from instattack.app.exceptions import PoolNoProxyError
 
 from .models import InstagramResult
@@ -104,12 +104,12 @@ async def login(
         pass
 
     except HTTP_RESPONSE_ERRORS as e:
-        if loop.config['log.logging'].get('request_errors') is True:
+        if config['log.logging'].get('request_errors') is True:
             await log.error(e, extra={'proxy': proxy})
         await on_proxy_response_error(proxy, e)
 
     except HTTP_REQUEST_ERRORS as e:
-        if loop.config['log.logging'].get('request_errors') is True:
+        if config['log.logging'].get('request_errors') is True:
             await log.error(e, extra={'proxy': proxy})
         await on_proxy_request_error(proxy, e)
 
@@ -164,7 +164,7 @@ async def attempt(
     # so that we can cancel the leftover ones.
     stop_event = asyncio.Event()
 
-    batch_size = loop.config['instattack']['attack']['attempts']['batch_size']
+    batch_size = config['attempts']['batch_size']
     async for result, num_tries, current_tasks in limit_as_completed(gen, batch_size, stop_event):
         if result is not None:
             stop_event.set()

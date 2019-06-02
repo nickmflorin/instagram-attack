@@ -1,12 +1,11 @@
 import asyncio
-import collections
 import itertools
 
+from instattack.config import config
 from instattack.app.exceptions import PoolNoProxyError
 from instattack.app.mixins import LoggerMixin
 
 from .models import Proxy
-from .utils import stream_proxies
 
 
 """
@@ -19,6 +18,118 @@ the desired queues based on priority.
 """
 
 
+class ConfirmedQueue(asyncio.Queue, LoggerMixin):
+
+    __name__ = 'Confirmed Queue'
+
+    async def get(self):
+        """
+        Retrieves the oldest proxy from the queue but does not remove it from
+        the queue.  This allows multiple threads access to the same proxy.
+        """
+        if self.qsize() != 0:
+            return self.queue[0]
+
+    async def put(self, proxy):
+        """
+        [x] Note:
+        ---------
+        Because proxies in the ConfirmedQueue are used simultaneously by multiple
+        threads at the same time, and a proxy from the ConfirmedQueue is likely to
+        cause subsequent successful responses, it is likely that the proxy is
+        already in the ConfirmedQueue.
+        """
+        if proxy not in self.queue:
+            await super(ConfirmedQueue, self).put(proxy)
+
+    async def remove(self, proxy):
+        """
+        [x] Note:
+        ---------
+        Because proxies in the ConfirmedQueue are used simultaneously by multiple
+        threads at the same time (not the case for HeldQueue), it is possible
+        that the proxy is already removed from the ConfirmedQueue by the time another
+        thread determines it should be removed.
+        """
+        if proxy in self.queue:
+            self.queue.remove(proxy)
+
+
+class HeldQueue(asyncio.Queue, LoggerMixin):
+
+    __name__ = 'Held Queue'
+
+    def __init__(self, limit, confirmed, pool):
+        super(HeldQueue, self).__init__(limit)
+        self.confirmed = confirmed
+        self.pool = pool
+
+    async def get(self):
+        """
+        Retrieves the first oldest proxy from the queue that should not be held
+        anymore.
+        """
+        for proxy in self.queue:
+            if not proxy.hold():
+                # This prevents the simultaneous thread use.
+                self.queue.remove(proxy)
+                return proxy
+        return None
+
+    async def recycle(self):
+        """
+        Removes proxies from the hold that are no longer required to be in
+        hold.  If the proxy has been confirmed to have a successful request, the
+        proxy is put in good, otherwise, the proxy is put back in the pool.
+
+        [x] TODO:
+        --------
+        Do we want to use active or historical num_requests to determine
+        if the proxy should be put in the good queue or not?
+
+        ^^ Probably not the most important matter, because the errors that cause
+        a proxy to be put in hold usually mean that there was a success somewhere.
+        """
+        for proxy in self.queue:
+            if proxy.hold():
+                continue
+            if proxy.is_confirmed():
+                await self.confirmed.put(proxy)
+            else:
+                await self.pool.put(proxy, evaluate=False)
+
+    async def put(self, proxy):
+        """
+        [x] Note:
+        ---------
+        Proxies in Hold Queue are not used by multiple threads simultaneously,
+        so when one thread determines that the proxy should be put in the
+        Hold Queue, it should not already be in there.
+        """
+        log = self.create_logger('add')
+
+        if proxy not in self.queue:
+            await super(HeldQueue, self).put(proxy)
+        else:
+            # This is Not a Race Condition
+            await log.warning('Cannot Add Proxy to Hold Queue', extra={
+                'other': 'Proxy Already in Hold Queue',
+                'proxy': proxy,
+            })
+
+    async def remove(self, proxy):
+        log = self.create_logger('remove')
+
+        if proxy in self.queue:
+            self.queue.remove(proxy)
+        else:
+            # This is Not a Race Condition
+            await log.warning('Cannot Remove Proxy from Hold Queue', extra={
+                'other': 'Proxy Not in Hold Queue',
+                'proxy': proxy,
+            })
+
+
 class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
 
     __name__ = 'Proxy Pool'
@@ -29,16 +140,16 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         super(ProxyPool, self).__init__(-1)
 
         self.loop = loop
-        self.config = self.loop.config
 
         self.broker = broker
         self.start_event = start_event
-        self.timeout = self.config['instattack']['proxies']['pool']['timeout']
+        self.timeout = config['pool']['timeout']
 
-        self.lock = asyncio.Lock()
+        # self.good_lock = asyncio.Lock()
+        # self.hold_lock = asyncio.Lock()
 
-        self.hold = collections.deque()
-        self.good = collections.deque()
+        self.confirmed = ConfirmedQueue(-1)
+        self.held = HeldQueue(-1, self.confirmed, self)
 
         # Tuple Comparison Breaks in Python3 -  The entry count serves as a
         # tie-breaker so that two tasks with the same priority are returned in
@@ -61,21 +172,10 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         proxies = await Proxy.all()
 
         for proxy in proxies:
-            # We probably don't want to discard confirmed proxies because of
-            # evaluation, right?
-            proxy.reset()
-
-            if proxy.last_request_confirmed:
-                evaluation = proxy.evaluate_for_pool(self.config)
-                if not evaluation.passed:
-                    await log.warning('Confirmed Proxy Failed Validation... Still Putting In',
-                        extra={
-                            'other': str(evaluation)
-                        }
-                    )
-                self.good.append(proxy)
+            if proxy.is_confirmed():
+                await self.confirmed.put(proxy)
             else:
-                evaluation = proxy.evaluate_for_pool(self.config)
+                evaluation = proxy.evaluate_for_pool()
                 if evaluation.passed:
                     await self.put(proxy)
 
@@ -84,7 +184,7 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
             return
 
         await log.complete(f"Prepopulated {self.num_proxies} Proxies")
-        await log.complete(f"Prepopulated {len(self.good)} Good Proxies")
+        await log.complete(f"Prepopulated {self.confirmed.qsize()} Good Proxies")
 
     async def collect(self):
         """
@@ -109,7 +209,7 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         collect_limit = 10000  # Arbitrarily high for now.
 
         async for proxy, created in self.broker.collect(save=True):
-            evaluation = proxy.evaluate_for_pool(self.config)
+            evaluation = proxy.evaluate_for_pool()
             if evaluation.passed:
                 await self.put(proxy)
 
@@ -126,65 +226,102 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
 
     @property
     def num_proxies(self):
-        return self.qsize() + len(self.hold) + len(self.good)
+        return self.qsize() + self.held.qsize() + self.confirmed.qsize()
 
     async def on_proxy_request_error(self, proxy, err):
+        """
+        Callback for case when request notices a request error.
 
+        Always remove from Good Queue if present.
+
+        Only remove from Hold Queue if the error is not consistent with errors
+        that cause proxies to be put in Hold Queue.
+
+        If proxy was just in the Hold Queue before error occured, and the error
+        is the same, we should increment the timeout.
+
+        [x] TODO:
+        --------
+        For the case of the pool (and not the login handler) the callbacks for
+        request and response errors of the proxy are exactly the same, so these
+        two methods can be consolidated.
+        """
         proxy.num_requests += 1
+        proxy.num_active_requests += 1
         proxy.last_request_confirmed = False
 
-        if proxy in self.good:
-            async with self.lock:
-                print('Removing Proxy from Good: %s' % err.__class__.__name__)
-                self.good.remove(proxy)
+        if proxy in self.confirmed.queue:
+            await self.confirmed.remove(proxy)
 
         # For errors that are related to just holding the proxy temporarily and
         # then returning, do not include in historical errors.
-        if err.__partial__:
-            proxy.set_recent_error(err, historical=True, active=True)
-            async with self.lock:
-                # THIS IS NOT A RACE CONDITION
-                # SEE INFO IN check_and_put
-                if proxy not in self.hold:
-                    print('Holding Proxy: %s' % err.__class__.__name__)
-                    self.hold.append(proxy)
-        else:
-            proxy.add_error(err, historical=True, active=True, recent=True)
+        if not err.__hold__:
+            proxy.add_error(err)
 
-        await self.check_and_put(proxy)
+            # Proxy evaluated in put() method, will be discarded if not valid.
+            await self.put(proxy)
+
+        else:
+            # Increment timeout if we keep seeing the error.
+            if proxy.last_active_error and proxy.last_active_error.__hold__:
+                print(f'Warning: Incrementing Timeout Value due to {err.__subtype__}')
+                proxy.increment_timeout(err.__subtype__)
+
+            proxy.set_recent_error(err, historical=True, active=True)
+            await self.held.put(proxy)
 
     async def on_proxy_response_error(self, proxy, err):
+        """
+        Callback for case when request notices a response error.
 
-        if proxy in self.good:
-            async with self.lock:
-                print('Removing Proxy from Good: %s' % err.__class__.__name__)
-                self.good.remove(proxy)
+        Always remove from Good Queue if present.
+
+        Only remove from Hold Queue if the error is not consistent with errors
+        that cause proxies to be put in Hold Queue.
+
+        If proxy was just in the Hold Queue before error occured, and the error
+        is the same, we should increment the timeout.
+
+        [x] TODO:
+        --------
+        For the case of the pool (and not the login handler) the callbacks for
+        request and response errors of the proxy are exactly the same, so these
+        two methods can be consolidated.
+        """
+        proxy.num_requests += 1
+        proxy.num_active_requests += 1
+        proxy.last_request_confirmed = False
+
+        if proxy in self.confirmed.queue:
+            await self.confirmed.remove(proxy)
 
         # For errors that are related to just holding the proxy temporarily and
         # then returning, do not include in historical errors.
-        if err.__partial__:
-            proxy.set_recent_error(err, historical=True, active=True)
-            async with self.lock:
-                # THIS IS NOT A RACE CONDITION
-                # SEE INFO IN check_and_put
-                if proxy not in self.hold:
-                    print('Holding Proxy: %s' % err.__class__.__name__)
-                    self.hold.append(proxy)
+        if not err.__hold__:
+            proxy.add_error(err)
+
+            # Proxy evaluated in put() method, will be discarded if not valid.
+            await self.put(proxy)
+
         else:
-            proxy.add_error(err, historical=True, active=True, recent=True)
+            # Increment timeout if we keep seeing the error.
+            if proxy.last_active_error and proxy.last_active_error.__hold__:
+                print(f'Warning: Incrementing Timeout Value due to {err.__subtype__}')
+                proxy.increment_timeout(err.__subtype__)
 
-        proxy.num_requests += 1
-        proxy.last_request_confirmed = False
-
-        await self.check_and_put(proxy)
+            proxy.set_recent_error(err, historical=True, active=True)
+            await self.held.put(proxy)
 
     async def on_proxy_success(self, proxy):
-        proxy.num_requests += 1
-        proxy.last_request_confirmed = True
 
-        # Proxy will not be in hold since we pull out of hold, not copy out of
-        # hold.
-        self.good.append(proxy)
+        proxy.num_requests += 1
+        proxy.num_active_requests += 1
+        proxy.last_request_confirmed = True
+        proxy.confirmed = True
+
+        # There is a chance that the proxy is already in the good queue...
+        if proxy not in self.confirmed.queue:
+            await self.confirmed.put(proxy)
 
     async def get(self):
         """
@@ -204,6 +341,8 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         """
         log = self.create_logger('get')
 
+        await self.held.recycle()
+
         if self.num_proxies <= 20:
             # Log Running Low on Proxies Periodically if Change Noticed
             if not self.last_logged_qsize or self.last_logged_qsize != self.num_proxies:
@@ -214,48 +353,6 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
             return await asyncio.wait_for(self._get_proxy(), timeout=self.timeout)
         except asyncio.TimeoutError:
             raise PoolNoProxyError()
-
-    async def _recycle_hold(self):
-        """
-        Removes proxies from the hold that are no longer required to be in
-        hold.  If the proxy has been confirmed to have a successful request, the
-        proxy is put in good, otherwise, the proxy is put back in the pool.
-        """
-        for proxy in self.hold:
-            if not proxy.hold(self.config):
-                # Do we want to use active or historical?
-                if proxy._num_requests(active=True, success=True) != 0:
-                    if proxy in self.good:
-                        raise RuntimeError('Proxy Already in Good')
-
-                    async with self.lock:
-                        print('Recycling Proxy from Hold to Good')
-                        self.good.append(proxy)
-                        self.hold.remove(proxy)
-                else:
-                    # Do we need to use check_and_put() here?
-                    await self.put(proxy)
-
-    async def _get_from_hold(self):
-        for proxy in self.hold:
-            hold = proxy.hold(self.config)
-            if not hold:
-                self.hold.remove(proxy)
-                return proxy
-
-    async def _get_from_good(self):
-        """
-        [!] Note:
-        --------
-        We might be able to avoid Case 2 if we always recycle the hold
-        before Case 1, so that any available proxies that would be removed from
-        hold are put in good.
-
-        That might slow down things though since we would have to wait for the
-        completion of self._recycle_hold().
-        """
-        if len(self.good) != 0:
-            return self.good[0]
 
     async def _get_proxy(self):
         """
@@ -329,68 +426,38 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         before Case 1, so that any available proxies that would be removed from
         hold are put in good.
         """
-        loop = asyncio.get_event_loop()
-
         while True:
-            # Not 100% sure if we have to check
-            # >>> proxy.evaluate_for_use(self.config)
-            proxy = await self._get_from_good()
+            proxy = await self.confirmed.get()
             if proxy:
-                # log.info('Returning Proxy from Good Proxies : %s' % len(self.good))
-                loop.call_soon(self._recycle_hold())
                 return proxy
 
-            # Not 100% sure if we have to check
-            # >>> proxy.evaluate_for_use(self.config)
-            proxy = await self._get_from_hold()
+            proxy = await self.held.get()
             if proxy:
-                print('Returning Proxy from Held Proxies : %s' % len(self.hold))
-                loop.call_soon(self._recycle_hold())
                 return proxy
 
             ret = await super(ProxyPool, self).get()
             proxy = ret[1]
 
-            evaluation = proxy.evaluate_for_use(self.config)
-            if evaluation.passed:
-                return proxy
+            # Proxies that should be held should be put in the Hold Queue and
+            # only removed when they should not be held anymore.
+            if proxy.hold() or proxy.is_confirmed():
+                raise RuntimeError(
+                    "There should not be held or confirmed proxies in queue.")
 
-    async def check_and_put(self, proxy):
+            # Proxies are always evaluated before being put in queue so we do
+            # not have to reevaluate.
+            return proxy
+
+    async def put(self, proxy, evaluate=True):
         """
+        Adds proxy to the pool and keeps record in proxy_finder for accessing
+        at later point.
+
         [!] IMPORTANT:
         -------------
         Sometimes we might want to still add the proxy even if the
         quantitative metrics aren't perfect, but we know the proxy has
         successful requests -> Reason for Strict Parameter
-
-        [x] TODO:
-        --------
-        Another option to the .hold() methodology might be to have a confirmed
-        queue and an unconfirmed queue, where the priority for the confirmed
-        queue emphasizes only time since used, which is not a priority value of
-        the unconfirmed queue.
-        """
-        log = self.create_logger('get')
-
-        evaluation = proxy.evaluate_for_pool(self.config)
-        if evaluation.passed:
-            # We might not need this since we are putting proxies in hold up in
-            # the handlers?  Although we do not check if we need to hold proxy...
-            # This is why we are getting duplicates in the held proxies
-            # if proxy.hold(self.config):
-            #     async with self.lock:
-            #         print('Holding Proxy')
-            #         await log.debug('Putting Proxy in Hold')
-            #         self.hold.append(proxy)
-            # else:
-                await self.put(proxy)
-        else:
-            log.debug('Discarding Proxy')
-
-    async def put(self, proxy):
-        """
-        Adds proxy to the pool and keeps record in proxy_finder for accessing
-        at later point.
 
         [!] IMPORTANT:
         -------------
@@ -398,7 +465,11 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         same, so we have to use a counter to guarantee that no two tuples are
         the same and priority will be given to proxies placed first.
         """
+        if evaluate:
+            evaluation = proxy.evaluate_for_pool()
+            if not evaluation.passed:
+                return
+
         count = next(self.proxy_counter)
-        priority = proxy.priority(count, self.config)
+        priority = proxy.priority(count)
         await super(ProxyPool, self).put((priority, proxy))
-        return proxy

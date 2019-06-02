@@ -3,40 +3,46 @@ import asyncio
 import inspect
 import logging
 import pathlib
-import signal
 import tortoise
 import warnings
+import sys
 
 from cement import App, TestApp
 from cement.core.exc import CaughtSignal
 
-from instattack import config
-from instattack.config import settings
-from instattack.config.utils import validate_config_schema
+from instattack.config import config, settings
 
 from instattack.lib import logger
 from instattack.lib.utils import (
     spin_start_and_stop, get_app_stack_at, task_is_third_party,
-    cancel_remaining_tasks, start_and_stop, break_after, break_before,
-    sync_spin_start_and_stop)
+    cancel_remaining_tasks, start_and_stop, break_after, break_before)
 
 from .app.exceptions import InstattackError
 from .controllers.base import Base, UserController, ProxyController
 
+from .mixins import AppMixin
+
+
+def exception_hook(exc_type, exc_value, exc_traceback):
+    """
+    You can log all uncaught exceptions on the main thread by assigning a handler
+    to sys.excepthook.
+    """
+    log = logger.get_sync(__name__, subname='exception_hook')
+    try:
+        log.traceback(exc_type, exc_value, exc_traceback)
+    except BlockingIOError:
+        # Don't Clog Output with Unrelated Error
+        # This will still print traceback up until point where there is a
+        # blocking issue.
+        pass
+
+
+sys.excepthook = exception_hook
 
 warnings.simplefilter('ignore')
-SIGNALS = (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)
 
 _shutdown = False
-
-# You can log all uncaught exceptions on the main thread by assigning a handler
-# to sys.excepthook.
-# def exception_hook(exc_type, exc_value, exc_traceback):
-#     log = logger.get_sync(__name__)
-#     log.traceback(exc_type, exc_value, exc_traceback)
-
-
-# sys.excepthook = exception_hook
 
 
 def handle_exception(loop, context):
@@ -72,29 +78,10 @@ def handle_exception(loop, context):
         log.warning('Could Not Output Traceback due to Blocking IO')
 
     log.debug('Shutting Down in Exception Handler')
-    shutdown_preemptively(loop)
-
-
-def ensure_logger_enabled(app):
-    log = logger.get_sync(__name__, subname='ensure_logger_enabled')
-    if not logger._enabled:
-        log.warning('Logger Should be Enabled Before App Start')
-        logger.enable()
-
-
-@spin_start_and_stop('Setting Up Loop')
-def setup_loop(app):
-
-    loop = asyncio.get_event_loop()
-    setattr(loop, 'config', app.config)
-
-    loop.set_exception_handler(handle_exception)
-    for s in SIGNALS:
-        loop.add_signal_handler(s, shutdown_preemptively)
+    shutdown(loop)
 
 
 @break_before
-@break_after
 def setup(app):
     """
     [x] TODO:
@@ -102,23 +89,35 @@ def setup(app):
     Use spinner for overall setup and shutdown methods and use the spinner.write()
     method to notify of individual tasks in the methods.
     """
-    @spin_start_and_stop('Setting Up Directories')
-    async def setup_directories(loop):
-        # Remove __pycache__ Files
-        [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
-        [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
+    loop = asyncio.get_event_loop()
 
-        if not settings.USER_PATH.exists():
-            settings.USER_PATH.mkdir()
+    def setup_directories():
+        with start_and_stop('Setting Up Directories') as spinner:
 
-    @spin_start_and_stop('Setting Up DB')
-    async def setup_database(loop):
-        await tortoise.Tortoise.close_connections()
-        await tortoise.Tortoise.init(config=settings.DB_CONFIG)
-        await tortoise.Tortoise.generate_schemas()
+            spinner.write('Removing __pycache__ Files')
+            [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
+            [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
 
-    @spin_start_and_stop('Setting Up Logger')
-    async def setup_logger(loop):
+            if not settings.USER_PATH.exists():
+                spinner.write('Creating User Directory')
+                settings.USER_PATH.mkdir()
+            else:
+                spinner.write('✔ User Directory Already Exists')
+        pass
+
+    def setup_database():
+        with start_and_stop('Setting Up DB') as spinner:
+            spinner.write('Closing Previous DB Connections')
+            loop.run_until_complete(tortoise.Tortoise.close_connections())
+
+            spinner.write('Configuring Database')
+            loop.run_until_complete(tortoise.Tortoise.init(config=settings.DB_CONFIG))
+
+            spinner.write('Generating Schemas')
+            loop.run_until_complete(tortoise.Tortoise.generate_schemas())
+
+    @spin_start_and_stop('Disabling External Loggers')
+    def setup_logger():
         logger.disable_external_loggers(
             'proxybroker',
             'aiosqlite',
@@ -127,92 +126,18 @@ def setup(app):
             'tortoise'
         )
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(setup_logger(loop))
-    loop.run_until_complete(setup_directories(loop))
-    loop.run_until_complete(setup_database(loop))
-
-
-@spin_start_and_stop('Shutting Down DB')
-async def shutdown_database(loop):
-    await tortoise.Tortoise.close_connections()
-
-
-async def shutdown_outstanding_tasks(loop):
-    with start_and_stop('Shutting Down Outstanding Tasks') as spinner:
-
-        futures = await cancel_remaining_tasks()
-        if len(futures) != 0:
-            spinner.write(f'Cancelled {len(futures)} Leftover Tasks')
-            spinner.indent()
-            spinner.number()
-
-            log_tasks = futures[:20]
-            for i, task in enumerate(log_tasks):
-                if task_is_third_party(task):
-                    spinner.write(f'{task._coro.__name__} (Third Party)')
-                else:
-                    spinner.write(f'{task._coro.__name__}')
-
-            if len(futures) > 20:
-                spinner.write("...")
-        else:
-            spinner.write(f'No Leftover Tasks to Cancel')
-
-
-@spin_start_and_stop('Shutting Down Async Loggers')
-async def shutdown_async_loggers(loop):
-    """
-    [x] TODO:
-    --------
-    aiologger is still in Beta, and we continue to get warnings about the loggers
-    not being shut down properly with .flush() and .close().  We should probably
-    remove that dependency and just stick to the sync logger, since it does not
-    improve speed by a substantial amount.
-    """
-    # This will return empty list right now.
-    loggers = [
-        logging.getLogger(name)
-        for name in logging.root.manager.loggerDict
-    ]
-
-    for lgr in loggers:
-        if isinstance(lgr, logger.AsyncLogger):
-            await lgr.shutdown()
+    setup_logger()
+    setup_directories()
+    setup_database()
 
 
 @break_before
-@break_after
-def shutdown_preemptively(loop, signal=None):
+def shutdown(*args, **kwargs):
     """
     The shutdown method that is tied to the Application hooks only accepts
     `app` as an argument, and we need the shutdown method tied to the exception
-    hook to accept `loop` and `signal` - which necessitates the need for an
-    alternate shutdown method.
-    """
-    log = logger.get_sync(__name__, subname='shutdown_preemptively')
+    hook to accept `loop`.
 
-    global _shutdown
-    if _shutdown:
-        log.warning('Instattack Already Shutdown...')
-        return
-
-    _shutdown = True
-
-    if signal:
-        log.warning(f'Received exit signal {signal.name}...')
-
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(shutdown_async_loggers(loop))
-    loop.run_until_complete(shutdown_outstanding_tasks(loop))
-    loop.run_until_complete(shutdown_database(loop))
-    loop.close()
-
-
-@break_before
-@break_after
-def shutdown(app):
-    """
     Race conditions can sometimes lead to multiple shutdown attempts, which can
     raise errors due to the loop state.  We check the global _shutdown status to
     make sure we avoid this and log in case it is avoidable.
@@ -231,30 +156,112 @@ def shutdown(app):
 
     _shutdown = True
 
+    if isinstance(args[0], App):
+        loop = asyncio.get_event_loop()
+    else:
+        loop = args[0]
+
+    def shutdown_database(spinner):
+        spinner.write('Closing DB Connections')
+        loop.run_until_complete(tortoise.Tortoise.close_connections())
+
+    def shutdown_outstanding_tasks(spinner):
+        spinner.write('Shutting Down Outstanding Tasks')
+
+        futures = loop.run_until_complete(cancel_remaining_tasks())
+        if len(futures) != 0:
+
+            spinner.indent()
+            spinner.write(f'Cancelled {len(futures)} Leftover Tasks')
+            spinner.indent()
+            spinner.number()
+
+            log_tasks = futures[:20]
+            for i, task in enumerate(log_tasks):
+                if task_is_third_party(task):
+                    spinner.write(f'{task._coro.__name__} (Third Party)')
+                else:
+                    spinner.write(f'{task._coro.__name__}')
+
+            if len(futures) > 20:
+                spinner.write("...")
+        else:
+            spinner.indent()
+            spinner.write(f'No Leftover Tasks to Cancel')
+
+        spinner.unindent()
+
+    def shutdown_async_loggers(spinner):
+        """
+        [x] TODO:
+        --------
+        aiologger is still in Beta, and we continue to get warnings about the loggers
+        not being shut down properly with .flush() and .close().  We should probably
+        remove that dependency and just stick to the sync logger, since it does not
+        improve speed by a substantial amount.
+        """
+        spinner.write('Shutting Down Async Loggers')
+
+        # This will return empty list right now.
+        loggers = [
+            logging.getLogger(name)
+            for name in logging.root.manager.loggerDict
+        ]
+
+        for lgr in loggers:
+            if isinstance(lgr, logger.AsyncLogger):
+                loop.run_until_complete(lgr.shutdown())
+
+    with start_and_stop('Shutting Down') as spinner:
+        shutdown_async_loggers(spinner)
+        shutdown_outstanding_tasks(spinner)
+        shutdown_database(spinner)
+
+        spinner.write('Closing Loop')
+        loop.close()
+
+
+def ensure_logger_enabled(app):
+    log = logger.get_sync(__name__, subname='ensure_logger_enabled')
+    if not logger._enabled:
+        log.warning('Logger Should be Enabled Before App Start')
+        logger.enable()
+
+
+@spin_start_and_stop('Setting Up Loop')
+def setup_loop(app):
+
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(shutdown_async_loggers(loop))
-    loop.run_until_complete(shutdown_outstanding_tasks(loop))
-    loop.run_until_complete(shutdown_database(loop))
-    loop.close()
+    setattr(loop, 'config', app.config)
+
+    loop.set_exception_handler(handle_exception)
+    for s in config.__SIGNALS__:
+        loop.add_signal_handler(s, shutdown)
 
 
-class Instattack(App):
+class Instattack(App, AppMixin):
 
     class Meta:
-        label = settings.APP_NAME
+        label = 'instattack'
 
         # Default configuration dictionary.
+        config_section = config.__CONFIG_SECTION__
         config_dirs = config.__CONFIG_DIRS__
         config_files = config.__CONFIG_FILES__
-        config_section = config.__CONFIG_SECTION__
-
-        exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
-
-        # Laod Additional Framework Extensions
-        extensions = config.__EXTENSIONS__
-
         config_handler = config.__CONFIG_HANDLER__
         config_file_suffix = config.__CONFIG_FILE_SUFFIX__
+
+        config_defaults = {
+            'connection': {},
+            'passwords': {},
+            'attempts': {},
+            'pool': {},
+            'broker': {},
+            'proxies': {}
+        }
+
+        exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
+        extensions = config.__EXTENSIONS__
 
         # Have to Figure Out How to Tie in Cement Logger with Our Logger
         log_handler = config.__LOG_HANDLER__
@@ -275,16 +282,26 @@ class Instattack(App):
 
     def run(self):
         self.loop = asyncio.get_event_loop()
-        setattr(self.loop, 'config', self.config)
         super(Instattack, self).run()
 
-    @break_after
-    @sync_spin_start_and_stop('Validating Config')
+    @spin_start_and_stop('Validating Config')
     def validate_config(self):
+        """
+        Validates the configuration against a Cerberus schema.  If the configuration
+        is valid, it will be set to the global config object in its dictionary
+        form.
+        """
         super(Instattack, self).validate_config()
+        data = self.config.get_dict()
 
-        data = self.config.get_dict()['instattack']
-        validate_config_schema({'instattack': data})
+        # Log.logging keeps failing in validation for some unknown reason.
+        logging_config = data['log.logging']
+        del data['log.logging']
+
+        config.validate(data, set=False)
+
+        data['log.logging'] = logging_config
+        config.set(data)
 
 
 class InstattackTest(TestApp, Instattack):
@@ -293,17 +310,23 @@ class InstattackTest(TestApp, Instattack):
         label = settings.APP_NAME
 
         # Default configuration dictionary.
+        config_section = config.__CONFIG_SECTION__
         config_dirs = config.__CONFIG_DIRS__
         config_files = config.__CONFIG_FILES__
-        config_section = config.__CONFIG_SECTION__
-
-        exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
-
-        # Laod Additional Framework Extensions
-        extensions = config.__EXTENSIONS__
-
         config_handler = config.__CONFIG_HANDLER__
         config_file_suffix = config.__CONFIG_FILE_SUFFIX__
+
+        config_defaults = {
+            'connection': {},
+            'passwords': {},
+            'attempts': {},
+            'pool': {},
+            'broker': {},
+            'proxies': {}
+        }
+
+        exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
+        extensions = config.__EXTENSIONS__
 
         hooks = [
             ('pre_setup', setup),
@@ -317,33 +340,24 @@ class InstattackTest(TestApp, Instattack):
 
 def main():
     with Instattack() as app:
-
-        # Wait for App Config to be Set
-        setup_loop(app)
-
+        setup_loop(app)  # Wait for App Config to be Set
         try:
             app.run()
 
         except AssertionError as e:
-            print('AssertionError > %s' % e.args[0])
-            app.exit_code = 1
-
-            if app.debug is True:
-                import traceback
-                traceback.print_exc()
+            app.failure('AssertionError > %s' % e.args[0])
 
         except InstattackError as e:
-            print('InstattackError > %s' % settings.LoggingLevels.ERROR(str(e)))
-            app.exit_code = 1
+            app.failure(str(e))
 
-            if app.debug is True:
-                import traceback
-                traceback.print_exc()
-
-        except CaughtSignal as e:
-            # Default Cement signals are SIGINT and SIGTERM, exit 0 (non-error)
-            print('\n%s' % e)
-            app.exit_code = 0
+        # Default Cement signals are SIGINT and SIGTERM, exit 0 (non-error)
+        except (CaughtSignal, KeyboardInterrupt) as e:
+            # [x] TODO:
+            # Maybe remove signals from our loop handler to avoid unnecessary
+            # signal attachment - also might want to perform save tasks here.
+            app.failure('Caught Signal %s' % e, exit_code=0, tb=False)
+            # print('\n%s' % e)
+            # app.exit_code = 0
 
 
 if __name__ == '__main__':

@@ -111,76 +111,28 @@ CONTEXT_LINES = Lines(
     Lines(
         Line(
             Item(
-                value="proxy.humanized_error_count",
+                value="proxy.humanized_active_errors",
                 format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
-                    constant="Num. Errors",
+                    constant="Active Errors",
                     delimiter=":",
                     format=settings.RecordAttributes.LABEL_2,
                 ),
             ),
             indent=2,
         ),
-        Line(
-            Item(
-                value="proxy.humanized_errors",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                label=Label(
-                    constant="Errors",
-                    delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
-                ),
-            ),
-            indent=2,
-        ),
-        Line(
-            Item(
-                value="proxy.humanized_connection_error_count",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                label=Label(
-                    constant="Num. Connection Errors",
-                    delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
-                ),
-            ),
-            indent=2,
-        ),
-        Line(
-            Item(
-                value="proxy.humanized_response_error_count",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                label=Label(
-                    constant="Num. Response Errors",
-                    delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
-                ),
-            ),
-            indent=2,
-        ),
-        Line(
-            Item(
-                value="proxy.humanized_ssl_error_count",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                label=Label(
-                    constant="Num. SSL Errors",
-                    delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
-                ),
-            ),
-            indent=2,
-        ),
-        Line(
-            Item(
-                value="proxy.num_active_requests",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                label=Label(
-                    constant="# Active Requests",
-                    delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
-                ),
-            ),
-            indent=2,
-        ),
+        # Line(
+        #     Item(
+        #         value="proxy.humanized_connection_error_count",
+        #         format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+        #         label=Label(
+        #             constant="Num. Connection Errors",
+        #             delimiter=":",
+        #             format=settings.RecordAttributes.LABEL_2,
+        #         ),
+        #     ),
+        #     indent=2,
+        # ),
     ),
     lines_above=1,
     lines_below=1,

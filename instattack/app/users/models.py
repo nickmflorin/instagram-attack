@@ -9,7 +9,7 @@ from instattack.lib import logger
 from instattack.lib.utils import stream_raw_data, read_raw_data
 
 from instattack.app.exceptions import DirExists, UserFileExists
-from .generator import password_gen
+from instattack.app.passwords import password_gen
 
 
 class UserAttempt(Model):
@@ -40,6 +40,7 @@ class User(Model):
     # have it in the attempts, but just in case for now.
     password = fields.CharField(max_length=100, null=True)
     date_created = fields.DatetimeField(auto_now_add=True)
+    birthday = fields.DatetimeField(null=True)
 
     FILES = settings.FILES
 
@@ -236,8 +237,6 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        log = logger.get_sync(__name__, subname='get_new_attempts')
-
         current_attempts = await self.get_attempts()
         current_attempts = [attempt.password for attempt in current_attempts]
 
@@ -245,11 +244,6 @@ class User(Model):
         generator = password_gen(self, current_attempts, limit=limit)
         for item in generator():
             generated.append(item)
-
-        if len(generator.duplicates) != 0:
-            log.warning(
-                f'There Were {len(generator.duplicates)} '
-                'Duplicates Removed from Generated Passwords')
 
         return generated
 
@@ -259,16 +253,9 @@ class User(Model):
         eventually want to generate alterations and compare to existing
         password attempts.
         """
-        log = logger.get_async(__name__, subname='stream_new_attempts')
-
         current_attempts = await self.get_attempts()
         current_attempts = [attempt.password for attempt in current_attempts]
 
         generator = password_gen(self, current_attempts, limit=limit)
         for item in generator():
             yield item
-
-        if len(generator.duplicates) != 0:
-            await log.warning(
-                f'There Were {len(generator.duplicates)} '
-                'Duplicates Removed from Generated Passwords')

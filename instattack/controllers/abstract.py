@@ -1,21 +1,22 @@
 import asyncio
 from cement import Controller
+import sys
 
 from instattack.config import settings
-from instattack.lib.utils import break_before
 
 
-class InstattackController(Controller):
+class PrintableMixin(object):
 
-    @break_before
     def success(self, text):
-        print(settings.LoggingLevels.SUCCESS(text))
+        sys.stdout.write("%s\n" % settings.LoggingLevels.SUCCESS(text))
 
-    @break_before
     def failure(self, text):
-        print(settings.LoggingLevels.ERROR(text))
+        sys.stdout.write("%s\n" % settings.LoggingLevels.ERROR(text))
+
+
+class InstattackController(Controller, PrintableMixin):
 
     def _dispatch(self, *args, **kwargs):
-        self.loop = asyncio.get_event_loop()
-        setattr(self.loop, 'config', self.app.config)
+        loop = asyncio.get_event_loop()
+        setattr(self, 'loop', loop)
         super(InstattackController, self)._dispatch(*args, **kwargs)

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Any
 
+from instattack.config import config
 from instattack.lib.utils import humanize_list
 
 
@@ -41,9 +42,10 @@ class ProxyEvaluation:
                 self.add(reason)
 
 
-def evaluate_errors(proxy, config):
+def evaluate_errors(proxy):
 
-    errors = config = config['instattack']['proxies']['limits'].get('errors', {})
+    errors = config['proxies']['limits'].get('errors', {})
+    evaluations = ProxyEvaluation(reasons=[])
 
     max_params = [
         ('all', (), ),
@@ -53,8 +55,6 @@ def evaluate_errors(proxy, config):
         ('timeout', ('timeout', )),
         ('instagram', ('instagram', )),
     ]
-
-    evaluations = ProxyEvaluation(reasons=[])
 
     for param_set in max_params:
         config_errors = errors.get(param_set[0])
@@ -85,17 +85,16 @@ def evaluate_errors(proxy, config):
     return evaluations
 
 
-def evaluate_requests(proxy, config):
+def evaluate_requests(proxy):
 
-    requests = config = config['instattack']['proxies']['limits'].get('requests', {})
+    evaluations = ProxyEvaluation(reasons=[])
+    requests = config['proxies']['limits'].get('requests', {})
 
     max_params = [
         ('all', (None, ), ),
         ('success', (True, )),
         ('fail', (False, )),
     ]
-
-    evaluations = ProxyEvaluation(reasons=[])
 
     for param_set in max_params:
         config_requests = requests.get(param_set[0])
@@ -148,14 +147,13 @@ def evaluate_requests(proxy, config):
     return evaluations
 
 
-def evaluate_error_rate(proxy, config):
+def evaluate_error_rate(proxy):
 
     evaluations = ProxyEvaluation(reasons=[])
+    limits = config['proxies']['limits']
 
-    config = config['instattack']['proxies']['limits']
-
-    if config.get('error_rate'):
-        config_error_rate = config['error_rate']
+    if limits.get('error_rate'):
+        config_error_rate = limits['error_rate']
         horizon = config_error_rate.get('horizon')
 
         config_active_rate = config_error_rate.get('active')
@@ -184,19 +182,11 @@ def evaluate_error_rate(proxy, config):
     return evaluations
 
 
-def evaluate_for_pool(proxy, config):
+def evaluate(proxy):
     """
-    Determines if the proxy meets the provided standards.
-
-    [x] TODO:
-    --------
-    Audit the use of `strict` as a parameter and how we are generating these
-    evaluations, whether or not all the information they contain is necessary.
-
-    Right now, we haven't really figured out a better meaning for `strict`
-    other than the fact that it means the proxy will be removed/not put
-    in queue.  This is kind of pointless because we could also just not
-    include the `value`, but we might have better reasons for `strict` soon.
+    Determines if the proxy meets the provided standards to be put into the pool,
+    versus `evaluate_from_pool` which evaluates whether or not the proxy is
+    okay to use after it has been dequeud from the pool.
 
     [!] IMPORTANT:
     -------------
@@ -207,51 +197,55 @@ def evaluate_for_pool(proxy, config):
 
     evaluations = ProxyEvaluation(reasons=[])
 
-    request_eval = evaluate_requests(proxy, config)
-    errors_eval = evaluate_errors(proxy, config)
-    error_rate_eval = evaluate_error_rate(proxy, config)
+    request_eval = evaluate_requests(proxy)
+    errors_eval = evaluate_errors(proxy)
+    error_rate_eval = evaluate_error_rate(proxy)
 
     evaluations.merge(request_eval, errors_eval, error_rate_eval)
 
-    config = config['instattack']['proxies']['limits']
+    limits = config['proxies']['limits']
     evaluations = ProxyEvaluation(reasons=[])
 
     # Will Have to be Included in evaluate_from_pool When We Start Manually Calculating
-    if config.get('resp_time'):
-        if proxy.avg_resp_time > config['resp_time']:
+    if limits.get('resp_time'):
+        if proxy.avg_resp_time > limits['resp_time']:
             reason = AttributeEvaluation(
-                value=actual_hist_requests,
-                relative_value=config_hist_requests,
-                name="Avg. Response Time".title(),
+                value=proxy.avg_resp_time,
+                relative_value=limits['resp_time'],
+                name="Avg. Response Time",
             )
             evaluations.add(reason)
 
     return evaluations
 
 
-def evaluate_from_pool(proxy, config):
+# def evaluate_from_pool(proxy):
+#     """
+#     Determines if the proxy meets the provided standards to be used after it
+#     is dequed from the pool.
+#     """
+#     evaluations = ProxyEvaluation(reasons=[])
 
-    evaluations = ProxyEvaluation(reasons=[])
+#     request_eval = evaluate_requests(proxy)
+#     errors_eval = evaluate_errors(proxy)
+#     error_rate_eval = evaluate_error_rate(proxy)
 
-    request_eval = evaluate_requests(proxy, config)
-    errors_eval = evaluate_errors(proxy, config)
-    error_rate_eval = evaluate_error_rate(proxy, config)
+#     # [x] NOTE:
+#     # This is the same logic that we apply in the .hold() method of the proxy,
+#     # but this logic adds the evaluation reasons and outputs differently.
 
-    config = config['instattack']['proxies']['limits']
+#     # We do NOT want to increment the timeouts here, only to evaluate if they are
+#     # valid or not.
+#     for err in proxy.TIMEOUT_ERRORS:
+#         if proxy.last_active_error and proxy.last_active_error.__subtype__ == err:
+#             timeout = proxy.timeout(err)
+#             if proxy.time_since_used < timeout:
+#                 reason = AttributeEvaluation(
+#                     value=proxy.time_since_used,
+#                     relative_value=timeout,
+#                     name=f"Time Between {err} Errors",
+#                     comparison="<"
+#                 )
+#                 evaluations.add(reason)
 
-    if (proxy.active_errors.get('most_recent') and
-            proxy.active_errors['most_recent'] in (
-                'too_many_requests'
-                'too_many_open_connections',
-    )):
-        if proxy.time_since_used < config['too_many_requests_delay']:
-
-            reason = AttributeEvaluation(
-                value=proxy.time_since_used,
-                relative_value=config['too_many_requests_delay'],
-                name="Time Between 429 or 503 Requests".title(),
-                comparison="<"
-            )
-            evaluations.add(reason)
-
-    return evaluations
+#     return evaluations

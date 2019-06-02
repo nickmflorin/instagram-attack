@@ -1,16 +1,10 @@
+import asyncio
 from cement import ex
+import functools
 
 
 def command(help=None, arguments=[]):
     return ex(help=help, arguments=arguments)
-
-
-def username_command(help=None, arguments=None):
-    _arguments = [(['username'], {'help': 'Username'})]
-    arguments = arguments or []
-    _arguments.extend(arguments)
-
-    return command(help=help, arguments=arguments)
 
 
 def proxy_command(help=None, limit=None):
@@ -23,3 +17,43 @@ def proxy_command(help=None, limit=None):
         ))
 
     return command(help=help, arguments=arguments)
+
+
+def user_command(help=None):
+
+    def user_command_wrapper(func):
+
+        @functools.wraps(func)
+        def wrapped(instance, *args, **kwargs):
+            instance.loop = asyncio.get_event_loop()
+            new_args = (instance.app.pargs.username, ) + args
+            return func(instance, *new_args, **kwargs)
+
+        arguments = [
+            (['username'], {'help': 'Username'}),
+        ]
+
+        return ex(help=help, arguments=arguments)(wrapped)
+
+    return user_command_wrapper
+
+
+def existing_user_command(help=None):
+
+    def user_command_wrapper(func):
+
+        @functools.wraps(func)
+        def wrapped(instance, *args, **kwargs):
+            instance.loop = asyncio.get_event_loop()
+
+            user = instance.get_user()
+            new_args = (user, ) + args
+            return func(instance, *new_args, **kwargs)
+
+        arguments = [
+            (['username'], {'help': 'Username'}),
+        ]
+
+        return ex(help=help, arguments=arguments)(wrapped)
+
+    return user_command_wrapper

@@ -3,7 +3,8 @@ from __future__ import absolute_import
 import asyncio
 import aiohttp
 import aiojobs
-import concurrent.futures
+
+from instattack.config import config
 
 from instattack.lib.utils import (
     percentage, limit_as_completed, start_and_stop, break_before)
@@ -55,28 +56,21 @@ class Handler(LoggerMixin):
 
         self.loop = loop
         self.user = self.loop.user
-        self.config = self.loop.config
 
         self.start_event = start_event
         self.stop_event = stop_event
 
-    async def scheduler(self):
-        if not self._scheduler:
-            self._scheduler = await aiojobs.create_scheduler(
-                limit=self.SCHEDULER_LIMIT,
-                exception_handler=None
-            )
-        return self._scheduler
+        self.scheduler = self.loop.run_until_complete(aiojobs.create_scheduler(
+            limit=self.SCHEDULER_LIMIT,
+        ))
 
     async def schedule_task(self, coro):
-        scheduler = await self.scheduler()
-        await scheduler.spawn(coro)
+        await self.scheduler.spawn(coro)
 
     async def close_scheduler(self):
         log = self.create_logger('close_scheduler')
         await log.start('Closing Scheduler')
-        scheduler = await self.scheduler()
-        await scheduler.close()
+        await self.scheduler.close()
         await log.complete('Scheduler Closed')
 
 
@@ -118,7 +112,7 @@ class ProxyHandler(Handler):
         and collection to be more dynamic and adjust, and collection to trigger
         if we are running low on proxies.
         """
-        log = self.create_logger('start', ignore_config=True)
+        log = self.create_logger('start')
         await log.start(f'Starting {self.__name__}')
 
         try:
@@ -127,7 +121,7 @@ class ProxyHandler(Handler):
         except Exception as e:
             raise e
 
-        if self.config['instattack']['proxies']['pool']['collect']:
+        if config['pool']['collect']:
             # Pool will set start event when it starts collecting proxies.
             await self.pool.collect()
         else:
@@ -154,12 +148,10 @@ class LoginHandler(Handler):
 
         self.passwords = asyncio.Queue()
         self.lock = asyncio.Lock()
-        self.save_lock = asyncio.Lock()
-
-        self.save_coros = []
 
         # Temporary Try to See if Performance Affected
-        self.proxy_save_coros = {}
+        self.proxies_to_save = []
+        self.attempts_to_save = []
 
         self.num_completed = 0
         self.num_passwords = 0  # Index for the current password and attempts per password.
@@ -185,12 +177,18 @@ class LoginHandler(Handler):
         Figure out a way to guarantee that this always gets run even if we hit
         some type of error.
         """
-        with start_and_stop(f"Saving {len(self.save_coros)} Attempts"):
-            await asyncio.gather(*self.save_coros)
+        if config['attempts']['save_method'] == 'end':
+            with start_and_stop(f"Saving {len(self.attempts_to_save)} Attempts"):
+                tasks = [
+                    self.user.create_or_update_attempt(att[0], success=att[1])
+                    for att in self.attempts_to_save
+                ]
+                await asyncio.gather(*tasks)
 
-        if self.config['instattack']['proxies']['pool']['save_method'] == 'conclusively':
-            with start_and_stop(f"Saving {len(self.proxy_save_coros)} Proxies"):
-                await asyncio.gather(*(self.proxy_save_coros.values()))
+        if config['proxies']['save_method'] == 'end':
+            with start_and_stop(f"Saving {len(self.proxies_to_save)} Proxies"):
+                tasks = [proxy.save() for proxy in self.proxies_to_save]
+                await asyncio.gather(*tasks)
 
     async def prepopulate(self, limit=None):
         log = self.create_logger('prepopulate')
@@ -218,15 +216,15 @@ class LoginHandler(Handler):
             loop=loop,
             ssl=False,
             force_close=True,
-            limit=self.config['instattack']['connection']['limit'],
-            limit_per_host=self.config['instattack']['connection']['limit_per_host'],
+            limit=config['connection']['limit'],
+            limit_per_host=config['connection']['limit_per_host'],
             enable_cleanup_closed=True,
         )
 
     @property
     def timeout(self):
         return aiohttp.ClientTimeout(
-            total=self.config['instattack']['connection']['timeout']
+            total=config['connection']['timeout']
         )
 
     @property
@@ -255,12 +253,12 @@ class LoginHandler(Handler):
 
         await self.proxy_handler.pool.on_proxy_request_error(proxy, err)
 
-        if self.config['instattack']['proxies']['pool']['save_method'] == 'conclusively':
-            self.proxy_save_coros[proxy.id] = proxy.save(reset=True)
-        else:
-            # Don't want to reset the active parameters for this case because
-            # proxy might be used after it is saved.
+        if config['proxies']['save_method'] == 'live':
             await self.schedule_task(proxy.save())
+        else:
+            # Do we need to find and replace here?
+            if proxy not in self.proxies_to_save:
+                self.proxies_to_save.append(proxy)
 
     async def on_proxy_response_error(self, proxy, e):
         err = find_response_error(e)
@@ -269,21 +267,21 @@ class LoginHandler(Handler):
 
         await self.proxy_handler.pool.on_proxy_response_error(proxy, err)
 
-        if self.config['instattack']['proxies']['pool']['save_method'] == 'conclusively':
-            self.proxy_save_coros[proxy.id] = proxy.save(reset=True)
-        else:
-            # Don't want to reset the active parameters for this case because
-            # proxy might be used after it is saved.
+        if config['proxies']['save_method'] == 'live':
             await self.schedule_task(proxy.save())
+        else:
+            # Do we need to find and replace here?
+            if proxy not in self.proxies_to_save:
+                self.proxies_to_save.append(proxy)
 
     async def on_proxy_success(self, proxy):
         await self.proxy_handler.pool.on_proxy_success(proxy)
 
-        if self.config['instattack']['proxies']['pool']['save_method'] == 'conclusively':
-            self.proxy_save_coros[proxy.id] = proxy.save(reset=True)
+        if config['proxies']['save_method'] == 'conclusively':
+            # Do we need to find and replace here?
+            if proxy not in self.proxies_to_save:
+                self.proxies_to_save.append(proxy)
         else:
-            # Don't want to reset the active parameters for this case because
-            # proxy might be used after it is saved.
             await self.schedule_task(proxy.save())
 
     async def login_task_generator(self, loop, session):
@@ -345,7 +343,7 @@ class LoginHandler(Handler):
         ) as session:
             gen = self.login_task_generator(loop, session)
             async for (result, num_tries), current_attempts, current_tasks in limit_as_completed(
-                gen, self.config['instattack']['attack']['batch_size'], self.stop_event,
+                gen, config['passwords']['batch_size'], self.stop_event,
             ):
                 # Generator Does Not Yield None on No More Coroutines
                 if result.conclusive:
@@ -358,9 +356,15 @@ class LoginHandler(Handler):
                         'password': result.password,
                     })
 
-                    # Add Coroutine to Save/Update Attempt to Coroutine Array
-                    self.save_coros.append(self.user.create_or_update_attempt(
-                        result.password, success=result.authorized))
+                    if config['attempts']['save_method'] == 'live':
+                        task = self.user.create_or_update_attempt(
+                            result.password,
+                            success=result.authorized
+                        )
+                        await self.schedule_task(task)
+                    else:
+                        if (result.password, result.authorized) not in self.attempts_to_save:
+                            self.attempts_to_save.append((result.password, result.authorized))
 
                     # TODO: This Causes asyncio.CancelledError
                     # await cancel_remaining_tasks(futures=current_tasks)

@@ -25,7 +25,7 @@ __all__ = (
 class HttpException(InstattackError):
 
     __message__ = None
-    __partial__ = False
+    __hold__ = False
 
     def __init__(self, exception):
         self.exception = exception
@@ -125,7 +125,7 @@ class HttpTooManyOpenConnections(HttpRequestError):
     """
     __message__ = 'Too many open connections'
     __subtype__ = 'too_many_open_connections'
-    __partial__ = True
+    __hold__ = True
 
     status_code = 503
 
@@ -138,7 +138,7 @@ class HttpTooManyRequestsError(HttpResponseError):
     or if it is being raised as a request error.
     """
     __subtype__ = 'too_many_requests'
-    __partial__ = True
+    __hold__ = True
 
     status_code = 429
 

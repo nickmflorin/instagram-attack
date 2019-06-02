@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import decorator
 from functools import wraps
 import sys
 
@@ -19,13 +18,21 @@ class DisableLogger():
 
 @contextlib.contextmanager
 def start_and_stop(text, numbered=False):
-    with DisableLogger():
-        with yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered) as spinner:
-            try:
-                yield spinner
-            finally:
-                spinner.text = settings.Colors.GREEN(text)
-                spinner.ok(settings.Colors.GREEN("✔"))
+    """
+    Only for synchronous functions.  Getting to work for async coroutines requires
+    a decent amount of overhead (see yaspin.py).
+    """
+    logger.disable()
+    spinner = yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered)
+    try:
+        spinner.start()
+        yield spinner
+    finally:
+        spinner.text = settings.Colors.GREEN(text)
+        spinner.ok(settings.Colors.GREEN("✔"))
+
+        spinner.stop()
+        logger.enable()
 
 
 def break_before(fn):
@@ -66,38 +73,36 @@ def break_after(fn):
         return wrapper
 
 
-def sync_spin_start_and_stop(text, numbered=False):
-
-    @decorator.decorator
-    def decorate(func, *args, **kwargs):
-        logger.disable()
-
-        with yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered) as spinner:
-            value = func(*args, **kwargs)
-            spinner.text = settings.Colors.GREEN(text)
-            spinner.ok(settings.Colors.GREEN("✔"))
-            return value
-
-        logger.enable()
-
-    return decorate
-
-
 def spin_start_and_stop(text, numbered=False):
     """
-    By Default: Asynchronous
-
-    [x] TODO:
-    --------
-    Allow synchronous versions as well.
+    Only for synchronous functions.  Getting to work for async coroutines requires
+    a decent amount of overhead (see yaspin.py).
     """
-    @decorator.decorator
-    async def decorate(coro, *args, **kwargs):
-        logger.disable()
-        with yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered) as spinner:
-            await coro(*args, **kwargs)
+    def _spin_start_and_stop(fn):
+
+        if asyncio.iscoroutinefunction(fn):
+            raise NotImplementedError('Decorator only for synchronous methods.')
+
+        spinner = yaspin(
+            text=settings.Colors.GRAY(text),
+            color="red",
+            numbered=numbered
+        )
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            logger.disable()
+            spinner.start()
+
+            results = fn(*args, **kwargs)
+
             spinner.text = settings.Colors.GREEN(text)
             spinner.ok(settings.Colors.GREEN("✔"))
-        logger.enable()
 
-    return decorate
+            spinner.stop()
+            logger.enable()
+
+            return results
+        return wrapper
+
+    return _spin_start_and_stop

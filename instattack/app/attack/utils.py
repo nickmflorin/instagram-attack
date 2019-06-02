@@ -16,5 +16,6 @@ async def get_token(session):
     """
     async with session.get(settings.INSTAGRAM_URL) as response:
         text = await response.text()
-        token = re.search('(?<="csrf_token":")\w+', text).group(0)
-        return token, response.cookies
+        token = re.search(r'(?<="csrf_token":")\w+', text).group(0)
+
+    return token, response.cookies

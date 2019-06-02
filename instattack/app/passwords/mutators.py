@@ -1,9 +1,53 @@
 from itertools import product
 
-from .base import mutation_gen
+from instattack.config import settings, config
+
+from .utils import (
+    find_indices_with_char, mutate_char_at_index, flatten_replacements,
+    capitalize_at_indices, all_combinations)
 
 
-class char_gen(mutation_gen):
+class mutator(object):
+
+    def __init__(self, base):
+        self.base = base
+        self.Config = config['passwords']['generator']
+        self.generated = []
+
+    def __call__(self, *args):
+        yield from self.safe_yield(self.base_generator(*args))
+
+    def safe_yield(self, iterable):
+        for item in iterable:
+            if item not in self.generated:
+                self.generated.append(item)
+                yield item
+
+
+class case_mutator(mutator):
+
+    def base_generator(self):
+        """
+        TODO
+        ----
+        Add setting for the maximum length of the word to make the entire
+        thing uppercase.
+        """
+        yield self.base.lower()
+
+        # Move Threshold to Settings or Config
+        THRESHOLD = 3
+        if len(self.base) <= THRESHOLD:
+            yield self.base.upper()
+
+        for index_set in self.Config['capitalize_at_indices']:
+            if type(index_set) is int:
+                index_set = (index_set, )
+
+            yield capitalize_at_indices(self.base, *index_set)
+
+
+class char_mutator(mutator):
     """
     Terminology
     -----------
@@ -41,13 +85,9 @@ class char_gen(mutation_gen):
 
             >>> [(1, 'b'), (2, 'b'), (5, 'x')]
     """
-    COMMON_CHAR_REPLACEMENTS = {
-        'i': ('1', '!'),
-        'p': ('3', '@'),
-    }
 
-    def __call__(self):
-        for char, new_chars in self.COMMON_CHAR_REPLACEMENTS.items():
+    def base_generator(self):
+        for char, new_chars in settings.COMMON_CHAR_REPLACEMENTS.items():
             altered = self.replace_character(char, new_chars)
             for alteration in altered:
                 yield alteration
@@ -74,6 +114,22 @@ class char_gen(mutation_gen):
             alterations.append(altered)
         return alterations
 
+    def apply_mutations(self, mutations):
+        """
+        [!] IMPORTANT
+        -------------
+        This is okay for now, since we are not including alterations before the
+        word, but we cannot cut it off as self.base[1:-1] because of alterations
+        at the end of the word.  What we need to do is start segmenting the
+        altered passwords so we are aware which is the core part:
+
+        >>> ({'value': '!', 'type': 'alteration'}), ({'value': 'pw', 'type': 'base'})
+        """
+        word = self.base[1:]
+        for mut in mutations:
+            word = mutate_char_at_index(word, *mut)
+        return self.base[0] + word + self.base[-1]
+
     def get_mutations(self, char, new_chars):
         """
         Returns a series of mutations for a given word, character to replace
@@ -97,7 +153,7 @@ class char_gen(mutation_gen):
             # The result of flatten_replacements will be something along the lines
             # of:
             # >>> [[(1, 'b'), (1, 'x')], [(2, 'b'), (2, 'x')]]
-            flat = self.flatten_replacements(replacements)
+            flat = flatten_replacements(replacements)
             # Find each different set of replacements with the index for each
             # replacement in the set being unique.  The result will be something
             # along the lines of:
@@ -116,7 +172,7 @@ class char_gen(mutation_gen):
         >>> [(1, ('b', 'x')), (2, ('b', 'x')), (5, ('b', 'x'))]
         """
         mutations_by_index = []
-        indices = self.find_indices_with_char(char)
+        indices = find_indices_with_char(self.base, char)
         for ind in indices:
             mutations_by_index.append((ind, (new_chars)))
         return mutations_by_index
@@ -138,33 +194,73 @@ class char_gen(mutation_gen):
         >>> ]
         """
         replacements = self.get_replacements(char, new_chars)
-        return self.all_combinations(replacements)
+        return all_combinations(replacements)
 
-    def flatten_replacements(self, replacements):
-        """
-        Flattens a series replacements into an iterable of flattened replacement
-        tuples.
-        """
-        flattened = []
-        for replacement in replacements:
-            flattened.append(self.flatten_replacement(replacement))
-        return flattened
 
-    def flatten_replacement(self, replacement):
-        """
-        Flattens a replacement (ind, (char1, char2, ...)) into an iterable
-        where each iterable is defined by the replacement index with a different
-        char in the replacement characters.
+class additive_mutator(mutator):
+    """
+    TODO:
+    ----
+    We are currently using this for both numerics and general alpha numeric
+    alterations.
 
-        >>> [(ind, char1), (ind, char2), ...]
-        """
-        flat_replacement = []
-        for ch in replacement[1]:
-            flat_replacement.append((replacement[0], ch))
-        return flat_replacement
+    We are eventually going to want to try additional variations of the
+    numbers, which might require not using generators and combining numbers
+    with previous number sequences.
+    """
 
-    def apply_mutations(self, mutations):
-        word = self.base
-        for mut in mutations:
-            word = self.mutate_char_at_index(word, *mut)
-        return word
+    def __init__(self, *args, mode='alterations'):
+        super(additive_mutator, self).__init__(*args)
+        self.mode = mode
+
+    def base_generator(self, additive):
+        if self.Config[self.mode]['before']:
+            yield from self.alteration_before(additive)
+        if self.Config[self.mode]['after']:
+            yield from self.alteration_after(additive)
+
+    def after(self, value):
+        return "%s%s" % (self.base, value)
+
+    def before(self, value):
+        return "%s%s" % (value, self.base)
+
+    def alteration_before(self, value):
+        yield self.before(value)
+        if self.mode == 'alteration':
+
+            # This can lead to duplicates if alterations have special characters
+            alteration_mutator = character_mutator(value)
+            for altered in alteration_mutator():
+                yield self.before(altered)
+
+    def alteration_after(self, value):
+        yield self.after(value)
+        if self.mode == 'alteration':
+
+            # This can lead to duplicates if alterations have special characters
+            alteration_mutator = character_mutator(value)
+            for altered in alteration_mutator():
+                yield self.after(altered)
+
+
+class character_mutator(mutator):
+    """
+    Custom alterations that are not necessarily defined by values in the
+    alterations or common numbers text files.d
+    """
+    generators = [
+        case_mutator,
+        char_mutator,
+    ]
+
+    def base_generator(self):
+        """
+        Applies generators alone and in tandem with one another.
+        """
+        combos = all_combinations(self.generators)
+        for combo in combos:
+            for gen in combo:
+                initialized = gen(self.base)
+                for item in initialized():
+                    yield item

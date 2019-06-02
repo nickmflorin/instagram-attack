@@ -9,7 +9,8 @@ from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
 
 from .abstract import InstattackController
-from .utils import username_command
+from .prompts import BirthdayPrompt
+from .utils import user_command, existing_user_command
 
 
 class UserInterface(Interface):
@@ -28,15 +29,24 @@ class UserInterface(Interface):
         else:
             return user
 
-    async def _create_user(self, username):
+    async def _create_user(self, username, **kwargs):
         try:
-            return await User.create(username=username)
+            return await User.create(
+                username=username,
+                **kwargs
+            )
         except tortoise.exceptions.IntegrityError:
             raise UserExists(username)
 
-    async def _delete_user(self, username):
+    async def _edit_user(self, user, **kwargs):
+        for key, val in kwargs.items():
+            setattr(user, key, val)
+        await user.save()
+
+    async def _delete_user(self, username=None, user=None):
         try:
-            user = await User.get(username=username)
+            if not user:
+                user = await User.get(username=username)
         except tortoise.exceptions.DoesNotExist:
             raise UserDoesNotExist(username)
         else:
@@ -48,8 +58,20 @@ class UserInterface(Interface):
         except tortoise.exceptions.DoesNotExist:
             raise UserDoesNotExist(username)
 
-    def get_user(self, username):
+    def get_users(self):
+        return self.loop.run_until_complete(self._get_users())
+
+    def edit_user(self, user, **kwargs):
+        return self.loop.run_until_complete(self._edit_user(user, **kwargs))
+
+    def get_user(self):
         return self.loop.run_until_complete(self._get_user(self.app.pargs.username))
+
+    def create_user(self, username, **kwargs):
+        return self.loop.run_until_complete(self._create_user(username, **kwargs))
+
+    def delete_user(self, user=None, username=None):
+        return self.loop.run_until_complete(self._delete_user(user=user, username=username))
 
     def user_authenticated(self, user):
         if isinstance(user, str):
@@ -68,41 +90,58 @@ class UserController(InstattackController, UserInterface):
             UserInterface,
         ]
 
-    @username_command(help="Create a New User")
-    def create(self):
-        username = self.app.pargs.username
+    @ex(help='Display All Users')
+    def show(self):
+        data = {'users': []}
 
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._create_user(username))
-        attempts = loop.run_until_complete(user.get_attempts())
+        users = self.get_users()
+        for user in users:
+            data['users'].append(user.__dict__)
 
-        data = {'user': {
-            'id': user.id,
-            'username': user.username,
-            'num_attempts': len(attempts),
-            'date_created': user.date_created,
-            'num_passwords': len(user.get_passwords()),
-            'num_numerics': len(user.get_numerics()),
-            'num_alterations': len(user.get_alterations())
-        }}
-        self.app.render(data, 'user.jinja2')
+        self.app.render(data, 'users.jinja2')
 
-    @username_command(help="Delete a User")
-    def delete(self):
-        username = self.app.pargs.username
+    @user_command(help="Create a New User")
+    def create(self, username):
 
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self._delete_user(username))
+        prompt = BirthdayPrompt()
+        birthday = prompt.prompt()
 
-        self.success(f"User {username} Successfully Deleted")
+        with start_and_stop('Creating New User') as spinner:
+            self.create_user(username, birthday=birthday)
+            spinner.write('Successfully Created User %s' % username)
 
-    @username_command(help='Display Information for User')
-    def get(self):
-        username = self.app.pargs.username
+    @user_command(help="Create a New User")
+    def add(self, username):
+        """
+        Same thing as the .create() method, just for convenience and the fact that
+        I am always using both of them interchangeably.
+        """
+        with start_and_stop('Creating New User') as spinner:
+            self.create_user(username)
+            spinner.write('Successfully Created User %s' % username)
 
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(username))
+    @existing_user_command(help="Delete a User")
+    def delete(self, user):
+        with start_and_stop('Deleting User') as spinner:
+            self.delete_user(user=user)
+            spinner.write(f"User {user.username} Successfully Deleted")
+            spinner.finished_break()
 
+    @existing_user_command(help="Edit an Existing User")
+    def edit(self, user):
+        """
+        Right now, we only have the ability to edit the birthday.  There are
+        no other editable attributes on the user.
+        """
+        prompt = BirthdayPrompt()
+        birthday = prompt.prompt()
+
+        with start_and_stop('Editing User') as spinner:
+            self.edit_user(user, birthday=birthday)
+            spinner.write('Successfully Edited User %s' % user.username)
+
+    @existing_user_command(help="Display Information for User")
+    def get(self, user):
         data = {'user': {
             'id': user.id,
             'username': user.username,
@@ -114,74 +153,27 @@ class UserController(InstattackController, UserInterface):
         }}
         self.app.render(data, 'user.jinja2')
 
-    @ex(help='Display All Users')
-    def show(self):
-        data = {'users': []}
-
-        loop = asyncio.get_event_loop()
-        users = loop.run_until_complete(self._get_users(loop))
-        for user in users:
-            data['users'].append(user.__dict__)
-
-        self.app.render(data, 'users.jinja2')
-
-    @ex(
-        help='Show User Base Passwords',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ]
-    )
-    def show_passwords(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+    @existing_user_command(help="Show User Base Passwords")
+    def show_passwords(self, user):
         passwords = user.get_passwords()
-
         data = {'title': 'Passwords', 'data': passwords}
         self.app.render(data, 'user_data.jinja2')
 
-    @ex(
-        help='Show User Base Alterations',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ]
-    )
-    def show_alterations(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+    @existing_user_command(help="Show User Base Alterations")
+    def show_alterations(self, user):
         alterations = user.get_alterations()
-
         data = {'title': 'Alterations', 'data': alterations}
         self.app.render(data, 'user_data.jinja2')
 
-    @ex(
-        help='Show User Numeric Alterations',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ]
-    )
-    def show_numerics(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
+    @existing_user_command(help="Show User Numeric Alterations")
+    def show_numerics(self, user):
         numerics = user.get_numerics()
-
         data = {'title': 'User Numeric Alterations', 'data': numerics}
         self.app.render(data, 'user_data.jinja2')
 
-    @ex(
-        help='Show User Historical Password Atttempts',
-        arguments=[
-            (['username'], {'help': 'Username'}),
-        ]
-    )
-    def show_attempts(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-        attempts = loop.run_until_complete(user.get_attempts())
-
+    @existing_user_command(help="Show User Historical Password Atttempts")
+    def show_attempts(self, user):
+        attempts = self.loop.run_until_complete(user.get_attempts())
         data = {
             'title': 'User Attempts',
             'data': [attempt.password for attempt in attempts]
@@ -195,14 +187,11 @@ class UserController(InstattackController, UserInterface):
             (['-l', '--limit'], {'default': None, 'type': int})
         ]
     )
-    def generate_attempts(self):
-
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-        attempts = loop.run_until_complete(
-            user.get_new_attempts(loop, limit=self.app.pargs.limit)
+    @existing_user_command(help="Generate Potential Password Atttempts")
+    def generate_attempts(self, user):
+        attempts = self.loop.run_until_complete(
+            user.get_new_attempts(self.loop, limit=self.app.pargs.limit)
         )
-
         if len(attempts) == 0:
             self.failure('No Attempts to Generate')
             return
@@ -213,12 +202,10 @@ class UserController(InstattackController, UserInterface):
         }
         self.app.render(data, 'user_data.jinja2')
 
-    @ex(help="Clear Historical Password Attempts", arguments=[
-        (['username'], {'help': 'Username'}),
-    ])
-    def clear_attempts(self):
+    @existing_user_command(help="Clear Historical Password Attempts")
+    def clear_attempts(self, user):
 
-        async def _clear_attempts(loop, user, spinner):
+        async def _clear_attempts(spinner):
             spinner.write("> Gathering Attempts...")
             attempts = await user.get_attempts()
 
@@ -230,11 +217,8 @@ class UserController(InstattackController, UserInterface):
                 for attempt in attempts:
                     await attempt.delete()
 
-        loop = asyncio.get_event_loop()
-        user = loop.run_until_complete(self._get_user(self.app.pargs.username))
-
-        with start_and_stop(f"Clearing User {self.app.pargs.username} Attempts") as spinner:
-            loop.run_until_complete(_clear_attempts(loop, user, spinner))
+        with start_and_stop(f"Clearing User {user.username} Attempts") as spinner:
+            self.loop.run_until_complete(_clear_attempts(spinner))
 
     @ex(
         help='Clean User Directory for Active and Deleted Users',

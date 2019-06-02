@@ -40,111 +40,135 @@
 
 
 log.logging:
-    level: 'debug'  # Doesn't Currently Do Anything
+    level: 'debug'
     request_errors: false
 
 
-instattack:
+connection:
+    limit_per_host: 0
+    timeout: 10
+    limit: 200
 
-    connection:
-        limit_per_host: 0
-        timeout: 10
-        limit: 200
+# The higher the batch sizes, the less likely it is that we will have good
+# proxies available for each request, potentially having the opposite effect
+# of larger batch sizes by slowing down the process.
+# >>> passwords.batch_size = 10, attempts.batch_size = 10 -> 100 unique proxies
 
-    attack:
-        # The higher the batch sizes, the less likely it is that we will have good
-        # proxies available for each request, potentially having the opposite effect
-        # of larger batch sizes by slowing down the process.
-        # >>> attack.batch_size = 10, attempts.batch_size = 10 -> 100 unique proxies
+# Better performance with passwords.batch_size >> attempts.batch_size
+passwords:
+    # The number of concurrent passwords to try at the same time.
+    batch_size: 20
 
-        # Better performance with attack.batch_size >> attempts.batch_size
-        # The number of concurrent passwords to try at the same time.
-        batch_size: 8
+    generator:
+        # TODO: Add validation to make sure all elements of nested lists are
+        # integers.
+        capitalize_at_indices: [0, 1, [0, 1]]
 
-        attempts:
-            # The number of concurrent requests to make for each password.
-            batch_size: 5
+        alterations:
+            before: false
+            after: true
 
-    proxies:
-        pool:
-            # The maximum amount of time to wait for a proxy from the queue before failing.
-            timeout: 25
-            collect: False
-            save_method: 'iteratively'
+        numerics:
+            before: false
+            after: true
+            birthday:
+                provided: true
+                all: false
+                # TODO: Make required based on the value of `all`.
+                start_year: 1991
+                end_year: 2000
 
-        limits:
-            # The maximum response time in seconds. If proxy.avg_resp_time exceeds this
-            # value, proxy will be removed from the pool.
-            # TODO: Allow Historical & Current
-            resp_time: null
-            time_since_used: 5.0
 
-            # The amount of time to wait before using a proxy that raises a 429 too many
-            # requests error.
-            # Note this is also being used for too many open connections as well.
-            too_many_requests_delay: 10
+attempts:
+    # The number of concurrent requests to make for each password.
+    batch_size: 15
+    save_method: 'end'
 
-            # The maxmium number of allowed requests for each proxy per attack, before
-            # being removed from pool.  For LARGER attacks, this should probably be
-            # negated, since we do not want to discard good proxies.
-            requests:
-                all:
-                    historical: null
-                    active: null
-                success:
-                    historical: null
-                    active: null
-                fail:
-                    historical: null
-                    active: null
+pool:
+    # The maximum amount of time to wait for a proxy from the queue before failing.
+    timeout: 25
+    collect: False
 
-            # The maximum overall error rate for a proxy to be put into or used from
-            # the pool.
-            # TODO: Start Measuring Historical & Active
-            error_rate:
+ # Settings Here Only Matter if Collect = True
+# Do we want to add a limit to the broker collection?
+broker:
+    # The maximum number of concurrent checks of proxies
+    max_conn: 200
+
+    # The maximum number of attempts to check a proxy
+    # Note that the lower the value of max_tries, the faster the broker will return
+    # proxies, but they will not contain as much information to gauge their
+    # relative reliability and speed.
+    max_tries: 2
+
+    # Maximum amount of time to wait for broker to return a proxy before failing.
+    timeout: 5
+
+proxies:
+    save_method: 'end'
+
+    # The amount of time to wait before using a proxy that raises an error
+    # that does not indicate an invalid proxy.
+    timeouts:
+        too_many_requests:
+            increment: 5
+            start: 10
+        too_many_open_connections:
+            increment: 5
+            start: 5
+
+    limits:
+        # The maximum response time in seconds. If proxy.avg_resp_time exceeds this
+        # value, proxy will be removed from the pool.
+        # TODO: Allow Historical & Current
+        resp_time: null
+
+        # The maxmium number of allowed requests for each proxy per attack, before
+        # being removed from pool.  For LARGER attacks, this should probably be
+        # negated, since we do not want to discard good proxies.
+        requests:
+            all:
                 historical: null
                 active: null
-                # The minimum number of requests required before error rate is non-zero.
-                horizon: 5
+            success:
+                historical: null
+                active: null
+            fail:
+                historical: null
+                active: null
 
-            # The maximum number of allowed errors for a proxy before being
-            # removed from the pool or not included in pool to begin with.
-            errors:
-                # Right now, too_many_requests counts as a general error, so
-                # we probably do not want to limit the number of total errors.
-                # We need to treat too_many_requests as a warning.
-                # all:
-                #     historical: 2
-                #     active: 1
-                connection:
-                    historical: 1
-                    active: 1
-                response:
-                    historical: 1
-                    active: 1
-                instagram:
-                    historical: 1
-                    active: 1
-                ssl:
-                    historical: 1
-                    active: 1
-                timeout:
-                    # There seem to be a lot of proxies that do get confirmed results
-                    # but also have a lot of historical timeout errors.
-                    historical: 1
-                    active: 1
+        # The maximum overall error rate for a proxy to be put into or used from
+        # the pool.
+        # TODO: Start Measuring Historical & Active
+        error_rate:
+            historical: null
+            active: null
+            # The minimum number of requests required before error rate is non-zero.
+            horizon: 5
 
-        # Settings Here Only Matter if Collect = True
-        # Do we want to add a limit to the broker collection?
-        broker:
-            # The maximum number of concurrent checks of proxies
-            max_conn: 200
-
-            # The maximum number of attempts to check a proxy
-            # Note that the lower the value of max_tries, the faster the broker will return
-            # proxies, but they will not contain as much information to gauge their
-            # relative reliability and speed.
-            max_tries: 2
-
-            # Maximum amount of time to wait for broker to return a proxy before failing.
-            timeout: 5
+        # The maximum number of allowed errors for a proxy before being
+        # removed from the pool or not included in pool to begin with.
+        errors:
+            # Right now, too_many_requests counts as a general error, so
+            # we probably do not want to limit the number of total errors.
+            # We need to treat too_many_requests as a warning.
+            # all:
+            #     historical: 2
+            #     active: 1
+            connection:
+                historical: 10
+                active: 3
+            response:
+                historical: 5
+                active: 4
+            instagram:
+                historical: null
+                active: 5
+            ssl:
+                historical: null
+                active: null
+            timeout:
+                # There seem to be a lot of proxies that do get confirmed results
+                # but also have a lot of historical timeout errors.
+                historical: null
+                active: 4

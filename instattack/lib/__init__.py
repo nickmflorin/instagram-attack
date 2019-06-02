@@ -1,5 +1,5 @@
-from .yaspin import CustomYaspin
+from .yaspin import SyncYaspin
 
 
 def yaspin(*args, **kwargs):
-    return CustomYaspin(*args, **kwargs)
+    return SyncYaspin(*args, **kwargs)

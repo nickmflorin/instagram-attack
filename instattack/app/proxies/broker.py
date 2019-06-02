@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 from proxybroker import Broker
 
-from instattack.config import settings
+from instattack.config import settings, config
 from instattack.app.mixins import LoggerMixin
 
 from .models import Proxy
@@ -15,7 +15,6 @@ class ProxyBroker(Broker, LoggerMixin):
     def __init__(self, loop, limit=None):
 
         self.loop = loop
-        self.config = self.loop.config
 
         self._stopped = False
         self._started = False
@@ -23,15 +22,14 @@ class ProxyBroker(Broker, LoggerMixin):
         # ProxyBroker needs a numeric limit unfortunately... if we do not set it,
         # it will be arbitrarily high.
         # TODO: Tie this in with the limit for the pool in some way.
-        self.limit = int(limit or self.config['instattack']['proxies']['broker'].get(
-            'limit', 10000))
+        self.limit = int(limit or config['broker'].get('limit', 10000))
         self._proxies = asyncio.Queue()
 
         super(ProxyBroker, self).__init__(
             self._proxies,
-            max_tries=self.config['instattack']['proxies']['broker']['max_tries'],
-            max_conn=self.config['instattack']['proxies']['broker']['max_conn'],
-            timeout=self.config['instattack']['proxies']['broker']['timeout'],
+            max_tries=config['broker']['max_tries'],
+            max_conn=config['broker']['max_conn'],
+            timeout=config['broker']['timeout'],
             verify_ssl=False,
         )
 
