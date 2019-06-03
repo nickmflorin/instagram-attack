@@ -1,85 +1,18 @@
 import asyncio
-from cement import ex, Interface
-import tortoise
+from cement import ex
 
 from instattack.lib.utils import start_and_stop
 
 from instattack.config import settings
-from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
 
 from .abstract import InstattackController
 from .prompts import BirthdayPrompt
 from .utils import user_command, existing_user_command
+from .interfaces import UserInterface, AttackInterface
 
 
-class UserInterface(Interface):
-
-    class Meta:
-        interface = 'user'
-
-    async def _get_users(self, loop):
-        return await User.all()
-
-    async def _check_if_user_exists(self, username):
-        try:
-            user = await User.get(username=username)
-        except tortoise.exceptions.DoesNotExist:
-            return None
-        else:
-            return user
-
-    async def _create_user(self, username, **kwargs):
-        try:
-            return await User.create(
-                username=username,
-                **kwargs
-            )
-        except tortoise.exceptions.IntegrityError:
-            raise UserExists(username)
-
-    async def _edit_user(self, user, **kwargs):
-        for key, val in kwargs.items():
-            setattr(user, key, val)
-        await user.save()
-
-    async def _delete_user(self, username=None, user=None):
-        try:
-            if not user:
-                user = await User.get(username=username)
-        except tortoise.exceptions.DoesNotExist:
-            raise UserDoesNotExist(username)
-        else:
-            await user.delete()
-
-    async def _get_user(self, username):
-        try:
-            return await User.get(username=username)
-        except tortoise.exceptions.DoesNotExist:
-            raise UserDoesNotExist(username)
-
-    def get_users(self):
-        return self.loop.run_until_complete(self._get_users())
-
-    def edit_user(self, user, **kwargs):
-        return self.loop.run_until_complete(self._edit_user(user, **kwargs))
-
-    def get_user(self):
-        return self.loop.run_until_complete(self._get_user(self.app.pargs.username))
-
-    def create_user(self, username, **kwargs):
-        return self.loop.run_until_complete(self._create_user(username, **kwargs))
-
-    def delete_user(self, user=None, username=None):
-        return self.loop.run_until_complete(self._delete_user(user=user, username=username))
-
-    def user_authenticated(self, user):
-        if isinstance(user, str):
-            user = self.get_user(user)
-        return self.loop.run_until_complete(user.was_authenticated())
-
-
-class UserController(InstattackController, UserInterface):
+class UserController(InstattackController, UserInterface, AttackInterface):
 
     class Meta:
         label = 'users'
@@ -88,6 +21,7 @@ class UserController(InstattackController, UserInterface):
 
         interfaces = [
             UserInterface,
+            AttackInterface
         ]
 
     @ex(help='Display All Users')
@@ -205,20 +139,58 @@ class UserController(InstattackController, UserInterface):
     @existing_user_command(help="Clear Historical Password Attempts")
     def clear_attempts(self, user):
 
-        async def _clear_attempts(spinner):
-            spinner.write("> Gathering Attempts...")
-            attempts = await user.get_attempts()
+        async def _clear_attempts():
 
+            attempts = await user.get_attempts()
             if len(attempts) == 0:
-                spinner.write("> No Attempts to Clear")
+                self.failure("No Attempts to Clear")
 
             else:
-                spinner.write(f"> Clearing {len(attempts)} Attempts...")
-                for attempt in attempts:
-                    await attempt.delete()
+                proceed = self.proceed(f"About to Clear {len(attempts)} Attempts")
+                if proceed:
+                    with start_and_stop(
+                        f"Clearing {len(attempts)} Attempts "
+                        f" for User {user.username} Attempts"
+                    ):
+                        await user.clear_attempts(attempts=attempts)
 
-        with start_and_stop(f"Clearing User {user.username} Attempts") as spinner:
-            self.loop.run_until_complete(_clear_attempts(spinner))
+        self.loop.run_until_complete(_clear_attempts())
+
+    @existing_user_command(help="Single Login Attempt", arguments=[
+        (['password'], {'help': 'Password'}),
+    ])
+    def login(self, user):
+        """
+        [x] TODO:
+        --------
+        Set collect flag to default to False unless specified for login and
+        attack modes.
+        """
+        message = None
+        if self.authenticated_with_password(user, self.app.pargs.password):
+            message = "User Already Authenticated with Password %s" % self.app.pargs.password
+        elif self.authenticated(user):
+            message = "User Already Authenticated"
+        elif self.attempted(user, self.app.pargs.password):
+            message = "Password Already Attempted"
+
+        if message:
+            if not self.proceed(message):
+                return
+
+        proxy_handler, password_handler = self._attack_handlers()
+
+        results = self.loop.run_until_complete(asyncio.gather(
+            password_handler.attempt_single_login(self.app.pargs.password),
+            proxy_handler.run(),
+        ))
+
+        # We might not need to stop proxy handler?
+        self.loop.run_until_complete(proxy_handler.stop())
+        if results[0].authenticated_result:
+            self.success(results[0].authenticated_result)
+        else:
+            self.failure(results[0].results[0])
 
     @ex(
         help='Clean User Directory for Active and Deleted Users',

@@ -4,11 +4,12 @@ from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
 from instattack.config import settings, config
-from instattack.app.exceptions import PoolNoProxyError
+
+from instattack.app.exceptions import (
+    PoolNoProxyError, InstagramResultError, HTTP_RESPONSE_ERRORS,
+    HTTP_REQUEST_ERRORS)
 
 from .models import InstagramResult
-from .exceptions import (
-    InstagramResultError, HTTP_RESPONSE_ERRORS, HTTP_REQUEST_ERRORS)
 
 
 async def login(

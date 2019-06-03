@@ -94,6 +94,9 @@ ProxySchema = {
         'limits': LimitsSchema,
         'timeouts': TimeoutSchema,
         'save_method': {'oneof_regex': ['end', 'live']},
+        'countries': {
+            'type': ['string', 'list'],
+        }
     }
 }
 

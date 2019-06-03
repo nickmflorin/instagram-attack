@@ -1,5 +1,5 @@
 import asyncio
-from cement import Controller
+from cement import Controller, shell
 import sys
 
 from instattack.config import settings
@@ -13,8 +13,24 @@ class PrintableMixin(object):
     def failure(self, text):
         sys.stdout.write("%s\n" % settings.LoggingLevels.ERROR(text))
 
+    def breakline(self):
+        sys.stdout.write("\n")
+
 
 class InstattackController(Controller, PrintableMixin):
+
+    def proceed(self, message):
+
+        fmt = settings.Colors.BLACK.format(bold=True)
+        message = fmt(f"{message}") + ", (Press Enter to Continue)"
+
+        p = shell.Prompt(message, default="ENTER")
+        res = p.prompt()
+        self.breakline()
+
+        if res == 'ENTER':
+            return True
+        return False
 
     def _dispatch(self, *args, **kwargs):
         loop = asyncio.get_event_loop()

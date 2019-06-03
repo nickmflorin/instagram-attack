@@ -4,7 +4,7 @@ from itertools import chain
 import ssl
 
 from .utils import get_http_exception_status_code
-from .http_exceptions import *  # noqa
+from .http import *  # noqa
 
 
 EXCEPTION_STATUS_CODES = {

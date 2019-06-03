@@ -172,13 +172,31 @@ class User(Model):
         async for item in self.stream_data(settings.NUMERICS, limit=limit):
             yield item
 
-    async def was_authenticated(self, limit=None):
+    async def was_authenticated(self):
         try:
             await UserAttempt.get(user=self, success=True)
         except DoesNotExist:
             return False
         else:
             return True
+
+    async def was_authenticated_with_password(self, password):
+        try:
+            attempt = await UserAttempt.get(user=self, success=True)
+        except DoesNotExist:
+            return False
+        else:
+            if attempt.password == password:
+                return True
+            return False
+
+    async def clear_attempts(self, attempts=None):
+        attempts = attempts or await self.get_attempts()
+
+        tasks = []
+        for attempt in attempts:
+            tasks.append(attempt.delete())
+        await asyncio.gather(*tasks)
 
     async def get_attempts(self, limit=None):
         attempts = await UserAttempt.filter(user=self).all()

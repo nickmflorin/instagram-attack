@@ -1,8 +1,6 @@
 from bs4 import BeautifulSoup
 import requests
 
-from .models import Proxy
-
 
 def scrape_proxies(limit=None):
     """
@@ -30,10 +28,8 @@ def scrape_proxies(limit=None):
         else:
             # We only want HTTP proxies.
             if is_https == 'no':
-                proxy = Proxy(
-                    host=host,
-                    port=port,
-                    avg_resp_time=0.1,  # Guess for now?
-                )
-                proxies.append(proxy)
+                proxies.append({
+                    'host': host,
+                    'port': port
+                })
     return proxies

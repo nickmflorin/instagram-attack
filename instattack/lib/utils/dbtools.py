@@ -1,7 +1,6 @@
 import asyncio
 from tortoise.exceptions import IntegrityError
 
-from instattack.lib import logger
 from .asyncio import ensure_async_generator
 
 
@@ -13,48 +12,33 @@ async def create_save_tasks(iterable):
     return tasks
 
 
-async def save_iteratively(iterable,
-        ignore_duplicates=False, update_duplicates=False, log_duplicates=False):
+async def save_iteratively(iterable):
     """
     TODO
     ----
     Incorporate progress bar optionality.
     """
-    log = logger.get_async(__name__, subname='save_iteratively')
-
     created = []
     updated = []
     async for item in ensure_async_generator(iterable):
         try:
             await item.save()
         except IntegrityError as e:
-            if not ignore_duplicates and not update_duplicates:
-                raise e
-            elif update_duplicates:
-
-                # We will need to add this method for proxy collection.
-                if not hasattr(item, 'update_existing'):
-                    raise RuntimeError('Must specify update method on model.')
-
-                item = await item.update_existing()
-                updated.append(item)
-            elif log_duplicates:
-                # We might want to not log all of these warnings all the time.
-                log.warning(e)
+            # Temporarily Until We Figure Out How to Handle
+            raise e
+            # item = await item.update_existing()
+            # updated.append(item)
         else:
             created.append(item)
     return created, updated
 
 
-async def save_concurrently(iterable,
-        ignore_duplicates=False, update_duplicates=False, log_duplicates=False):
+async def save_concurrently(iterable):
     """
     TODO
     ----
     Incorporate progress bar optionality.
     """
-    log = logger.get_async(__name__, subname='save_concurrently')
-
     tasks = await create_save_tasks(iterable)
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -62,20 +46,19 @@ async def save_concurrently(iterable,
     updated = []
     for result in results:
         if isinstance(result, Exception):
-            if isinstance(result, IntegrityError):
-                if not ignore_duplicates and not update_duplicates:
-                    raise result
-                elif update_duplicates:
+            # Temporarily Until We Figure Out How to Handle
+            raise result
+            # if isinstance(result, IntegrityError):
+            #     if not ignore_duplicates and not update_duplicates:
+            #         raise result
+            #     elif update_duplicates:
 
-                    # We will need to add this method for proxy collection.
-                    if not hasattr(result, 'update_existing'):
-                        raise RuntimeError('Must specify update method on model.')
+            #         # We will need to add this method for proxy collection.
+            #         if not hasattr(result, 'update_existing'):
+            #             raise RuntimeError('Must specify update method on model.')
 
-                    result = await result.update_existing()
-                    updated.append(result)
-                elif log_duplicates:
-                    # We might want to not log all of these warnings all the time.
-                    log.warning(result)
+            #         result = await result.update_existing()
+            #         updated.append(result)
         else:
             created.append(result)
 

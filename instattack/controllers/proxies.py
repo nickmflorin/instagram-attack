@@ -1,13 +1,13 @@
 import asyncio
 from cement import Interface
+import tortoise
 
 from instattack.lib.utils import (
     save_iteratively, save_concurrently, start_and_stop)
 
 from instattack.app.mixins import LoggerMixin
 
-from instattack.app.proxies.models import Proxy
-from instattack.app.proxies.broker import ProxyBroker
+from instattack.app.proxies import Proxy, ProxyBroker
 from instattack.app.proxies.utils import scrape_proxies
 
 from .abstract import InstattackController
@@ -19,20 +19,56 @@ class ProxyInterface(Interface, LoggerMixin):
     class Meta:
         interface = 'user'
 
-    async def _save_proxies(self, iterable, update_duplicates=False, ignore_duplicates=True):
+    async def _save_proxies(self, iterable):
         if self.app.pargs.concurrent:
-            created, updated = await save_concurrently(
-                iterable,
-                ignore_duplicates=ignore_duplicates,
-                update_duplicates=update_duplicates,
-            )
+            created, updated = await save_concurrently(iterable)
         else:
-            created, updated = await save_iteratively(
-                iterable,
-                ignore_duplicates=ignore_duplicates,
-                update_duplicates=update_duplicates,
-            )
+            created, updated = await save_iteratively(iterable)
         return created, updated
+
+    def get_proxies(self):
+
+        async def _get_proxies():
+            return await Proxy.all()
+        return self.loop.run_until_complete(_get_proxies())
+
+    def get_duplicates(self):
+
+        duplicates = {}
+
+        proxies = self.get_proxies()
+        for proxy in proxies:
+            duplicates.setdefault((proxy.host, proxy.port), [])
+            duplicates[(proxy.host, proxy.port)].append(proxy)
+
+        to_remove = []
+        for key, val in duplicates.items():
+            if len(val) == 1:
+                to_remove.append(key)
+
+        for key in to_remove:
+            del duplicates[key]
+        return duplicates
+
+    def create_proxies(self, proxy_args):
+        """
+        Creates new proxies based on a list of proxy attributes which must at
+        a minimum contain `host`, `port` and `avg_resp_time`.
+
+        >>> [{'host': '0.0.0.0', 'port': 80, 'avg_resp_time': 1.0}, ...]
+        """
+        async def _create_proxies():
+            created = []
+            for proxy in proxy_args:
+                try:
+                    Proxy.get(host=proxy['host'], port=proxy['port'])
+                except tortoise.exceptions.DoesNotExist:
+                    proxy = await Proxy.create(**proxy)
+                    created.append(proxy)
+            return created
+
+        created = self.loop.run_until_complete(_create_proxies())
+        return created
 
 
 class ProxyController(InstattackController, ProxyInterface):
@@ -65,9 +101,7 @@ class ProxyController(InstattackController, ProxyInterface):
             to_save = loop.run_until_complete(_migrate_history())
 
             spinner.write(f"> Updating {len(to_save)} Proxies")
-            loop.run_until_complete(self._save_proxies(
-                to_save, update_duplicates=True, ignore_duplicates=True
-            ))
+            loop.run_until_complete(self._save_proxies(to_save))
 
     @proxy_command(help="Clear Historical Error and Request History of Proxies")
     def clear_history(self):
@@ -88,22 +122,69 @@ class ProxyController(InstattackController, ProxyInterface):
             to_save = loop.run_until_complete(_clear_history())
 
             spinner.write(f"> Updating {len(to_save)} Proxies")
-            loop.run_until_complete(self._save_proxies(
-                to_save, update_duplicates=True, ignore_duplicates=True
-            ))
+            loop.run_until_complete(self._save_proxies(to_save))
 
     @proxy_command(help="Scrape Proxies and Save to DB", limit=True)
     def scrape(self):
 
         with start_and_stop("Scraping Proxies") as spinner:
-            proxies = scrape_proxies(limit=self.limit)
+            proxy_args = scrape_proxies(limit=self.app.pargs.limit)
 
-            spinner.write(f"> Saving {len(proxies)} Scraped Proxies")
-            loop = asyncio.get_event_loop()
-            created, updated = loop.run_until_complete(self._save_proxies(proxies))
+            proxies = self.get_proxies()
+            spinner.write(f"Currently {len(proxies)} Proxies")
 
-            spinner.write(f"> Created {len(created)} Proxies")
-            spinner.write(f"> Updated {len(updated)} Proxies")
+            # Have to Set a Default Value for Average Response Time for Now
+            for proxy in proxy_args:
+                proxy['avg_resp_time'] = 0.1
+
+            spinner.write(f"Scraped {len(proxy_args)} Proxies")
+            created = self.create_proxies(proxy_args)
+
+            spinner.indent()
+            if len(created) != 0:
+                spinner.write(f"Created {len(created)} Proxies", success=True)
+
+                proxies = self.get_proxies()
+                spinner.write(f"Now {len(proxies)} Proxies")
+            else:
+                spinner.write('No New Proxies from Scrape', failure=True)
+
+    @proxy_command(help="Check for Duplicate Proxies in Database")
+    def check_duplicates(self):
+        """
+        We think that duplicates are coming about because the unique fields
+        on the proxy model were never created for the given table, and we would
+        have to migrate the current proxies to another temporary table to
+        fix the problem.
+        """
+        duplicates = self.get_duplicates()
+        if len(duplicates) == 0:
+            self.success('No Duplicate Proxies')
+        else:
+            self.failure(f"{len(duplicates)} Duplicate Proxies")
+
+    @proxy_command(help="Remove Duplicate Proxies in Database")
+    def remove_duplicates(self):
+        """
+        We think that duplicates are coming about because the unique fields
+        on the proxy model were never created for the given table, and we would
+        have to migrate the current proxies to another temporary table to
+        fix the problem.
+        """
+        duplicates = self.get_duplicates()
+        if len(duplicates) == 0:
+            self.failure('No Duplicates to Remove')
+            return
+
+        with start_and_stop(f"Deleting {len(duplicates)} Duplicates"):
+
+            tasks = []
+            for key, dups in duplicates.items():
+                chronologically_ordered = sorted(dups, key=lambda dup: dup.date_added)
+                for proxy in chronologically_ordered[1:]:
+                    tasks.append(proxy.delete())
+
+            self.loop.run_until_complete(asyncio.gather(*tasks))
 
     @proxy_command(help="Collect Proxies w/ ProxyBroker and Save to DB", limit=True)
     def collect(self):
@@ -129,7 +210,7 @@ class ProxyController(InstattackController, ProxyInterface):
             updated, created = loop.run_until_complete(_collect(broker))
 
             spinner.write(f"> Creating {len(created)} Proxies")
-            loop.run_until_complete(self._save_proxies(created, update_duplicates=True))
+            loop.run_until_complete(self._save_proxies(created))
 
             spinner.write(f"> Updating {len(updated)} Proxies")
-            loop.run_until_complete(self._save_proxies(updated, update_duplicates=True))
+            loop.run_until_complete(self._save_proxies(updated))

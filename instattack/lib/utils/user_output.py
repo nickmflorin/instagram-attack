@@ -3,16 +3,23 @@ import contextlib
 from functools import wraps
 import sys
 
-from instattack.lib import logger, yaspin
 from instattack.config import settings
+
+from .yaspin import SyncYaspin
+
+
+def yaspin(*args, **kwargs):
+    return SyncYaspin(*args, **kwargs)
 
 
 class DisableLogger():
 
     def __enter__(self):
+        from instattack.lib import logger
         logger.disable()
 
     def __exit__(self, a, b, c):
+        from instattack.lib import logger
         logger.enable()
 
 
@@ -22,6 +29,8 @@ def start_and_stop(text, numbered=False):
     Only for synchronous functions.  Getting to work for async coroutines requires
     a decent amount of overhead (see yaspin.py).
     """
+    from instattack.lib import logger
+
     logger.disable()
     spinner = yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered)
     try:
@@ -36,6 +45,7 @@ def start_and_stop(text, numbered=False):
 
 
 def break_before(fn):
+
     if asyncio.iscoroutinefunction(fn):
 
         @wraps(fn)
@@ -91,6 +101,8 @@ def spin_start_and_stop(text, numbered=False):
 
         @wraps(fn)
         def wrapper(*args, **kwargs):
+            from instattack.lib import logger
+
             logger.disable()
             spinner.start()
 

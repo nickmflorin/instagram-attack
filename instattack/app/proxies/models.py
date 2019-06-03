@@ -106,15 +106,14 @@ class Proxy(Model, HumanizedMetrics):
 
     @property
     def priority_values(self):
-        err_rate = config['proxies']['limits'].get('error_rate', {})
-        horizon = err_rate.get('horizon')
-
         # We do not need the confirmed fields since they already are factored
         # in based on the separate queues.
         PROXY_PRIORITY_VALUES = (
+            (-1, self.num_active_successful_requests),
+            (1, self.active_error_rate),
             (-1, self.num_successful_requests),
+            (1, self.historical_error_rate),
             (1, self.avg_resp_time),
-            (1, self._error_rate(active=False, horizon=horizon)),
         )
 
         return [
@@ -133,6 +132,21 @@ class Proxy(Model, HumanizedMetrics):
     def increment_timeout(self, err):
         increment = self._timeout_increments[err]
         self._timeouts[err] += increment
+
+    def note_success(self):
+        self.num_requests += 1
+        self.num_active_requests += 1
+        self.num_successful_requests += 1
+        self.num_active_successful_requests += 1
+        self.last_request_confirmed = True
+        self.confirmed = True
+
+    def note_failure(self):
+        self.num_requests += 1
+        self.num_active_requests += 1
+        self.num_failed_requests += 1
+        self.num_active_failed_requests += 1
+        self.last_request_confirmed = False
 
     def set_recent_error(self, exc, historical=True, active=False):
         # For active errors, since we are not saving those to DB, we store the
@@ -165,19 +179,29 @@ class Proxy(Model, HumanizedMetrics):
                 historical=True,
             )
 
-    def _error_rate(self, active=False, horizon=5):
+    @property
+    def error_rate_horizon(self):
+        err_rate = config['proxies']['limits'].get('error_rate', {})
+        return err_rate.get('horizon')
+
+    @property
+    def active_error_rate(self):
         """
         Counts the error_rate as 0.0 until there are a sufficient number of
         requests.
-
-        [x] TODO:
-        --------
-        Figure out how to not require the configuration to be reloaded for these
-        property parameters.
         """
-        if self._num_requests(active=active) >= horizon:
-            return (float(self._num_requests(active=active, success=False)) /
-                self._num_requests(active=active))
+        if self.num_active_requests >= self.error_rate_horizon:
+            return float(self.num_active_failed_requests) / float(self.num_active_requests)
+        return 0.0
+
+    @property
+    def historical_error_rate(self):
+        """
+        Counts the error_rate as 0.0 until there are a sufficient number of
+        requests.
+        """
+        if self.num_requests >= self.error_rate_horizon:
+            return float(self.num_failed_requests) / float(self.num_requests)
         return 0.0
 
     def _num_active_errors(self, *args):
@@ -252,33 +276,6 @@ class Proxy(Model, HumanizedMetrics):
         that it is okay or not okay for the pool.
         """
         return evaluate(self)
-
-    def is_confirmed(self):
-        """
-        Evaluates whether or not the proxy should be prioritized by putting in
-        the Good Queue that allows simultaneous use.
-
-        [x] TODO:
-        --------
-        Use a more general confirmed field that pertains to any request ever
-        being confirmed, and optionally base this logic off of that.
-        """
-        log = logger.get_sync(__name__, subname='confirmed')
-
-        if self.last_request_confirmed:
-            # We probably don't want to discard confirmed proxies because of
-            # evaluation, right?  Do we even need to evaluate here?
-            evaluation = self.evaluate()
-            if not evaluation.passed:
-                log.warning(
-                    'Confirmed Proxy Failed Validation... '
-                    'Still Putting In Good Queue',
-                    extra={
-                        'other': str(evaluation)
-                    }
-                )
-            return True
-        return False
 
     def hold(self):
         """

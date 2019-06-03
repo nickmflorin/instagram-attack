@@ -1,13 +1,13 @@
 from datetime import datetime
 import logging
 
-from instattack.lib.artsylogger import (
+from artsylogger import (
     Item, Line, Lines, Header, Label, LineIndex)
 from instattack.config import settings
 
 
 def get_record_message(record):
-    from instattack.app.attack.exceptions.utils import get_http_exception_message
+    from instattack.app.exceptions.utils import get_http_exception_message
     if isinstance(record.msg, Exception):
         return get_http_exception_message(record.msg)
     return record.msg

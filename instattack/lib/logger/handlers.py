@@ -1,6 +1,6 @@
 from .filters import TypeFilter
 from .handler import AsyncHandler, SyncHandler, SimpleSyncHandler, SimpleAsyncHandler
-from .log_formats import (
+from .formats import (
     SIMPLE_FORMATTER, LOG_FORMAT_STRING, BARE_FORMAT_STRING, SIMPLE_FORMAT_STRING)
 
 

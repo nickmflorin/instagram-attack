@@ -57,7 +57,7 @@ connection:
 # Better performance with passwords.batch_size >> attempts.batch_size
 passwords:
     # The number of concurrent passwords to try at the same time.
-    batch_size: 20
+    batch_size: 10
 
     generator:
         # TODO: Add validation to make sure all elements of nested lists are
@@ -81,7 +81,7 @@ passwords:
 
 attempts:
     # The number of concurrent requests to make for each password.
-    batch_size: 15
+    batch_size: 5
     save_method: 'end'
 
 pool:
@@ -106,13 +106,14 @@ broker:
 
 proxies:
     save_method: 'end'
+    countries: ['US']
 
     # The amount of time to wait before using a proxy that raises an error
     # that does not indicate an invalid proxy.
     timeouts:
         too_many_requests:
-            increment: 5
-            start: 10
+            increment: 10
+            start: 20
         too_many_open_connections:
             increment: 5
             start: 5

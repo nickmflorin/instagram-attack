@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import asyncio
-import inspect
 import logging
 import pathlib
 import tortoise
@@ -14,8 +13,8 @@ from instattack.config import config, settings
 
 from instattack.lib import logger
 from instattack.lib.utils import (
-    spin_start_and_stop, get_app_stack_at, task_is_third_party,
-    cancel_remaining_tasks, start_and_stop, break_after, break_before)
+    spin_start_and_stop, task_is_third_party,
+    cancel_remaining_tasks, start_and_stop, break_before)
 
 from .app.exceptions import InstattackError
 from .controllers.base import Base, UserController, ProxyController
@@ -58,12 +57,6 @@ def handle_exception(loop, context):
     log = logger.get_sync('handle_exception', sync=True)
     log.debug('Handling Exception')
 
-    # Unfortunately, the step will only work for exceptions that are caught
-    # at the immediate next stack.  It might make more sense to take the step
-    # out.
-    stack = inspect.stack()
-    frame = get_app_stack_at(stack, step=1)
-
     # The only benefit including the frame has is that the filename
     # will not be in the logger, it will be in the last place before the
     # logger and this statement.
@@ -72,7 +65,6 @@ def handle_exception(loop, context):
             context['exception'].__class__,
             context['exception'],
             context['exception'].__traceback__,
-            extra={'frame': frame}
         )
     except BlockingIOError:
         log.warning('Could Not Output Traceback due to Blocking IO')
@@ -83,30 +75,31 @@ def handle_exception(loop, context):
 
 @break_before
 def setup(app):
-    """
-    [x] TODO:
-    --------
-    Use spinner for overall setup and shutdown methods and use the spinner.write()
-    method to notify of individual tasks in the methods.
-    """
+
     loop = asyncio.get_event_loop()
 
-    def setup_directories():
-        with start_and_stop('Setting Up Directories') as spinner:
+    def setup_directories(spinner):
+        spinner.write('Setting Up Directories')
+
+        with spinner.block():
 
             spinner.write('Removing __pycache__ Files')
             [p.unlink() for p in pathlib.Path(settings.APP_DIR).rglob('*.py[co]')]
             [p.rmdir() for p in pathlib.Path(settings.APP_DIR).rglob('__pycache__')]
 
             if not settings.USER_PATH.exists():
+                spinner.write('User Directory Does Not Exist', failure=True)
                 spinner.write('Creating User Directory')
                 settings.USER_PATH.mkdir()
             else:
-                spinner.write('✔ User Directory Already Exists')
+                spinner.write('User Directory Already Exists', success=True)
+
         pass
 
-    def setup_database():
-        with start_and_stop('Setting Up DB') as spinner:
+    def setup_database(spinner):
+        spinner.write('Setting Up DB')
+
+        with spinner.block():
             spinner.write('Closing Previous DB Connections')
             loop.run_until_complete(tortoise.Tortoise.close_connections())
 
@@ -116,8 +109,9 @@ def setup(app):
             spinner.write('Generating Schemas')
             loop.run_until_complete(tortoise.Tortoise.generate_schemas())
 
-    @spin_start_and_stop('Disabling External Loggers')
-    def setup_logger():
+    def setup_logger(spinner):
+
+        spinner.write('Disabling External Loggers')
         logger.disable_external_loggers(
             'proxybroker',
             'aiosqlite',
@@ -126,9 +120,10 @@ def setup(app):
             'tortoise'
         )
 
-    setup_logger()
-    setup_directories()
-    setup_database()
+    with start_and_stop('Preparing') as spinner:
+        setup_logger(spinner)
+        setup_directories(spinner)
+        setup_database(spinner)
 
 
 @break_before
@@ -141,11 +136,6 @@ def shutdown(*args, **kwargs):
     Race conditions can sometimes lead to multiple shutdown attempts, which can
     raise errors due to the loop state.  We check the global _shutdown status to
     make sure we avoid this and log in case it is avoidable.
-
-    [x] TODO:
-    --------
-    Use spinner for overall setup and shutdown methods and use the spinner.write()
-    method to notify of individual tasks in the methods.
     """
     log = logger.get_sync(__name__, subname='shutdown')
 
@@ -171,25 +161,22 @@ def shutdown(*args, **kwargs):
         futures = loop.run_until_complete(cancel_remaining_tasks())
         if len(futures) != 0:
 
-            spinner.indent()
-            spinner.write(f'Cancelled {len(futures)} Leftover Tasks')
-            spinner.indent()
-            spinner.number()
+            with spinner.block():
+                spinner.write(f'Cancelled {len(futures)} Leftover Tasks')
+                spinner.number()
 
-            log_tasks = futures[:20]
-            for i, task in enumerate(log_tasks):
-                if task_is_third_party(task):
-                    spinner.write(f'{task._coro.__name__} (Third Party)')
-                else:
-                    spinner.write(f'{task._coro.__name__}')
+                with spinner.block():
+                    log_tasks = futures[:20]
+                    for i, task in enumerate(log_tasks):
+                        if task_is_third_party(task):
+                            spinner.write(f'{task._coro.__name__} (Third Party)')
+                        else:
+                            spinner.write(f'{task._coro.__name__}')
 
-            if len(futures) > 20:
-                spinner.write("...")
+                    if len(futures) > 20:
+                        spinner.write("...")
         else:
-            spinner.indent()
             spinner.write(f'No Leftover Tasks to Cancel')
-
-        spinner.unindent()
 
     def shutdown_async_loggers(spinner):
         """
@@ -222,7 +209,13 @@ def shutdown(*args, **kwargs):
 
 
 def ensure_logger_enabled(app):
-    log = logger.get_sync(__name__, subname='ensure_logger_enabled')
+
+    log = logger.get_sync(__name__)
+    if not logger._enabled:
+        log.warning('Logger Should be Enabled Before App Start')
+        logger.enable()
+
+    log = logger.get_async(__name__)
     if not logger._enabled:
         log.warning('Logger Should be Enabled Before App Start')
         logger.enable()
@@ -240,7 +233,12 @@ def setup_loop(app):
 
 
 class Instattack(App, AppMixin):
-
+    """
+    [x] TODO:
+    --------
+    Figure out if there is a seamless/easy way to tie in the cement log handler
+    with our logging system.
+    """
     class Meta:
         label = 'instattack'
 
@@ -263,7 +261,6 @@ class Instattack(App, AppMixin):
         exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
         extensions = config.__EXTENSIONS__
 
-        # Have to Figure Out How to Tie in Cement Logger with Our Logger
         log_handler = config.__LOG_HANDLER__
         output_handler = config.__OUTPUT_HANDLER__
 
@@ -273,7 +270,6 @@ class Instattack(App, AppMixin):
             ('post_run', shutdown),
         ]
 
-        # Register Handlers
         handlers = [
             Base,
             UserController,
@@ -339,6 +335,15 @@ class InstattackTest(TestApp, Instattack):
 
 
 def main():
+    """
+    Default Cement signals are SIGINT and SIGTERM, exit 0 (non-error)
+
+    [x] TODO:
+    --------
+    Maybe remove signals from our loop handler to avoid unnecessary
+    signal attachment - also might want to perform save tasks here, where
+    signal casues failure.
+    """
     with Instattack() as app:
         setup_loop(app)  # Wait for App Config to be Set
         try:
@@ -350,15 +355,14 @@ def main():
         except InstattackError as e:
             app.failure(str(e))
 
-        # Default Cement signals are SIGINT and SIGTERM, exit 0 (non-error)
         except (CaughtSignal, KeyboardInterrupt) as e:
-            # [x] TODO:
-            # Maybe remove signals from our loop handler to avoid unnecessary
-            # signal attachment - also might want to perform save tasks here.
             app.failure('Caught Signal %s' % e, exit_code=0, tb=False)
             # print('\n%s' % e)
             # app.exit_code = 0
 
 
 if __name__ == '__main__':
+    from instattack.config import settings
+    print(settings.Colors)
+    sys.exit()
     main()

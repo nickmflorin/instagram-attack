@@ -1,11 +1,13 @@
 import asyncio
 from collections import Counter
+import contextlib
 import sys
 
 from yaspin.core import Yaspin
 from yaspin.helpers import to_unicode
 
 from instattack.config import settings
+from .terminal import cursor
 
 
 class CustomYaspin(Yaspin):
@@ -29,6 +31,13 @@ class CustomYaspin(Yaspin):
     >>> (Cursor Position)
     """
 
+    INDENT_COLORS = {
+        1: settings.Colors.GRAY,
+        2: settings.Colors.MED_GRAY,
+        3: settings.Colors.LIGHT_GRAY,
+    }
+    DEFAULT_INDEX_COLOR = settings.Colors.LIGHT_GRAY
+
     def __init__(self, numbered=False, *args, **kwargs):
         super(CustomYaspin, self).__init__(*args, **kwargs)
         self.current_indent = 1
@@ -37,29 +46,26 @@ class CustomYaspin(Yaspin):
         self.current_line = 1
         self.lines = 0
 
-    def finished_break(self):
-        self._move_down()
-
-    def _move_up(self):
-        self.current_line -= 1
-        sys.stdout.write("\033[F")
-
-    def _move_down(self):
-        self.current_line += 1
-        sys.stdout.write("\n")
-
     def move_up(self, nlines):
-        for i in range(nlines):
-            self._move_up()
+        cursor.move_up(nlines=nlines)
+        self.current_line -= nlines
 
     def move_down(self, nlines):
-        for i in range(nlines):
-            self._move_down()
+        cursor.move_down(nlines=nlines)
+        self.current_line += nlines
 
     def start(self):
         self.current_line += 1
         self.lines += 1
         super(CustomYaspin, self).start()
+
+    @contextlib.contextmanager
+    def block(self):
+        try:
+            self.indent()
+            yield
+        finally:
+            self.unindent()
 
     def indent(self):
         self.current_indent += 1
@@ -91,8 +97,7 @@ class CustomYaspin(Yaspin):
         if self.current_indent != 1:
             padding_before = "  "
 
-        pointer = padding_before + (" " * self.current_indent) + (">" * self.current_indent)
-        return settings.Colors.ALT_GRAY(pointer)
+        return padding_before + (" " * self.current_indent) + ">"
 
     @property
     def index(self):
@@ -102,22 +107,24 @@ class CustomYaspin(Yaspin):
             index_string = "[%s]" % index
             return settings.Colors.GRAY(index_string)
 
-    def indented_message(self, text):
-        indent_colors = {
-            1: settings.Colors.BLACK,
-            2: settings.Colors.MED_GRAY,
-            3: settings.Colors.LIGHT_GRAY,
-        }
-        color = indent_colors.get(self.current_indent, settings.Colors.LIGHT_GRAY)
-        return color(text)
+    def get_write_message(self, text, failure=False, success=False):
+        color = self.INDENT_COLORS.get(
+            self.current_indent,
+            self.DEFAULT_INDEX_COLOR
+        )
 
-    def get_write_message(self, text):
-        parts = [
-            self.pointer,
-            self.index,
-            self.indented_message(text),
-        ]
-        parts = [pt for pt in parts if pt is not None]
+        text = color(text)
+        if failure:
+            text = "%s %s" % (settings.Colors.GRAY("✘"), text)
+        elif success:
+            text = "%s %s" % (settings.Colors.GRAY("✔"), text)
+
+        pointer = color(self.pointer)
+
+        parts = [pointer, text]
+        if self.index:
+            parts = [pointer, self.index, text]
+
         message = " ".join(parts)
         message = to_unicode(message)
         return "{0}".format(message)
@@ -140,14 +147,14 @@ class SyncYaspin(CustomYaspin):
             # Add Break After Spinner by Not Going Down lines - 1
             self.move_down(self.lines)
 
-    def write(self, text, indent=False):
+    def write(self, text, indent=False, failure=False, success=False):
         """
         Write text in the terminal without breaking the spinner.
         """
         self.lines += 1
         if indent:
             self.indent()
-        message = self.get_write_message(text)
+        message = self.get_write_message(text, failure=failure, success=success)
 
         with self._stdout_lock:
             self.move_down(self.lines - 1)
@@ -181,4 +188,4 @@ class AsyncYaspin(CustomYaspin):
                 self.indent()
 
             message = self.get_write_message(text, break_after=break_after)
-            sys.stdout.write("{0}\n".format(message))
+            sys.stdout.write("{0}".format(message))
