@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import pathlib
+import progressbar
 import tortoise
 import warnings
 import sys
@@ -290,13 +291,16 @@ class Instattack(App, AppMixin):
         super(Instattack, self).validate_config()
         data = self.config.get_dict()
 
+        # Validation Not Working Properly Right Now
+        print('Warning: Not Validating Schema')
+
         # Log.logging keeps failing in validation for some unknown reason.
-        logging_config = data['log.logging']
-        del data['log.logging']
+        # logging_config = data['log.logging']
+        # del data['log.logging']
 
-        config.validate(data, set=False)
+        # config.validate(data, set=False)
 
-        data['log.logging'] = logging_config
+        # data['log.logging'] = logging_config
         config.set(data)
 
 

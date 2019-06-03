@@ -8,8 +8,11 @@ from instattack.lib.utils import (
 from instattack.app.mixins import LoggerMixin
 
 from instattack.app.models import Proxy
+
 from instattack.app.proxies import ProxyBroker
 from instattack.app.proxies.utils import scrape_proxies
+
+from instattack.app.handlers import TrainHandler
 
 from .abstract import InstattackController
 from .utils import proxy_command
@@ -124,6 +127,14 @@ class ProxyController(InstattackController, ProxyInterface):
 
             spinner.write(f"> Updating {len(to_save)} Proxies")
             loop.run_until_complete(self._save_proxies(to_save))
+
+    @proxy_command(help="Scrape Proxies and Save to DB", limit=True)
+    def train(self):
+        train = TrainHandler(self.loop)
+
+        # Right now there are no results
+        result = self.loop.run_until_complete(train.train(limit=self.app.pargs.limit))
+        print(result)
 
     @proxy_command(help="Scrape Proxies and Save to DB", limit=True)
     def scrape(self):

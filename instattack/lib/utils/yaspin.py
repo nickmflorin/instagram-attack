@@ -88,8 +88,9 @@ class CustomYaspin(Yaspin):
         sys.stdout.write("\r")
         self._clear_line()
 
-        if sys.stdout.isatty():
-            self._show_cursor()
+        # Conflicts with Progress Bar IO Wrapping
+        # if sys.stdout.isatty():
+        #     self._show_cursor()
 
     @property
     def pointer(self):

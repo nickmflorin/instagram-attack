@@ -45,7 +45,7 @@ class client:
         )
 
     @classmethod
-    def test_post(cls, session, proxy):
+    def train_post(cls, session, proxy):
 
         data = {
             'test_field_1': 'test_value_1',

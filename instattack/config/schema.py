@@ -93,9 +93,17 @@ ProxySchema = {
     'schema': {
         'limits': LimitsSchema,
         'timeouts': TimeoutSchema,
-        'save_method': {'oneof_regex': ['end', 'live']},
-        'countries': {
-            'type': ['string', 'list'],
+        'save_method': {
+            'required': True,
+            'type': 'string',
+            # 'oneof_regex': ['end', 'live']
+        },
+        'train': {
+            'required': True,
+            'type': dict,
+            'schema': {
+                'batch_size': positive_int(max=100),
+            }
         }
     }
 }
@@ -153,7 +161,10 @@ AttemptsSchema = {
     'type': 'dict',
     'schema': {
         'batch_size': positive_int(max=100),
-        'save_method': {'oneof_regex': ['end', 'live']},
+        'save_method': {
+            'type': 'string',
+            'oneof_regex': ['end', 'live']
+        },
     }
 }
 
@@ -167,24 +178,24 @@ ConnectionSchema = {
     }
 }
 
-LoggingSchema = {
-    'required': True,
-    'type': dict,
-    'schema': {
-        'level': {
-            'required': True,
-            'type': 'string',
-            'anyof': [
-                {'regex': 'debug'},
-                {'regex': 'info'},
-                {'regex': 'warning'},
-                {'regex': 'error'},
-                {'regex': 'critical'},
-            ]
-        },
-        'request_errors': boolean(default=False, required=False)
-    }
-}
+# LoggingSchema = {
+#     'required': True,
+#     'type': dict,
+#     'schema': {
+#         'level': {
+#             'required': True,
+#             'type': 'string',
+#             'anyof': [
+#                 {'regex': 'debug'},
+#                 {'regex': 'info'},
+#                 {'regex': 'warning'},
+#                 {'regex': 'error'},
+#                 {'regex': 'critical'},
+#             ]
+#         },
+#         'request_errors': boolean(default=False, required=False)
+#     }
+# }
 
 Schema = {
     'passwords': PasswordsSchema,
@@ -192,6 +203,6 @@ Schema = {
     'proxies': ProxySchema,
     'pool': PoolSchema,
     'broker': BrokerSchema,
-    'connection': ConnectionSchema,
+    'connection': ConnectionSchema
     # 'log.logging': LoggingSchema,
 }

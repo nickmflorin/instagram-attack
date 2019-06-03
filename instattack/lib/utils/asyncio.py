@@ -29,7 +29,7 @@ def get_remaining_tasks():
     return list(tasks)
 
 
-async def limit_as_completed(coros, batch_size, stop_event):
+async def limit_as_completed(coros, batch_size, stop_event=None):
     """
     Takes a generator yielding coroutines and runs the coroutines concurrently,
     similarly to asyncio.as_completed(tasks), except that it limits the number
@@ -49,7 +49,7 @@ async def limit_as_completed(coros, batch_size, stop_event):
 
     num_tries = 0
 
-    while len(futures) > 0 and not stop_event.is_set():
+    while len(futures) > 0 and (stop_event is None or not stop_event.is_set()):
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
         for f in futures:
             if f.done():

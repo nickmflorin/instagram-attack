@@ -11,7 +11,7 @@ from instattack.app.proxies import AdvancedProxyPool
 
 from .base import AbstractRequestHandler
 from .proxies import BrokeredProxyHandler
-from .helpers import attempt_login
+from .requests import login_request
 from .client import client
 
 
@@ -43,8 +43,8 @@ class AbstractLoginHandler(AbstractRequestHandler):
             await sess.close()
         return self._cookies
 
-    async def attempt_login(self, session, password, proxy):
-        return await attempt_login(
+    async def login_request(self, session, password, proxy):
+        return await login_request(
             loop=self.loop,
             session=session,
             token=self.token,
@@ -86,7 +86,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
             proxy = await self.proxy_handler.pool.get()
             if not proxy:
                 raise PoolNoProxyError()
-            yield self.attempt_login(session, password, proxy)
+            yield self.login_request(session, password, proxy)
 
     async def attempt_login_with_password(self, session, password):
         """

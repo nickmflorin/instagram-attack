@@ -39,11 +39,6 @@
     # max_files: 4
 
 
-log.logging:
-    level: 'debug'
-    request_errors: true
-
-
 connection:
     limit_per_host: 0
     timeout: 10
@@ -78,7 +73,6 @@ passwords:
                 start_year: 1991
                 end_year: 2000
 
-
 attempts:
     # The number of concurrent requests to make for each password.
     batch_size: 5
@@ -107,6 +101,9 @@ broker:
 proxies:
     save_method: 'end'
     countries: ['US']
+
+    train:
+        batch_size: 10
 
     # The amount of time to wait before using a proxy that raises an error
     # that does not indicate an invalid proxy.
@@ -173,3 +170,9 @@ proxies:
                 # but also have a lot of historical timeout errors.
                 historical: null
                 active: 4
+
+
+log.logging:
+    level: 'debug'
+    request_errors: true
+

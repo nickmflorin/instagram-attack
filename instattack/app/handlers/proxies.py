@@ -10,7 +10,7 @@ class ProxyHandler(Handler):
     async def stop(self):
         pass
 
-    async def run(self):
+    async def run(self, limit=None):
         """
         Retrieves proxies from the queue that is populated from the Broker and
         then puts these proxies in the prioritized heapq pool.
@@ -29,7 +29,7 @@ class ProxyHandler(Handler):
 
         try:
             await log.debug('Prepopulating Proxy Pool...')
-            await self.pool.prepopulate()
+            await self.pool.prepopulate(limit=limit)
         except Exception as e:
             raise e
 
@@ -56,7 +56,7 @@ class BrokeredProxyHandler(ProxyHandler):
         if self.broker._started:
             self.broker.stop()
 
-    async def run(self):
+    async def run(self, limit=None):
         """
         Retrieves proxies from the queue that is populated from the Broker and
         then puts these proxies in the prioritized heapq pool.
@@ -71,7 +71,7 @@ class BrokeredProxyHandler(ProxyHandler):
         if we are running low on proxies.
         """
         log = self.create_logger('start')
-        await super(BrokeredProxyHandler, self).run()
+        await super(BrokeredProxyHandler, self).run(limit=limit)
 
         if config['pool']['collect']:
             # Pool will set start event when it starts collecting proxies.

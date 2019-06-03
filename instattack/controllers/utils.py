@@ -5,13 +5,10 @@ import functools
 
 def proxy_command(help=None, limit=None):
 
-    arguments = [(
-        ['-c', '--concurrent'],
-        {'help': 'Save or Update Proxies Concurrently'}
-    )]
+    arguments = []
     if limit:
         arguments.append((
-            ['-l', '--limit'], {'help': 'Limit the Number of Proxies'}
+            ['-l', '--limit'], {'help': 'Limit the Number of Proxies', 'type': int},
         ))
 
     def proxy_command_wrapper(func):

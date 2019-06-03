@@ -10,7 +10,56 @@ from instattack.app.exceptions import (InstagramResultError, HTTP_RESPONSE_ERROR
 from .client import client
 
 
-async def attempt_login(
+async def train_request(
+    loop,
+    session,
+    proxy,
+    on_proxy_response_error,
+    on_proxy_request_error,
+    on_proxy_success,
+):
+    log = logger.get_async(__name__, subname='train_request')
+
+    # Do we want to update the time of the proxy?  Probably not.
+    # proxy.update_time()
+
+    async def raise_for_result(response):
+        """
+        Since a 400 response will have valid json that can indicate an authentication,
+        via a `checkpoint_required` value, we cannot raise_for_status until after
+        we try to first get the response json.
+        """
+        response.raise_for_status()
+        json = await response.json()
+        data = json['form']
+        assert data == {'test_field_1': 'test_value_1', 'test_field_2': 'test_value_2'}
+        return data
+
+    try:
+        async with client.train_post(
+            session=session,
+            proxy=proxy  # Only Http Proxies Are Supported by AioHTTP
+        ) as response:
+
+            result = await raise_for_result(response)
+            await on_proxy_success(proxy)
+            return result
+
+    except asyncio.CancelledError:
+        pass
+
+    except HTTP_RESPONSE_ERRORS as e:
+        if config['log.logging'].get('request_errors') is True:
+            await log.error(e, extra={'proxy': proxy})
+        await on_proxy_response_error(proxy, e)
+
+    except HTTP_REQUEST_ERRORS as e:
+        if config['log.logging'].get('request_errors') is True:
+            await log.error(e, extra={'proxy': proxy})
+        await on_proxy_request_error(proxy, e)
+
+
+async def login_request(
     loop,
     session,
     token,
@@ -46,7 +95,7 @@ async def attempt_login(
     >>>     else:
     >>>         raise e
     """
-    log = logger.get_async(__name__, subname='login')
+    log = logger.get_async(__name__, subname='login_request')
 
     proxy.update_time()
 

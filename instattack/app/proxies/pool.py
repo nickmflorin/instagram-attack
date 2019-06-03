@@ -89,7 +89,7 @@ class SimpleProxyPool(AbstractProxyPool):
 
     __name__ = 'Simple Proxy Pool'
 
-    async def prepopulate(self):
+    async def prepopulate(self, limit=None):
         """
         When initially starting, it sometimes takes awhile for the proxies with
         valid credentials to populate and kickstart the password consumer.
@@ -100,18 +100,23 @@ class SimpleProxyPool(AbstractProxyPool):
         log = self.create_logger('prepopulate')
         await log.start('Prepopulating Proxies')
 
+        count = 0
+
         proxies = await Proxy.all()
         for proxy in proxies:
-            # Do we even want to evaluate for training proxies?
-            evaluation = proxy.evaluate_for_pool()
-            if evaluation.passed:
-                await self.put(proxy, evaluate=False)
+            if limit and count == limit:
+                break
+
+            await self.put(proxy)
+            count += 1
 
         if self.num_proxies == 0:
             await log.error('No Proxies to Prepopulate')
             return
 
+        # Non-Broker Proxy Pool: Set start event after prepopulation.
         await log.complete(f"Prepopulated {self.num_proxies} Proxies")
+        self.start_event.set()
 
     async def on_proxy_request_error(self, proxy, err):
         """
@@ -235,7 +240,7 @@ class AdvancedProxyPool(BrokeredProxyPool):
         self.confirmed = ConfirmedQueue()
         self.held = HeldQueue(self.confirmed, self)
 
-    async def prepopulate(self):
+    async def prepopulate(self, limit=None):
         """
         When initially starting, it sometimes takes awhile for the proxies with
         valid credentials to populate and kickstart the password consumer.
@@ -246,8 +251,13 @@ class AdvancedProxyPool(BrokeredProxyPool):
         log = self.create_logger('prepopulate')
         await log.start('Prepopulating Proxies')
 
+        count = 0
+
         proxies = await Proxy.all()
         for proxy in proxies:
+            if limit and count == limit:
+                break
+
             # Should we use the historical confirmed value or just the last request
             # confirmed value?
             if proxy.confirmed:
@@ -260,6 +270,8 @@ class AdvancedProxyPool(BrokeredProxyPool):
                 evaluation = proxy.evaluate_for_pool()
                 if evaluation.passed:
                     await self.put(proxy, evaluate=False)
+
+            count += 1
 
         if self.num_proxies == 0:
             await log.error('No Proxies to Prepopulate')
