@@ -12,7 +12,7 @@ from .queues import ConfirmedQueue, HeldQueue
 class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
 
     def __init__(self, loop, broker, start_event=None):
-        super(ProxyAttackPool, self).__init__(-1)
+        super(ProxyPool, self).__init__(-1)
 
         self.loop = loop
 
@@ -84,7 +84,7 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
     async def put(self, proxy):
         count = next(self.proxy_counter)
         priority = proxy.priority(count)
-        await super(ProxyTrainPool, self).put((priority, proxy))
+        await super(ProxyPool, self).put((priority, proxy))
 
     async def get(self):
         """
@@ -112,7 +112,7 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         Proxies are always evaluated before being put in queue so we do
         not have to reevaluate.
         """
-        ret = await super(ProxyAttackPool, self).get()
+        ret = await super(ProxyPool, self).get()
         proxy = ret[1]
         return proxy
 

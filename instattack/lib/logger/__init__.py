@@ -56,6 +56,9 @@ def get_sync(name, subname=None):
 
 class LoggerMixin(object):
 
+    def done(self):
+        sys.stdout.write("\n")
+
     def findCaller(self, *args):
         """
         Find the stack frame of the caller so that we can note the source

@@ -5,14 +5,15 @@ from instattack.lib.utils import start_and_stop
 
 from instattack.config import settings
 from instattack.app.users import User
+from instattack.app.attack.handlers import LoginHandler
 
 from .abstract import InstattackController
 from .prompts import BirthdayPrompt
 from .utils import user_command, existing_user_command
-from .interfaces import UserInterface, AttackInterface
+from .interfaces import UserInterface
 
 
-class UserController(InstattackController, UserInterface, AttackInterface):
+class UserController(InstattackController, UserInterface):
 
     class Meta:
         label = 'users'
@@ -21,7 +22,6 @@ class UserController(InstattackController, UserInterface, AttackInterface):
 
         interfaces = [
             UserInterface,
-            AttackInterface
         ]
 
     @ex(help='Display All Users')
@@ -178,19 +178,13 @@ class UserController(InstattackController, UserInterface, AttackInterface):
             if not self.proceed(message):
                 return
 
-        proxy_handler, password_handler = self._attack_handlers()
+        login = LoginHandler(self.loop)
+        result = self.loop.run_until_complete(login.login(self.app.pargs.password))
 
-        results = self.loop.run_until_complete(asyncio.gather(
-            password_handler.attempt_single_login(self.app.pargs.password),
-            proxy_handler.run(),
-        ))
-
-        # We might not need to stop proxy handler?
-        self.loop.run_until_complete(proxy_handler.stop())
-        if results[0].authenticated_result:
-            self.success(results[0].authenticated_result)
+        if result.authorized:
+            self.success('Authenticated!')
         else:
-            self.failure(results[0].results[0])
+            self.failure('Not Authenticated')
 
     @ex(
         help='Clean User Directory for Active and Deleted Users',

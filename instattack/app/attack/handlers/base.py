@@ -98,12 +98,22 @@ class ProxyHandler(Handler):
 
 class RequestHandler(Handler):
 
-    def __init__(self, loop, proxy_handler, **kwargs):
+    __proxy_handler__ = None
+
+    def __init__(self, loop, **kwargs):
         super(RequestHandler, self).__init__(loop, **kwargs)
 
-        self.proxy_handler = proxy_handler
         self.num_completed = 0
         self.proxies_to_save = []
+
+        self.start_event = asyncio.Event()
+        self.stop_event = asyncio.Event()
+
+        self.proxy_handler = self.__proxy_handler__(
+            loop,
+            start_event=self.start_event,
+            stop_event=self.stop_event,
+        )
 
     async def finish(self):
         """
@@ -117,9 +127,10 @@ class RequestHandler(Handler):
                 tasks = [proxy.save() for proxy in self.proxies_to_save]
                 await asyncio.gather(*tasks)
 
-    def connector(self, loop):
+    @property
+    def connector(self):
         return aiohttp.TCPConnector(
-            loop=loop,
+            loop=self.loop,
             ssl=False,
             force_close=True,
             limit=config['connection']['limit'],

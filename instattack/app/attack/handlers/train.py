@@ -1,5 +1,3 @@
-import asyncio
-
 from instattack.app.proxies import ProxyTrainPool
 
 from .base import RequestHandler, ProxyHandler

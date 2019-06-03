@@ -1,13 +1,13 @@
-import asyncio
-
 from cement.utils.version import get_version_banner
 
 from instattack.config import settings
 from instattack.app.version import get_version
 
+from instattack.app.attack.handlers import AttackHandler
+
 from .abstract import InstattackController
 from .users import UserController
-from .interfaces import UserInterface, AttackInterface
+from .interfaces import UserInterface
 from .proxies import ProxyController
 from .utils import existing_user_command
 
@@ -33,7 +33,7 @@ ATTACK_ARGUMENTS = [
 ]
 
 
-class Base(InstattackController, AttackInterface, UserInterface):
+class Base(InstattackController, UserInterface):
 
     class Meta:
         label = 'base'
@@ -45,7 +45,6 @@ class Base(InstattackController, AttackInterface, UserInterface):
         epilog = f'Usage: {settings.APP_NAME} get_user username'
 
         interfaces = [
-            AttackInterface,
             UserInterface
         ]
 
@@ -86,25 +85,14 @@ class Base(InstattackController, AttackInterface, UserInterface):
             if not self.proceed('User was already authenticated.'):
                 return
 
-        proxy_handler, password_handler = self._attack_handlers()
+        attack = AttackHandler(self.loop)
 
         limit = None
         if not self.app.pargs.nolimit:
             limit = int(self.app.pargs.limit)
 
-        try:
-            results = self.loop.run_until_complete(asyncio.gather(
-                password_handler.attack(limit=limit),
-                proxy_handler.run(),
-            ))
-        except Exception as e:
-            self.loop.run_until_complete(password_handler.finish_attack())
-            self.loop.run_until_complete(proxy_handler.stop())
-            raise e
+        result = self.loop.run_until_complete(attack.attack(limit=limit))
+        if result.authenticated_result:
+            self.success(result.authenticated_result)
         else:
-            # We might not need to stop proxy handler?
-            self.loop.run_until_complete(proxy_handler.stop())
-            if results[0].authenticated_result:
-                self.success(results[0].authenticated_result)
-            else:
-                self.failure('Not Authenticated')
+            self.failure('Not Authenticated')

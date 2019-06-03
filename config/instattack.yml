@@ -41,7 +41,7 @@
 
 log.logging:
     level: 'debug'
-    request_errors: false
+    request_errors: true
 
 
 connection:
