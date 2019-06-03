@@ -4,8 +4,8 @@ from cement import ex
 from instattack.lib.utils import start_and_stop
 
 from instattack.config import settings
-from instattack.app.users import User
-from instattack.app.attack.handlers import LoginHandler
+from instattack.app.models import User
+from instattack.app.handlers import LoginHandler
 
 from .abstract import InstattackController
 from .prompts import BirthdayPrompt

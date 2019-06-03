@@ -1,6 +1,8 @@
 # Instagram Constants
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
+TEST_POST_URL = "https://postman-echo.com/post"
+
 
 VERSION = 18
 RELEASE = 4.3

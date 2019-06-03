@@ -2,21 +2,27 @@ import asyncio
 import itertools
 
 from instattack.config import config
+
 from instattack.app.exceptions import PoolNoProxyError
 from instattack.app.mixins import LoggerMixin
+from instattack.app.models import Proxy
 
-from .models import Proxy
 from .queues import ConfirmedQueue, HeldQueue
 
 
-class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
+__all__ = (
+    'SimpleProxyPool',
+    'BrokeredProxyPool',
+    'AdvancedProxyPool',
+)
 
-    def __init__(self, loop, broker, start_event=None):
-        super(ProxyPool, self).__init__(-1)
+
+class AbstractProxyPool(asyncio.PriorityQueue, LoggerMixin):
+
+    def __init__(self, loop, start_event=None):
+        super(AbstractProxyPool, self).__init__(-1)
 
         self.loop = loop
-
-        self.broker = broker
         self.start_event = start_event
         self.timeout = config['pool']['timeout']
 
@@ -42,49 +48,6 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
                 await log.warning(f'Running Low on Proxies: {self.num_proxies}')
 
                 self.last_logged_qsize = self.num_proxies
-
-    async def collect(self):
-        """
-        Retrieves proxies from the broker and converts them to our Proxy model.
-        The proxy is then evaluated as to whether or not it meets the standards
-        specified and conditionally added to the pool.
-
-        [!] IMPORTANT:
-        -------------
-        We should maybe make this more dynamic, and add proxies from the broker
-        when the pool drops below the limit.
-
-        Figure out how to make the collect limit more dynamic, or at least calculated
-        based on the prepopulated limit.
-        >>> collect_limit = max(self._maxsize - self.qsize(), 0)
-        """
-        log = self.create_logger('collect')
-
-        await log.start('Collecting Proxies')
-
-        count = 0
-        collect_limit = 10000  # Arbitrarily high for now.
-
-        async for proxy, created in self.broker.collect(save=True):
-            evaluation = proxy.evaluate_for_pool()
-            if evaluation.passed:
-                await self.put(proxy)
-
-                # Set Start Event on First Proxy Retrieved from Broker
-                if self.start_event and not self.start_event.is_set():
-                    self.start_event.set()
-                    await log.info('Setting Start Event', extra={
-                        'other': 'Broker Started Sending Proxies'
-                    })
-
-            if collect_limit and count == collect_limit:
-                break
-            count += 1
-
-    async def put(self, proxy):
-        count = next(self.proxy_counter)
-        priority = proxy.priority(count)
-        await super(ProxyPool, self).put((priority, proxy))
 
     async def get(self):
         """
@@ -112,14 +75,19 @@ class ProxyPool(asyncio.PriorityQueue, LoggerMixin):
         Proxies are always evaluated before being put in queue so we do
         not have to reevaluate.
         """
-        ret = await super(ProxyPool, self).get()
+        ret = await super(AbstractProxyPool, self).get()
         proxy = ret[1]
         return proxy
 
+    async def put(self, proxy):
+        count = next(self.proxy_counter)
+        priority = proxy.priority(count)
+        await super(AbstractProxyPool, self).put((priority, proxy))
 
-class ProxyTrainPool(ProxyPool):
 
-    __name__ = 'Proxy Train Pool'
+class SimpleProxyPool(AbstractProxyPool):
+
+    __name__ = 'Simple Proxy Pool'
 
     async def prepopulate(self):
         """
@@ -212,12 +180,57 @@ class ProxyTrainPool(ProxyPool):
         proxy.note_success()
 
 
-class ProxyAttackPool(ProxyPool):
+class BrokeredProxyPool(SimpleProxyPool):
 
-    __name__ = 'Proxy Attack Pool'
+    __name__ = 'Brokered Proxy Pool'
 
     def __init__(self, loop, broker, start_event=None):
-        super(ProxyAttackPool, self).__init__(loop, broker, start_event=start_event)
+        super(BrokeredProxyPool, self).__init__(loop, start_event=start_event)
+        self.broker = broker
+
+    async def collect(self):
+        """
+        Retrieves proxies from the broker and converts them to our Proxy model.
+        The proxy is then evaluated as to whether or not it meets the standards
+        specified and conditionally added to the pool.
+
+        [!] IMPORTANT:
+        -------------
+        We should maybe make this more dynamic, and add proxies from the broker
+        when the pool drops below the limit.
+
+        Figure out how to make the collect limit more dynamic, or at least calculated
+        based on the prepopulated limit.
+        >>> collect_limit = max(self._maxsize - self.qsize(), 0)
+        """
+        log = self.create_logger('collect')
+
+        await log.start('Collecting Proxies')
+
+        count = 0
+        collect_limit = 10000  # Arbitrarily high for now.
+
+        async for proxy, created in self.broker.collect(save=True):
+            evaluation = proxy.evaluate_for_pool()
+            if evaluation.passed:
+                await self.put(proxy)
+
+                # Set Start Event on First Proxy Retrieved from Broker
+                if self.start_event and not self.start_event.is_set():
+                    self.start_event.set()
+                    await log.info('Setting Start Event', extra={
+                        'other': 'Broker Started Sending Proxies'
+                    })
+
+            if collect_limit and count == collect_limit:
+                break
+            count += 1
+
+
+class AdvancedProxyPool(BrokeredProxyPool):
+
+    def __init__(self, loop, broker, start_event=None):
+        super(AdvancedProxyPool, self).__init__(loop, broker, start_event=start_event)
 
         self.confirmed = ConfirmedQueue()
         self.held = HeldQueue(self.confirmed, self)
@@ -257,7 +270,8 @@ class ProxyAttackPool(ProxyPool):
 
     @property
     def num_proxies(self):
-        return super(ProxyAttackPool, self).num_proxies + self.held.qsize() + self.confirmed.qsize()
+        return (super(BrokeredProxyPool, self).num_proxies +
+            self.held.qsize() + self.confirmed.qsize())
 
     async def on_proxy_request_error(self, proxy, err):
         """
@@ -379,7 +393,7 @@ class ProxyAttackPool(ProxyPool):
         """
         await self.held.recycle()
         await self.log_pool_size()
-        return await super(ProxyAttackPool, self).get()
+        return await super(BrokeredProxyPool, self).get()
 
     async def _get_proxy(self):
         """
@@ -459,7 +473,7 @@ class ProxyAttackPool(ProxyPool):
         if not proxy:
             proxy = await self.held.get()
             if not proxy:
-                proxy = await super(ProxyAttackPool, self)._get_proxy()
+                proxy = await super(BrokeredProxyPool, self)._get_proxy()
 
                 """
                 There can be held proxies in general queue if they were not
@@ -515,4 +529,4 @@ class ProxyAttackPool(ProxyPool):
                 await log.warning('Cannot Add Proxy to Pool')
                 return
 
-        await super(ProxyAttackPool, self).put(proxy)
+        await super(BrokeredProxyPool, self).put(proxy)

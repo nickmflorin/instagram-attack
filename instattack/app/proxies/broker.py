@@ -3,9 +3,9 @@ import contextlib
 from proxybroker import Broker
 
 from instattack.config import settings, config
-from instattack.app.mixins import LoggerMixin
 
-from .models import Proxy
+from instattack.app.mixins import LoggerMixin
+from instattack.app.models import Proxy
 
 
 class ProxyBroker(Broker, LoggerMixin):

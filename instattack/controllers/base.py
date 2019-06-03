@@ -3,7 +3,7 @@ from cement.utils.version import get_version_banner
 from instattack.config import settings
 from instattack.app.version import get_version
 
-from instattack.app.attack.handlers import AttackHandler
+from instattack.app.handlers import AttackHandler
 
 from .abstract import InstattackController
 from .users import UserController

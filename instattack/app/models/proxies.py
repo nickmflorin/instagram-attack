@@ -137,6 +137,8 @@ class Proxy(Model, HumanizedMetrics):
         return self._timeout_increments[err]
 
     def increment_timeout(self, err):
+        if isinstance(err, Exception):
+            err = err.__subtype__
         self._timeouts[err] += self.timeout_increment(err)
 
     def note_success(self):

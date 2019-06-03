@@ -1,9 +1,8 @@
-import asyncio
 from cement import Interface
 import tortoise
 
 from instattack.app.exceptions import UserDoesNotExist, UserExists
-from instattack.app.users import User
+from instattack.app.models import User
 
 
 class UserInterface(Interface):

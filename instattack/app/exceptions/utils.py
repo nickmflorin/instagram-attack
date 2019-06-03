@@ -38,7 +38,7 @@ def get_http_exception_request_method(exc):
 
 
 def get_http_exception_message(exc):
-    from .http_exceptions import HttpException
+    from .http import HttpException
 
     if not isinstance(exc, HttpException):
         return str(exc)

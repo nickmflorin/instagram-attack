@@ -20,8 +20,8 @@ DB_CONFIG = {
     'apps': {
         'models': {
             'models': [
-                'instattack.app.proxies.models',
-                'instattack.app.users.models',
+                'instattack.app.models.proxies',
+                'instattack.app.models.user',
             ],
             'default_connection': 'default',
         }

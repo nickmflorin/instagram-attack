@@ -176,8 +176,8 @@ LOG_FORMAT_STRING = Lines(
     ),
     CONTEXT_LINES,
     TRACEBACK_LINE,
-    lines_above=1,
-    lines_below=0,
+    lines_above=0,
+    lines_below=1,
     header=Header(
         char="-",
         length=25,

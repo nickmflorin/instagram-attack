@@ -42,6 +42,11 @@ class PoolNoProxyError(InstattackError):
     __message__ = 'No More Proxies in Pool'
 
 
+class TokenNotFound(InstattackError):
+
+    __message__ = "Could not find a token from the response."
+
+
 class ConfigurationError(InstattackError):
     def __init__(self, errors):
         self.errors = errors

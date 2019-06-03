@@ -10,7 +10,6 @@ from instattack.lib.utils import start_and_stop
 
 from instattack.app.exceptions import find_request_error, find_response_error
 from instattack.app.mixins import LoggerMixin
-from instattack.app.proxies import ProxyBroker
 
 
 class Handler(LoggerMixin):
@@ -20,7 +19,6 @@ class Handler(LoggerMixin):
     def __init__(self, loop, start_event=None, stop_event=None):
 
         self.loop = loop
-
         self.start_event = start_event
         self.stop_event = stop_event
 
@@ -32,76 +30,17 @@ class Handler(LoggerMixin):
         await self.scheduler.spawn(coro)
 
     async def close_scheduler(self):
-        log = self.create_logger('close_scheduler')
-        await log.start('Closing Scheduler')
-        await self.scheduler.close()
-        await log.complete('Scheduler Closed')
+        with start_and_stop('Closing Scheduler'):
+            await self.scheduler.close()
 
 
-class ProxyHandler(Handler):
-
-    __name__ = "Proxy Handler"
-
-    def __init__(self, loop, start_event=None, stop_event=None):
-        """
-        [x] TODO:
-        ---------
-        We need to use the stop event to stop the broker just in case an authenticated
-        result is found.
-
-        What would be really cool would be if we could pass in our custom pool
-        directly so that the broker popoulated that queue with the proxies.
-        """
-        super(ProxyHandler, self).__init__(loop, start_event=start_event,
-            stop_event=stop_event)
-        self.broker = ProxyBroker(loop)
-
-    async def stop(self):
-        if self.broker._started:
-            self.broker.stop()
-
-    async def run(self):
-        """
-        Retrieves proxies from the queue that is populated from the Broker and
-        then puts these proxies in the prioritized heapq pool.
-
-        Prepopulates proxies if the flag is set to put proxies that we previously
-        saved into the pool.
-
-        [x] TODO:
-        ---------
-        We are eventually going to need the relationship between prepopulation
-        and collection to be more dynamic and adjust, and collection to trigger
-        if we are running low on proxies.
-        """
-        log = self.create_logger('start')
-        await log.start(f'Starting {self.__name__}')
-
-        try:
-            await log.debug('Prepopulating Proxy Pool...')
-            await self.pool.prepopulate()
-        except Exception as e:
-            raise e
-
-        if config['pool']['collect']:
-            # Pool will set start event when it starts collecting proxies.
-            await self.pool.collect()
-        else:
-            if self.start_event.is_set():
-                raise RuntimeError('Start Event Already Set')
-
-            self.start_event.set()
-            await log.info('Setting Start Event', extra={
-                'other': 'Proxy Pool Prepopulated'
-            })
-
-
-class RequestHandler(Handler):
+class AbstractRequestHandler(Handler):
 
     __proxy_handler__ = None
+    __proxy_pool__ = None
 
     def __init__(self, loop, **kwargs):
-        super(RequestHandler, self).__init__(loop, **kwargs)
+        super(AbstractRequestHandler, self).__init__(loop, **kwargs)
 
         self.num_completed = 0
         self.proxies_to_save = []
@@ -111,6 +50,7 @@ class RequestHandler(Handler):
 
         self.proxy_handler = self.__proxy_handler__(
             loop,
+            pool_cls=self.__proxy_pool__,
             start_event=self.start_event,
             stop_event=self.stop_event,
         )

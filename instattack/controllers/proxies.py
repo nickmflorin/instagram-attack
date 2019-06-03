@@ -7,7 +7,8 @@ from instattack.lib.utils import (
 
 from instattack.app.mixins import LoggerMixin
 
-from instattack.app.proxies import Proxy, ProxyBroker
+from instattack.app.models import Proxy
+from instattack.app.proxies import ProxyBroker
 from instattack.app.proxies.utils import scrape_proxies
 
 from .abstract import InstattackController
