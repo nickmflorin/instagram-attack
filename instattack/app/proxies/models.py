@@ -127,11 +127,17 @@ class Proxy(Model, HumanizedMetrics):
         return tuple(priority)
 
     def timeout(self, err):
+        if isinstance(err, Exception):
+            err = err.__subtype__
         return self._timeouts[err]
 
+    def timeout_increment(self, err):
+        if isinstance(err, Exception):
+            err = err.__subtype__
+        return self._timeout_increments[err]
+
     def increment_timeout(self, err):
-        increment = self._timeout_increments[err]
-        self._timeouts[err] += increment
+        self._timeouts[err] += self.timeout_increment(err)
 
     def note_success(self):
         self.num_requests += 1
@@ -148,7 +154,7 @@ class Proxy(Model, HumanizedMetrics):
         self.num_active_failed_requests += 1
         self.last_request_confirmed = False
 
-    def set_recent_error(self, exc, historical=True, active=False):
+    def set_recent_error(self, exc, historical=True, active=True):
         # For active errors, since we are not saving those to DB, we store the
         # actual error class.
         if active:
@@ -156,7 +162,7 @@ class Proxy(Model, HumanizedMetrics):
         if historical:
             self.last_error = exc.__subtype__
 
-    def add_error(self, exc, count=1, historical=True, active=True, recent=True):
+    def add_error(self, exc, count=1, historical=True, active=True):
         # For active errors, since we are not saving those to DB, we use the
         # actual error class.
         if active:
@@ -166,9 +172,6 @@ class Proxy(Model, HumanizedMetrics):
         if historical:
             self.errors.setdefault(exc.__subtype__, 0)
             self.errors[exc.__subtype__] += count
-
-        if recent:
-            self.set_recent_error(exc, historical=historical, active=active)
 
     def include_errors(self, errors):
         for key, val in errors.items():

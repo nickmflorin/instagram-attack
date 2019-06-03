@@ -4,7 +4,7 @@ import tortoise
 
 from instattack.app.exceptions import UserDoesNotExist, UserExists
 from instattack.app.users import User
-from instattack.app.attack.handlers import AttackHandler, ProxyHandler
+from instattack.app.attack.handlers import AttackHandler, ProxyAttackHandler
 
 
 class UserInterface(Interface):
@@ -97,7 +97,7 @@ class AttackInterface(Interface):
         start_event = asyncio.Event()
         auth_result_found = asyncio.Event()
 
-        proxy_handler = ProxyHandler(
+        proxy_handler = ProxyAttackHandler(
             self.loop,
             start_event=start_event,
             stop_event=auth_result_found,
