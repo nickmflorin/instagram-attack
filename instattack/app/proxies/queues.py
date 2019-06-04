@@ -122,7 +122,7 @@ class HeldQueue(ProxySubQueue):
         async with self.lock:
             for proxy in self._queue:
                 last_request = proxy.last_request(active=True)
-                if not proxy.time_since_used < proxy.timeout(last_request.error):
+                if not proxy.time_since_used > proxy.timeout(last_request.error):
                     self._queue.remove(proxy)
                     return proxy
         return None
@@ -166,8 +166,26 @@ class HeldQueue(ProxySubQueue):
             proxy.queue_id = 'hold'
             await super(HeldQueue, self).put(proxy)
 
+    async def safe_put(self, proxy):
+        """
+        Used ONLY when we cannot be guaranteed of proxy's presence due to race
+        conditions.
+        """
+        async with self.lock:
+            if not self.contains(proxy):
+                self.put(proxy)
+
     async def remove(self, proxy):
         async with self.lock:
             if proxy not in self._queue:
                 raise ProxyPoolError('Cannot Remove Proxy from Hold Queue')
             self._queue.remove(proxy)
+
+    async def safe_remove(self, proxy):
+        """
+        Used ONLY when we cannot be guaranteed of proxy's presence due to race
+        conditions.
+        """
+        async with self.lock:
+            if self.contains(proxy):
+                self.remove(proxy)

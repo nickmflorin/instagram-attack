@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from collections import deque
 from datetime import datetime
 from dataclasses import dataclass, field
 from dacite import from_dict
@@ -84,12 +85,16 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         """
         super(Proxy, self).__init__(*args, **kwargs)
 
-        self.history = sorted(
+        self.history = deque(sorted(
             [ProxyResult.from_dict(data) for data in self.history],
-            key=lambda x: x.date
-        )
+            key=lambda x: x.date,
+        ))
 
-        self.active_history = []
+        # Temporary Sanity Check
+        if len(self.history) > 1:
+            assert self.history[0].date <= self.history[-1].date
+
+        self.active_history = deque([])
         self.queue_id = None
 
         timeout_config = config['proxies']['timeouts']
@@ -178,7 +183,8 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         self._timeouts[err]['count'] += 1
 
         if self.timeout_exceeds_max(err):
-            raise ProxyMaxTimeoutError(err, self.timeout(err))
+            log.warning(f'Proxy Timeout {self.timeout(err)} Exceeded Max {self.timeout_max(err)}')
+            # raise ProxyMaxTimeoutError(err, self.timeout(err))
 
     @allow_exception_input
     def timeout_exceeds_max(self, *args):

@@ -43,7 +43,7 @@ passwords:
 
 attempts:
     # The number of concurrent requests to make for each password.
-    batch_size: 5
+    batch_size: 1
     save_method: 'end'
 
 pool:

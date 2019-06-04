@@ -114,6 +114,7 @@ class AbstractRequestHandler(Handler):
         if not err:
             raise e
 
+        assert not type(e) is str
         await self.proxy_handler.pool.on_proxy_error(proxy, err)
 
         if config['proxies']['save_method'] == 'live':

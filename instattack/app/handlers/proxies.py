@@ -28,9 +28,7 @@ class ProxyHandler(Handler):
         and collection to be more dynamic and adjust, and collection to trigger
         if we are running low on proxies.
         """
-        log.start(f'Starting {self.__name__}')
         try:
-            log.debug('Prepopulating Proxy Pool...')
             await self.pool.prepopulate(limit=limit, confirmed=confirmed)
         except Exception as e:
             raise e
@@ -82,7 +80,7 @@ class BrokeredProxyHandler(ProxyHandler):
                 raise RuntimeError('Start Event Already Set')
 
             self.start_event.set()
-            log.info('Setting Start Event', extra={
+            log.debug('Setting Start Event', extra={
                 'other': 'Proxy Pool Prepopulated'
             })
 

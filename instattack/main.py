@@ -317,7 +317,10 @@ def main():
             app.run()
 
         except AssertionError as e:
-            app.failure('AssertionError > %s' % e.args[0])
+            if len(e.args) != 0:
+                app.failure('AssertionError > %s' % e.args)
+            else:
+                app.failure('Assertion Error')
 
         except InstattackError as e:
             app.failure(str(e))
