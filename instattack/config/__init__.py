@@ -17,20 +17,14 @@ class _Config(dict):
 
     settings = importlib.import_module('.settings', package=__name__)
 
-    __CONFIG__ = init_defaults('log.logging')
+    __CONFIG_SECTION__ = APP_NAME
 
-    # [x] TODO:
-    # Have to Figure Out How to Tie in Cement Logger with Our Logger
-    # __CONFIG__['log.logging']['level'] = 'info'
+    __CONFIG__ = init_defaults(APP_NAME)
+    __CONFIG__[APP_NAME]['debug'] = False
+    __CONFIG__[APP_NAME]['log.logging'] = {'level': 'info'}
 
     __CONFIG_DIRS__ = [os.path.join(ROOT_DIR, 'config')]
     __CONFIG_FILES__ = [f'{APP_NAME}.yml']
-
-    # [!] NOTE
-    # Cement annoyingly automatically force adds a config section, usually the app
-    # name, which will cause our validation to fail.  We can avoid this by just
-    # including another section that we have...
-    __CONFIG_SECTION__ = 'pool'
 
     __EXTENSIONS__ = ['yaml', 'colorlog', 'jinja2']
     __CONFIG_HANDLER__ = 'yaml'

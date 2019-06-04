@@ -6,13 +6,16 @@ import aiojobs
 
 from instattack.config import config
 
+from instattack.lib import logger
 from instattack.lib.utils import start_and_stop
 
-from instattack.app.exceptions import find_request_error, find_response_error
-from instattack.app.mixins import LoggerMixin
+from instattack.app.exceptions import translate_error
 
 
-class Handler(LoggerMixin):
+log = logger.get(__name__)
+
+
+class Handler(object):
 
     SCHEDULER_LIMIT = 1000
 
@@ -38,12 +41,15 @@ class AbstractRequestHandler(Handler):
 
     __proxy_handler__ = None
     __proxy_pool__ = None
+    __client__ = None
 
     def __init__(self, loop, **kwargs):
         super(AbstractRequestHandler, self).__init__(loop, **kwargs)
 
         self.num_completed = 0
+
         self.proxies_to_save = []
+        self.saved_proxies = []
 
         self.start_event = asyncio.Event()
         self.stop_event = asyncio.Event()
@@ -55,17 +61,11 @@ class AbstractRequestHandler(Handler):
             stop_event=self.stop_event,
         )
 
-    async def finish(self):
-        """
-        [x] TODO:
-        --------
-        Figure out a way to guarantee that this always gets run even if we hit
-        some type of error.
-        """
-        if config['proxies']['save_method'] == 'end':
-            with start_and_stop(f"Saving {len(self.proxies_to_save)} Proxies"):
-                tasks = [proxy.save() for proxy in self.proxies_to_save]
-                await asyncio.gather(*tasks)
+        self.client = self.__client__(
+            self.loop,
+            on_error=self.on_proxy_error,
+            on_success=self.on_proxy_success
+        )
 
     @property
     def connector(self):
@@ -84,26 +84,37 @@ class AbstractRequestHandler(Handler):
             total=config['connection']['timeout']
         )
 
-    async def on_proxy_request_error(self, proxy, e):
-        err = find_request_error(e)
-        if not err:
-            raise e
+    async def save_proxy(self, proxy):
+        self.saved_proxies.append(proxy)
+        await proxy.save()
 
-        await self.proxy_handler.pool.on_proxy_request_error(proxy, err)
-
+    async def finish(self):
+        """
+        [x] TODO:
+        --------
+        Figure out a way to guarantee that this always gets run even if we hit
+        some type of error.
+        """
         if config['proxies']['save_method'] == 'live':
-            await self.schedule_task(proxy.save())
+            if len(self.saved_proxies) != 0:
+                # Still Use Context Manager Just for Style Purposes - Need Another
+                # Solution to Keep Things Consistent
+                with start_and_stop(f"Saved {len(self.saved_proxies)} Proxies"):
+                    pass
         else:
-            # Do we need to find and replace here?
-            if proxy not in self.proxies_to_save:
-                self.proxies_to_save.append(proxy)
+            if len(self.proxies_to_save) != 0:
+                with start_and_stop(f"Saving {len(self.proxies_to_save)} Proxies"):
+                    tasks = [proxy.save() for proxy in self.proxies_to_save]
+                    await asyncio.gather(*tasks)
 
-    async def on_proxy_response_error(self, proxy, e):
-        err = find_response_error(e)
+        await self.close_scheduler()
+
+    async def on_proxy_error(self, proxy, e):
+        err = translate_error(e)
         if not err:
             raise e
 
-        await self.proxy_handler.pool.on_proxy_response_error(proxy, err)
+        await self.proxy_handler.pool.on_proxy_error(proxy, err)
 
         if config['proxies']['save_method'] == 'live':
             await self.schedule_task(proxy.save())
@@ -113,11 +124,12 @@ class AbstractRequestHandler(Handler):
                 self.proxies_to_save.append(proxy)
 
     async def on_proxy_success(self, proxy):
+
         await self.proxy_handler.pool.on_proxy_success(proxy)
 
-        if config['proxies']['save_method'] == 'conclusively':
+        if config['proxies']['save_method'] == 'live':
+            await self.schedule_task(self.save_proxy(proxy))
+        else:
             # Do we need to find and replace here?
             if proxy not in self.proxies_to_save:
                 self.proxies_to_save.append(proxy)
-        else:
-            await self.schedule_task(proxy.save())

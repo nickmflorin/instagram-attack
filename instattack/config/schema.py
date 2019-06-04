@@ -5,6 +5,7 @@ LimitsSchema = {
     'required': True,
     'type': 'dict',
     'schema': {
+        'always_include_confirmed': boolean(default=True),
         'errors': {
             'required': False,
             'type': 'dict',

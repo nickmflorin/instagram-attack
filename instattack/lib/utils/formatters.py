@@ -1,5 +1,24 @@
+def filtered_array(*items):
+    array = []
+    for item in items:
+        if isinstance(item, tuple) and len(item) == 2:
+            if item[1] is not None:
+                array.append(item[0] % item[1])
+        elif isinstance(item, tuple) and len(item) == 1:
+            if item[0] is not None:
+                array.append(item[0])
+        else:
+            if item is not None:
+                array.append(item)
+    return array
+
+
 def percentage(num1, num2):
     return f"{'{0:.2f}'.format((num1 / num2 * 100))} %"
+
+
+def progress(num1, num2):
+    return f"{num1}/{num2} ({'{0:.2f} %)'.format((num1 / num2 * 100))}"
 
 
 def is_numeric(value):

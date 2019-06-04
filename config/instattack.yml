@@ -1,48 +1,16 @@
 ### Instattack Configuration Settings
----
 
-# Toggle application level debug (does not toggle framework debugging)
-# debug: false
+instattack:
+    debug: true
 
-# Where external (third-party) plugins are loaded from
-# plugin_dir: /var/lib/instatttack/plugins/
-
-# Where all plugin configurations are loaded from
-# plugin_config_dir: /etc/instatttack/plugins.d/
-
-# Where external templates are loaded from
-# template_dir: /var/lib/instatttack/templates/
-
-# The log handler label
-# Have to Figure Out How to Tie in Cement Logger with Our Logger
-# log_handler: colorlog
-
-
-# log.colorlog:
-
-    # Where the log file lives (no log file by default)
-    # file: null
-
-    # The level for which to log.  One of: info, warning, error, fatal, debug
-    # level: info
-
-    # Whether or not to log to console
-    # to_console: true
-
-    # Whether or not to rotate the log file when it reaches `max_bytes`
-    # rotate: false
-
-    # Max size in bytes that a log file can grow until it is rotated.
-    # max_bytes: 512000
-
-    # The maximun number of log files to maintain when rotating
-    # max_files: 4
-
+    log.logging:
+        level: 'debug'
+        request_errors: true
 
 connection:
     limit_per_host: 0
-    timeout: 10
-    limit: 200
+    timeout: 6
+    limit: 100
 
 # The higher the batch sizes, the less likely it is that we will have good
 # proxies available for each request, potentially having the opposite effect
@@ -81,7 +49,17 @@ attempts:
 pool:
     # The maximum amount of time to wait for a proxy from the queue before failing.
     timeout: 25
-    collect: False
+    collect: false
+
+    # We do not need the confirmed fields since they already are factored
+    # in based on the separate queues.
+    priority: [
+        [-1, 'num_active_successful_requests'],
+        [1, 'active_error_rate'],
+        [-1, 'num_successful_requests'],
+        [1, 'historical_error_rate'],
+        [1, 'avg_resp_time'],
+    ]
 
  # Settings Here Only Matter if Collect = True
 # Do we want to add a limit to the broker collection?
@@ -103,17 +81,29 @@ proxies:
     countries: ['US']
 
     train:
-        batch_size: 10
+        batch_size: 50
+        # timeout: 10  # Replaces Timeout for Connection
 
     # The amount of time to wait before using a proxy that raises an error
     # that does not indicate an invalid proxy.
+    # Each additional increment is calculated as increment = start*e^(c*x), where
+    # x is the number of times the request has failed consecutively.
+    # After the max value has been reached via incrementation, the
+    # proxy will be discarded.
     timeouts:
         too_many_requests:
-            increment: 10
-            start: 20
-        too_many_open_connections:
+            # Coefficient Not Currently Used
+            coefficient: 0.1
             increment: 5
             start: 5
+            max: 10
+
+        too_many_open_connections:
+            # Coefficient Not Currently Used
+            coefficient: 0.1
+            increment: 5
+            start: 5
+            max: 40
 
     limits:
         # The maximum response time in seconds. If proxy.avg_resp_time exceeds this
@@ -168,11 +158,41 @@ proxies:
             timeout:
                 # There seem to be a lot of proxies that do get confirmed results
                 # but also have a lot of historical timeout errors.
-                historical: null
-                active: 4
+                historical: 2
+                active: 1
 
 
-log.logging:
-    level: 'debug'
-    request_errors: true
+# Where external (third-party) plugins are loaded from
+# plugin_dir: /var/lib/instatttack/plugins/
+
+# Where all plugin configurations are loaded from
+# plugin_config_dir: /etc/instatttack/plugins.d/
+
+# Where external templates are loaded from
+# template_dir: /var/lib/instatttack/templates/
+
+# The log handler label
+# Have to Figure Out How to Tie in Cement Logger with Our Logger
+# log_handler: colorlog
+
+
+# log.colorlog:
+
+    # Where the log file lives (no log file by default)
+    # file: null
+
+    # The level for which to log.  One of: info, warning, error, fatal, debug
+    # level: info
+
+    # Whether or not to log to console
+    # to_console: true
+
+    # Whether or not to rotate the log file when it reaches `max_bytes`
+    # rotate: false
+
+    # Max size in bytes that a log file can grow until it is rotated.
+    # max_bytes: 512000
+
+    # The maximun number of log files to maintain when rotating
+    # max_files: 4
 

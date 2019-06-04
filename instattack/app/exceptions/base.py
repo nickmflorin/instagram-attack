@@ -37,7 +37,24 @@ class NoPasswordsError(InstattackError):
     __message__ = 'There are no passwords to try.'
 
 
-class PoolNoProxyError(InstattackError):
+class ProxyMaxTimeoutError(InstattackError):
+
+    def __init__(self, err, timeout):
+        self.err = err
+        self.timeout = timeout
+
+    def __str__(self):
+        return (
+            f"The proxy timeout for {self.err} has been incremented to "
+            f"{self.timeout}, past it's max allowed value."
+        )
+
+
+class ProxyPoolError(InstattackError):
+    pass
+
+
+class PoolNoProxyError(ProxyPoolError):
 
     __message__ = 'No More Proxies in Pool'
 
@@ -45,6 +62,10 @@ class PoolNoProxyError(InstattackError):
 class TokenNotFound(InstattackError):
 
     __message__ = "Could not find a token from the response."
+
+
+class ConfigError(InstattackError):
+    pass
 
 
 class ConfigurationError(InstattackError):

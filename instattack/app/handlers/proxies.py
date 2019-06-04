@@ -1,8 +1,12 @@
 from instattack.config import config
+from instattack.lib import logger
 
 from instattack.app.proxies import ProxyBroker
 
 from .base import Handler
+
+
+log = logger.get(__name__, 'Proxy Handler')
 
 
 class ProxyHandler(Handler):
@@ -10,7 +14,7 @@ class ProxyHandler(Handler):
     async def stop(self):
         pass
 
-    async def run(self, limit=None):
+    async def run(self, limit=None, confirmed=False):
         """
         Retrieves proxies from the queue that is populated from the Broker and
         then puts these proxies in the prioritized heapq pool.
@@ -24,12 +28,10 @@ class ProxyHandler(Handler):
         and collection to be more dynamic and adjust, and collection to trigger
         if we are running low on proxies.
         """
-        log = self.create_logger('start')
-        await log.start(f'Starting {self.__name__}')
-
+        log.start(f'Starting {self.__name__}')
         try:
-            await log.debug('Prepopulating Proxy Pool...')
-            await self.pool.prepopulate(limit=limit)
+            log.debug('Prepopulating Proxy Pool...')
+            await self.pool.prepopulate(limit=limit, confirmed=confirmed)
         except Exception as e:
             raise e
 
@@ -56,7 +58,7 @@ class BrokeredProxyHandler(ProxyHandler):
         if self.broker._started:
             self.broker.stop()
 
-    async def run(self, limit=None):
+    async def run(self, limit=None, confirmed=False):
         """
         Retrieves proxies from the queue that is populated from the Broker and
         then puts these proxies in the prioritized heapq pool.
@@ -70,8 +72,7 @@ class BrokeredProxyHandler(ProxyHandler):
         and collection to be more dynamic and adjust, and collection to trigger
         if we are running low on proxies.
         """
-        log = self.create_logger('start')
-        await super(BrokeredProxyHandler, self).run(limit=limit)
+        await super(BrokeredProxyHandler, self).run(limit=limit, confirmed=confirmed)
 
         if config['pool']['collect']:
             # Pool will set start event when it starts collecting proxies.
@@ -81,7 +82,7 @@ class BrokeredProxyHandler(ProxyHandler):
                 raise RuntimeError('Start Event Already Set')
 
             self.start_event.set()
-            await log.info('Setting Start Event', extra={
+            log.info('Setting Start Event', extra={
                 'other': 'Proxy Pool Prepopulated'
             })
 

@@ -1,8 +1,9 @@
 from cement.utils.version import get_version_banner
 
 from instattack.config import settings
-from instattack.app.version import get_version
+from instattack.lib import logger
 
+from instattack.app.version import get_version
 from instattack.app.handlers import AttackHandler
 
 from .abstract import InstattackController
@@ -60,6 +61,11 @@ class Base(InstattackController, UserInterface):
                 {'action': 'version', 'version': VERSION_BANNER}
             ),
         ]
+
+    def _post_argument_parsing(self):
+        if self.app.pargs.level is not None:
+            print('Setting Level')
+            logger.setLevel(self.app.pargs.level)
 
     def _default(self):
         """

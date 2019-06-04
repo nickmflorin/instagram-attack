@@ -5,8 +5,6 @@ import tortoise
 from instattack.lib.utils import (
     save_iteratively, save_concurrently, start_and_stop)
 
-from instattack.app.mixins import LoggerMixin
-
 from instattack.app.models import Proxy
 
 from instattack.app.proxies import ProxyBroker
@@ -18,7 +16,7 @@ from .abstract import InstattackController
 from .utils import proxy_command
 
 
-class ProxyInterface(Interface, LoggerMixin):
+class ProxyInterface(Interface):
 
     class Meta:
         interface = 'user'
@@ -111,29 +109,30 @@ class ProxyController(InstattackController, ProxyInterface):
     def clear_history(self):
 
         async def _clear_history():
-            to_save = []
+            tasks = []
             async for proxy in Proxy.all():
                 # Regular errors are translated on save currently.
-                if proxy.errors != {} or proxy.active_errors != {} or proxy.num_requests != 0:
-                    proxy.errors = {}
-                    proxy.active_errors = {}
-                    proxy.num_requests = 0
-                    to_save.append(proxy)
-            return to_save
+                proxy.history = []
+                tasks.append(proxy.save())
+
+            await asyncio.gather(*tasks)
+            return tasks
 
         with start_and_stop("Clearing Proxy History") as spinner:
-            loop = asyncio.get_event_loop()
-            to_save = loop.run_until_complete(_clear_history())
+            tasks = self.loop.run_until_complete(_clear_history())
+            spinner.write(f"> Cleared History for {len(tasks)} Proxies")
 
-            spinner.write(f"> Updating {len(to_save)} Proxies")
-            loop.run_until_complete(self._save_proxies(to_save))
-
-    @proxy_command(help="Scrape Proxies and Save to DB", limit=True)
+    @proxy_command(help="Train Proxies with Test Requests", limit=True, arguments=[
+        (['-c', '--confirmed'], {'help': 'Limit to Confirmed Proxies', 'action': 'store_true'})
+    ])
     def train(self):
         train = TrainHandler(self.loop)
 
         # Right now there are no results
-        result = self.loop.run_until_complete(train.train(limit=self.app.pargs.limit))
+        result = self.loop.run_until_complete(train.train(
+            limit=self.app.pargs.limit,
+            confirmed=self.app.pargs.confirmed,
+        ))
         print(result)
 
     @proxy_command(help="Scrape Proxies and Save to DB", limit=True)

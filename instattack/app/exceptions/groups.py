@@ -115,13 +115,7 @@ def find_response_error(exc):
 
 
 def find_request_error(exc):
-    """
-    Classifies different HTTP request based errors that we run into into our
-    classification scheme meant for determining how to handle proxies.
 
-    Our classification scheme essentially just wraps the exceptions and groups
-    them together.
-    """
     for error_set in _HTTP_REQUEST_ERRORS:
         if exc.__class__ in error_set:
             err = error_set[exc.__class__]
@@ -131,3 +125,17 @@ def find_request_error(exc):
                 err = err(exc)
 
             return err(exc)
+
+
+def translate_error(exc):
+    """
+    Classifies different HTTP request based errors that we run into into our
+    classification scheme meant for determining how to handle proxies.
+
+    Our classification scheme essentially just wraps the exceptions and groups
+    them together.
+    """
+    err = find_response_error(exc)
+    if not err:
+        err = find_request_error(exc)
+    return err

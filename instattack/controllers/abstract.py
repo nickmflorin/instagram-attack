@@ -2,6 +2,7 @@ import asyncio
 from cement import Controller, shell
 import sys
 
+from instattack.lib import logger
 from instattack.config import settings
 
 
@@ -18,6 +19,10 @@ class PrintableMixin(object):
 
 
 class InstattackController(Controller, PrintableMixin):
+
+    def _post_argument_parsing(self):
+        if self.app.pargs.level is not None:
+            logger.setLevel(self.app.pargs.level)
 
     def proceed(self, message):
 

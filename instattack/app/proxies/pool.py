@@ -1,10 +1,10 @@
 import asyncio
 import itertools
 
-from instattack.config import config
+from instattack.lib import logger
+from instattack.config import config, settings
 
-from instattack.app.exceptions import PoolNoProxyError
-from instattack.app.mixins import LoggerMixin
+from instattack.app.exceptions import PoolNoProxyError, ProxyPoolError, ProxyMaxTimeoutError
 from instattack.app.models import Proxy
 
 from .queues import ConfirmedQueue, HeldQueue
@@ -17,7 +17,10 @@ __all__ = (
 )
 
 
-class AbstractProxyPool(asyncio.PriorityQueue, LoggerMixin):
+log = logger.get(__name__, subname='Proxy Pool')
+
+
+class AbstractProxyPool(asyncio.PriorityQueue):
 
     def __init__(self, loop, start_event=None):
         super(AbstractProxyPool, self).__init__(-1)
@@ -32,6 +35,7 @@ class AbstractProxyPool(asyncio.PriorityQueue, LoggerMixin):
         self.proxy_counter = itertools.count()
 
         self.last_logged_qsize = None
+        self.original_num_proxies = 0
 
     @property
     def num_proxies(self):
@@ -41,12 +45,9 @@ class AbstractProxyPool(asyncio.PriorityQueue, LoggerMixin):
         """
         Log Running Low on Proxies Periodically if Change Noticed
         """
-        log = self.create_logger('get')
-
         if self.num_proxies <= 20:
             if not self.last_logged_qsize or self.last_logged_qsize != self.num_proxies:
-                await log.warning(f'Running Low on Proxies: {self.num_proxies}')
-
+                log.warning(f'Running Low on Proxies: {self.num_proxies}')
                 self.last_logged_qsize = self.num_proxies
 
     async def get(self):
@@ -82,14 +83,17 @@ class AbstractProxyPool(asyncio.PriorityQueue, LoggerMixin):
     async def put(self, proxy):
         count = next(self.proxy_counter)
         priority = proxy.priority(count)
+        proxy.queue_id = 'pool'
+
         await super(AbstractProxyPool, self).put((priority, proxy))
+        return proxy
 
 
 class SimpleProxyPool(AbstractProxyPool):
 
     __name__ = 'Simple Proxy Pool'
 
-    async def prepopulate(self, limit=None):
+    async def prepopulate(self, limit=None, confirmed=False):
         """
         When initially starting, it sometimes takes awhile for the proxies with
         valid credentials to populate and kickstart the password consumer.
@@ -97,28 +101,31 @@ class SimpleProxyPool(AbstractProxyPool):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        log = self.create_logger('prepopulate')
-        await log.start('Prepopulating Proxies')
+        log.debug('Prepopulating Proxies')
 
-        count = 0
+        self.original_num_proxies = 0
 
-        proxies = await Proxy.all()
+        if confirmed:
+            proxies = await Proxy.filter(confirmed=True).all()
+        else:
+            proxies = await Proxy.all()
+
         for proxy in proxies:
-            if limit and count == limit:
-                break
-
             await self.put(proxy)
-            count += 1
 
-        if self.num_proxies == 0:
-            await log.error('No Proxies to Prepopulate')
+            if limit and self.original_num_proxies == limit:
+                break
+            self.original_num_proxies += 1
+
+        if self.original_num_proxies == 0:
+            log.error('No Proxies to Prepopulate')
             return
 
         # Non-Broker Proxy Pool: Set start event after prepopulation.
-        await log.complete(f"Prepopulated {self.num_proxies} Proxies")
+        log.debug(f"Prepopulated {self.original_num_proxies} Proxies")
         self.start_event.set()
 
-    async def on_proxy_request_error(self, proxy, err):
+    async def on_proxy_error(self, proxy, err):
         """
         For training proxies, we only care about storing the state variables
         on the proxy model, and we do not need to put the proxy back in the
@@ -142,39 +149,7 @@ class SimpleProxyPool(AbstractProxyPool):
         request and response errors of the proxy are exactly the same, so these
         two methods can be consolidated.
         """
-        proxy.note_failure()
-        proxy.set_recent_error(err)
-        if not err.__hold__:
-            proxy.add_error(err)
-
-    async def on_proxy_response_error(self, proxy, err):
-        """
-        For training proxies, we only care about storing the state variables
-        on the proxy model, and we do not need to put the proxy back in the
-        pool, or a designated pool.
-
-        Case: Error -> Hold Error
-        ------------------------
-        - Do not include error in historical errors
-        - Record error as proxy's last recent error
-        - Put in General Pool
-
-        Case: Error -> Not Hold Error
-        -----------------------------
-        - Record error as proxy's last recent error
-        - Include error in proxy's historical errors
-        - Put in General Pool
-
-        [x] TODO:
-        --------
-        For the case of the pool (and not the login handler) the callbacks for
-        request and response errors of the proxy are exactly the same, so these
-        two methods can be consolidated.
-        """
-        proxy.note_failure()
-        proxy.set_recent_error(err)
-        if not err.__hold__:
-            proxy.add_error(err)
+        proxy.add_error(err)
 
     async def on_proxy_success(self, proxy):
         """
@@ -182,7 +157,7 @@ class SimpleProxyPool(AbstractProxyPool):
         on the proxy model, and we do not need to put the proxy back in the
         pool, or a designated pool.
         """
-        proxy.note_success()
+        proxy.add_success()
 
 
 class BrokeredProxyPool(SimpleProxyPool):
@@ -208,9 +183,7 @@ class BrokeredProxyPool(SimpleProxyPool):
         based on the prepopulated limit.
         >>> collect_limit = max(self._maxsize - self.qsize(), 0)
         """
-        log = self.create_logger('collect')
-
-        await log.start('Collecting Proxies')
+        log.debug('Collecting Proxies')
 
         count = 0
         collect_limit = 10000  # Arbitrarily high for now.
@@ -223,7 +196,7 @@ class BrokeredProxyPool(SimpleProxyPool):
                 # Set Start Event on First Proxy Retrieved from Broker
                 if self.start_event and not self.start_event.is_set():
                     self.start_event.set()
-                    await log.info('Setting Start Event', extra={
+                    log.debug('Setting Start Event', extra={
                         'other': 'Broker Started Sending Proxies'
                     })
 
@@ -240,7 +213,7 @@ class AdvancedProxyPool(BrokeredProxyPool):
         self.confirmed = ConfirmedQueue()
         self.held = HeldQueue(self.confirmed, self)
 
-    async def prepopulate(self, limit=None):
+    async def prepopulate(self, limit=None, confirmed=False):
         """
         When initially starting, it sometimes takes awhile for the proxies with
         valid credentials to populate and kickstart the password consumer.
@@ -248,144 +221,75 @@ class AdvancedProxyPool(BrokeredProxyPool):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        log = self.create_logger('prepopulate')
-        await log.start('Prepopulating Proxies')
+        log.debug('Prepopulating Proxies')
 
-        count = 0
+        self.original_num_proxies = 0
 
-        proxies = await Proxy.all()
+        if confirmed:
+            proxies = await Proxy.filter(confirmed=True).all()
+        else:
+            proxies = await Proxy.all()
+
         for proxy in proxies:
-            if limit and count == limit:
+            if limit and self.original_num_proxies == limit:
                 break
+            proxy = await self.put(proxy)
+            if proxy:
+                self.original_num_proxies += 1
 
-            # Should we use the historical confirmed value or just the last request
-            # confirmed value?
-            if proxy.confirmed:
-                await self.confirmed.put(proxy)
-            # If time between attacks isn't sufficiently large, there might be proxies
-            # that should still be held.
-            elif proxy.hold():
-                await self.held.put(proxy)
-            else:
-                evaluation = proxy.evaluate_for_pool()
-                if evaluation.passed:
-                    await self.put(proxy, evaluate=False)
-
-            count += 1
-
-        if self.num_proxies == 0:
-            await log.error('No Proxies to Prepopulate')
+        if self.original_num_proxies == 0:
+            log.error('No Proxies to Prepopulate')
             return
 
-        await log.complete(f"Prepopulated {self.num_proxies} Proxies")
-        await log.complete(f"Prepopulated {self.confirmed.qsize()} Good Proxies")
+        log.debug(f"Prepopulated {self.original_num_proxies} Proxies")
+        log.debug(f"Prepopulated {self.confirmed.qsize()} Good Proxies")
 
     @property
     def num_proxies(self):
-        return (super(BrokeredProxyPool, self).num_proxies +
+        return (super(AdvancedProxyPool, self).num_proxies +
             self.held.qsize() + self.confirmed.qsize())
 
-    async def on_proxy_request_error(self, proxy, err):
-        """
-        Callback for case when request notices a request error.
-
-        Always remove from Good Queue if present.
-
-        Case: Error -> Hold Error
-        ------------------------
-        - Do not include error in historical errors
-        - Record error as proxy's last recent error
-        - If the proxy's last error is consistent with the new Hold Error, increment
-          the timeout.
-        - Put in Hold Queue
-
-        Case: Error -> Not Hold Error
-        -----------------------------
-        - Remove from Hold Queue
-        - Record error as proxy's last recent error
-        - Include error in proxy's historical errors
-        - Put in General Pool
-
-        [x] TODO:
-        --------
-        For the case of the pool (and not the login handler) the callbacks for
-        request and response errors of the proxy are exactly the same, so these
-        two methods can be consolidated.
-        """
-        log = self.create_logger('on_proxy_response_error')
-        proxy.note_failure()
-
-        await self.confirmed.remove(proxy)
-        proxy.set_recent_error(err)
-
-        if err.__hold__:
-            if proxy.last_active_error and proxy.last_active_error.__hold__:
-                proxy.increment_timeout(err)
-                await log.debug(
-                    f'Incremented {err.__subtype__} Timeout to {proxy.timeout(err)}'
-                )
-
-            await self.held.put(proxy)
-        else:
-            proxy.add_error(err)
-            # [!] IMPORTANT: This is what is causing confirmed proxies to be in
-            # general pool, you can have an error for a confirmed proxy.
-            await self.put(proxy)
-
-    async def on_proxy_response_error(self, proxy, err):
+    async def on_proxy_error(self, proxy, err):
         """
         Callback for case when request notices a response error.
 
-        Always remove from Good Queue if present.
-
-        Case: Error -> Hold Error
-        ------------------------
-        - Do not include error in historical errors
-        - Record error as proxy's last recent error
-        - If the proxy's last error is consistent with the new Hold Error, increment
-          the timeout.
-        - Put in Hold Queue
-
-        Case: Error -> Not Hold Error
-        -----------------------------
-        - Remove from Hold Queue
-        - Record error as proxy's last recent error
-        - Include error in proxy's historical errors
-        - Put in General Pool
-
         [x] TODO:
         --------
-        For the case of the pool (and not the login handler) the callbacks for
-        request and response errors of the proxy are exactly the same, so these
-        two methods can be consolidated.
+        We can probably move the logic below for incrementing the timeout into
+        the put method, since proxy.last_request will be the error to this
+        method in the .put() method.
         """
-        log = self.create_logger('on_proxy_response_error')
-        proxy.note_failure()
+        await super(AdvancedProxyPool, self).on_proxy_error(proxy, err)
 
-        await self.confirmed.remove(proxy)
-        proxy.set_recent_error(err)
+        last_request = proxy.last_request(active=True)
+        if not last_request or not last_request.was_timeout_error:
+            proxy.reset_timeouts()
 
-        if err.__hold__:
-            if proxy.last_active_error and proxy.last_active_error.__hold__:
-                proxy.increment_timeout(err)
-                await log.debug(
-                    f'Incremented {err.__subtype__} Timeout to {proxy.timeout(err)}'
-                )
+        elif last_request and last_request.was_timeout_error:
+            # Leave in Hold Queue and Increment Timeout
+            await self.held.raise_if_missing(proxy)
+            try:
+                proxy.increment_timeout(last_request.error)
+            except ProxyMaxTimeoutError as e:
+                log.debug(e)
 
-            await self.held.put(proxy)
-        else:
-            proxy.add_error(err)
-            # [!] IMPORTANT: This is what is causing confirmed proxies to be in
-            # general pool, you can have an error for a confirmed proxy.
-            await self.put(proxy)
+                proxy.reset_timeout(err)
+                await self.held.remove(proxy)
+
+                # Don't want to use normal put method because resetting thte timeout
+                # will cause the proxy to be put right back into the hold queue.
+                return await self.put_in_pool(proxy)
+
+        await self.put(proxy)
 
     async def on_proxy_success(self, proxy):
         """
         There is a chance that the proxy is already in the good queue... our
         overridden put method handles that.
         """
-        proxy.note_success()
-        await self.confirmed.put(proxy)
+        await super(AdvancedProxyPool, self).on_proxy_success(proxy)
+        if not await self.confirmed.contains(proxy):
+            await self.confirmed.put(proxy)
 
     async def get(self):
         """
@@ -403,12 +307,16 @@ class AdvancedProxyPool(BrokeredProxyPool):
         timeout so it does not think there are no more proxies when they are just
         all currently being used.
         """
-        await self.held.recycle()
+        # await self.held.recycle()
         await self.log_pool_size()
         return await super(BrokeredProxyPool, self).get()
 
     async def _get_proxy(self):
         """
+        [x] TODO:
+        --------
+        Update this docstring to reflect current setup.
+
         Good = [Proxy]
         Hold = [Proxy]
         Pool = queue(Proxy) (This object)
@@ -479,66 +387,187 @@ class AdvancedProxyPool(BrokeredProxyPool):
         before Case 1, so that any available proxies that would be removed from
         hold are put in good.
         """
-        log = self.create_logger('get')
-
         proxy = await self.confirmed.get()
         if not proxy:
             proxy = await self.held.get()
             if not proxy:
                 proxy = await super(BrokeredProxyPool, self)._get_proxy()
 
-                """
-                There can be held proxies in general queue if they were not
-                supposed to be held at the time they were initially checked.
+                if proxy.confirmed or proxy.last_error(active=True) in settings.TIMEOUT_ERRORS:
+                    raise ProxyPoolError("Confirmed or holdable proxies should not be in pool.")
 
-                We can fix this problem by checking if the last_error is an error
-                that indicates they MIGHT be a holdable proxy, but that might be
-                overkill.
-                """
-                if proxy.hold():
-                    await log.warning('Found Hold Proxy in General Pool...', extra={
-                        'other': 'Putting Back in Hold Queue and Returning'
-                    })
-                    await self.held.put(proxy)
+        return proxy
 
-                """
-                There can be confirmed proxies in general queue if the confirmed
-                proxy's last reauest failed.
+    async def put_in_pool(self, proxy):
+        if not proxy.num_requests(active=False, success=True):
+            evaluation = proxy.evaluate_for_pool()
+            if not evaluation.passed:
+                log.debug('Cannot Add Proxy to Pool', extra={
+                    'other': str(evaluation)
+                })
+                return
 
-                We should start checking the last_request_confirmed value instead.
-                """
-                if proxy.confirmed:
-                    await log.error('There should not be confirmed proxies in general pool...',
-                        extra={
-                            'other': 'Putting Back in Confirmed Queue & Returning'
-                        })
-                    await self.confirmed.put(proxy)
-
+        await super(BrokeredProxyPool, self).put(proxy)
         return proxy
 
     async def put(self, proxy, evaluate=True):
         """
-        Adds proxy to the pool and keeps record in proxy_finder for accessing
-        at later point.
+        Determines whether or not proxy should be put in the Confirmed Queue,
+        the Hold Queue or back in the general pool.  If the proxy is not supposed
+        to be held or confirmed, evaluates whether or not the proxy meets the
+        specified standards before putting in the general pool.
 
-        [!] IMPORTANT:
-        -------------
-        Sometimes we might want to still add the proxy even if the
-        quantitative metrics aren't perfect, but we know the proxy has
-        successful requests -> Reason for Strict Parameter
+        [x] NOTE:
+        ---------
+        Because proxies in the ConfirmedQueue are used simultaneously by multiple
+        threads at the same time, and a proxy from the ConfirmedQueue is likely to
+        cause subsequent successful responses, it is likely that the proxy is
+        already in the ConfirmedQueue.
 
-        [!] IMPORTANT:
-        -------------
-        Tuple comparison for priority in Python3 breaks if two tuples are the
-        same, so we have to use a counter to guarantee that no two tuples are
-        the same and priority will be given to proxies placed first.
+        [x] NOTE:
+        ---------
+        Do not evaluate for confirmed proxies, it will throw an error because
+        we intentionally want to avoid that.  For unconfirmed proxies, we have
+        to determine if we want them to be evaluated if they should be held.
         """
-        log = self.create_logger('put')
 
-        if evaluate:
-            evaluation = proxy.evaluate_for_pool()
-            if not evaluation.passed:
-                await log.warning('Cannot Add Proxy to Pool')
-                return
+        # Proxies that have not been used yet will not have a queue_id, these
+        # are always proxies immediately from the prepopulation.
 
-        await super(BrokeredProxyPool, self).put(proxy)
+        if not proxy.queue_id:
+            if proxy.num_requests(active=False, success=True):
+                await self.confirmed.raise_if_present(proxy)
+                await self.confirmed.put(proxy)
+                return proxy
+            else:
+                return await self.put_in_pool(proxy)
+
+        else:
+            # Guaranteed to be Non Null
+            last_request = proxy.last_request(active=True)
+
+            if proxy.queue_id == 'confirmed':
+                if last_request.confirmed:
+
+                    # Sanity Check for Now
+                    # Should already be in Confirmed Queue - however, another thread
+                    # might have removed it in some sort of edge case.
+                    missing = await self.confirmed.warn_if_missing(proxy)
+                    if missing:
+                        await self.confirmed.put(proxy)
+
+                    # Sanity Check for Now
+                    await self.held.raise_if_present(proxy)
+                    return proxy
+
+                elif last_request.was_timeout_error:
+                    # Move to the Hold Queue if not enough time has passed since
+                    # the timeout error.  Since the error would have just happened,
+                    # this is almost guaranteed to be true.
+                    if proxy.time_since_used < proxy.timeout(last_request.error):
+
+                        await self.confirmed.raise_if_missing(proxy)
+                        await self.confirmed.remove(proxy)
+                        await self.held.raise_if_present(proxy)
+                        await self.held.put(proxy)
+
+                        return proxy
+
+                    # Here, enough time has passed since the timeout error. This
+                    # would most likely never get reached.
+                    else:
+                        if proxy.confirmed:
+                            await self.confirmed.raise_if_missing(proxy)
+                            return proxy
+                        else:
+                            return await self.put_in_pool(proxy)
+
+            elif proxy.queue_id == 'hold':
+                if last_request.confirmed:
+
+                    await self.held.raise_if_missing(proxy)
+                    await self.held.remove(proxy)
+
+                    # Always reset timeout when moving out of hold queue.
+                    proxy.reset_timeouts()
+
+                    await self.confirmed.raise_if_present(proxy)
+                    await self.confirmed.put(proxy)
+                    return proxy
+
+                elif last_request.was_timeout_error:
+
+                    # Prevent proxies from staying in hold queue forever by checking
+                    # if timeout exceeds the max.
+                    if proxy.timeout_exceeds_max(last_request.error):
+                        raise RuntimeError('This should not happen, since we should always catch'
+                            ' the exception when incremenging timeouts.')
+                        # log.debug('Timeout for Proxy in Hold Queue Exceeded Max')
+
+                        # # Always reset timeout when moving out of hold queue.
+                        # proxy.reset_timeout(last_request.error)
+
+                        # await self.held.raise_if_missing(proxy)
+                        # await self.held.remove(proxy)
+
+                        # # We might want to discard instead of putting back in pool here?
+                        # # Could wind up causing a lot of additional unnecessary reqeusts.
+                        # return put_in_pool(proxy)
+
+                    else:
+                        # Leave in Hold Queue and Increment Timeout
+                        await self.held.raise_if_missing(proxy)
+                        try:
+                            proxy.increment_timeout(last_request.error)
+                        except ProxyMaxTimeoutError as e:
+                            log.debug(e)
+                            proxy.reset_timeout(last_request.error)
+                            await self.held.remove(proxy)
+                        else:
+                            # We might want to discard instead of putting back in pool here?
+                            # Could wind up reusing quickly leading to more timeouts.
+                            return await self.put_in_pool(proxy)
+
+                else:
+                    await self.held.raise_if_missing(proxy)
+                    await self.held.remove(proxy)
+
+                    # Always reset timeout when moving out of hold queue.
+                    proxy.reset_timeouts()
+
+                    # We might want to discard instead of putting back in pool here?
+                    # Could wind up causing a lot of additional unnecessary reqeusts.
+                    return await self.put_in_pool(proxy)
+
+            else:
+                if last_request.confirmed:
+                    await self.confirmed.raise_if_present(proxy)
+                    await self.confirmed.put(proxy)
+                    return proxy
+
+                # There may be an edge case where the last request error is a timeout
+                # error but enough time has passed where it is immediately usable
+                # again - but that will just mean it is used from the hold queue
+                # faster than usual.
+                elif last_request.was_timeout_error:
+                    await self.held.raise_if_present(proxy)
+                    await self.held.put(proxy)
+                    return proxy
+
+                else:
+                    # Here, we basically have a proxy from the pool that had a
+                    # bad error.  What we should do is evaluate it and put it
+                    # back in pool, if it has a confirmed request it will automatically
+                    # go back in pool.
+
+                    # [x] TODO: If proxy was confirmed within active life span,
+                    # maybe we should put it back in confirmed pool?  Not sure
+                    # if this block would ever get reached, but we can leave. code
+                    # for now.
+                    if proxy.num_requests(active=True, success=True):
+                        log.debug('Putting Pool Proxy in Confirmed Queue')
+                        await self.confirmed.raise_if_present(proxy)
+                        await self.confirmed.put(proxy)
+                        return proxy
+                    else:
+                        return await self.put_in_pool(proxy)

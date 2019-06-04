@@ -1,16 +1,4 @@
-def filtered_array(*items):
-    array = []
-    for item in items:
-        if isinstance(item, tuple) and len(item) == 2:
-            if item[1] is not None:
-                array.append(item[0] % item[1])
-        elif isinstance(item, tuple) and len(item) == 1:
-            if item[0] is not None:
-                array.append(item[0])
-        else:
-            if item is not None:
-                array.append(item)
-    return array
+from instattack.lib.utils import filtered_array
 
 
 def get_http_exception_err_no(exc):
@@ -40,10 +28,12 @@ def get_http_exception_request_method(exc):
 def get_http_exception_message(exc):
     from .http import HttpException
 
-    if not isinstance(exc, HttpException):
+    if isinstance(exc, HttpException):
         return str(exc)
     else:
         message = getattr(exc, 'message', None) or str(exc)
+        if message is None or message == "":
+            message = exc.__class__.__name__
 
         parts = filtered_array(*(
             message,

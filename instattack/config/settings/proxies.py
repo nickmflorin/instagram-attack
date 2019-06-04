@@ -31,3 +31,5 @@ ERROR_TYPE_CLASSIFICATION = {
         'invalid_response',
     ),
 }
+
+TIMEOUT_ERRORS = ('too_many_requests', 'too_many_open_connections')

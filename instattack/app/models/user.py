@@ -12,6 +12,9 @@ from instattack.app.exceptions import DirExists, UserFileExists
 from instattack.app.passwords import password_gen
 
 
+log = logger.get(__name__, subname='User')
+
+
 class UserAttempt(Model):
 
     id = fields.IntField(pk=True)
@@ -76,8 +79,6 @@ class User(Model):
         We do this when a user is saved to the database, but we should see if
         we can do it everytime the user is also retrieved from the database.
         """
-        log = logger.get_sync(__name__, subname='setup')
-
         if not self.directory.exists():
             self.initialize_directory()
         else:
@@ -88,9 +89,6 @@ class User(Model):
                     filepath.touch()
 
     def teardown(self):
-
-        log = logger.get_sync(__name__, subname='teardown')
-
         if not self.directory.exists():
             log.warning(f'User directory {self.directory.name} was already deleted.')
         else:
@@ -117,26 +115,22 @@ class User(Model):
         return missing
 
     async def stream_data(self, filename, limit=None):
-        log = logger.get_async(__name__, subname='stream_data')
-
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
         if not self.directory.exists():
-            await log.warning(f'User Directory for {self.username} Does Not Exist')
+            log.warning(f'User Directory for {self.username} Does Not Exist')
             self.directory.mkdir()
 
         filepath = self.file_path(filename)
         if not filepath:
-            await log.warning(f"File {filepath.name} Does Not Exist.")
+            log.warning(f"File {filepath.name} Does Not Exist.")
             filepath.touch()
 
         async for item in stream_raw_data(filepath, limit=limit):
             yield item
 
     def read_data(self, filename, limit=None):
-        log = logger.get_sync(__name__, subname='read_data')
-
         if filename not in self.FILES:
             raise ValueError(f'Invalid filename {filename}.')
 
@@ -213,9 +207,6 @@ class User(Model):
             count += 1
 
     async def create_or_update_attempt(self, attempt, success=False, try_attempt=0):
-
-        log = logger.get_async(__name__, subname='create_or_update_attempt')
-
         try:
             attempt, created = await UserAttempt.get_or_create(
                 defaults={

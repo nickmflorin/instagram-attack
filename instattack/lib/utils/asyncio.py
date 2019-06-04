@@ -37,33 +37,37 @@ async def limit_as_completed(coros, batch_size, stop_event=None):
 
     When coroutines complete, and the pool of concurrent tasks drops below the
     batch_size, coroutines will be added to the batch until there are none left.and
+
+    [!] IMPORTANT:
+    --------------
+    For whatever reason, using StopAsyncIteration was not working properly,
+    especially in cases where the number of coroutines yielded from coros is
+    less than the batch size.  The only other solution I could think of right
+    now is to set a timeout, since the generator should be creating the tasks
+    at a high frequency.
+
+    Note sure why StopAsyncIteration works below though?
     """
     futures = []
     while len(futures) < batch_size:
         try:
-            c = await coros.__anext__()
-        except StopAsyncIteration as e:
-            break
-        else:
+            c = await asyncio.wait_for(coros.__anext__(), timeout=2.0)
             futures.append(asyncio.create_task(c))
-
-    num_tries = 0
+        # except StopAsyncIteration as e:
+        except asyncio.TimeoutError:
+            break
 
     while len(futures) > 0 and (stop_event is None or not stop_event.is_set()):
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
         for f in futures:
             if f.done():
-                num_tries += 1
-                if f.exception():
-                    raise f.exception()
-                else:
-                    futures.remove(f)
-                    try:
-                        newc = await coros.__anext__()
-                        futures.append(asyncio.create_task(newc))
-                    except StopAsyncIteration as e:
-                        pass
-                    yield f.result(), num_tries, futures
+                futures.remove(f)
+                try:
+                    newc = await coros.__anext__()
+                    futures.append(asyncio.create_task(newc))
+                except StopAsyncIteration as e:
+                    pass
+                yield f
 
 
 async def cancel_remaining_tasks(futures=None):

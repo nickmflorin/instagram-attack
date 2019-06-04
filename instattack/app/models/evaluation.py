@@ -61,7 +61,7 @@ def evaluate_errors(proxy):
         if config_errors:
             config_active_errors = config_errors.get('active')
             if config_active_errors:
-                actual_active_errors = proxy._num_errors(*param_set[1], active=True)
+                actual_active_errors = proxy.num_errors(*param_set[1], active=True)
 
                 if actual_active_errors > config_active_errors:
                     reason = AttributeEvaluation(
@@ -73,7 +73,7 @@ def evaluate_errors(proxy):
 
             config_hist_errors = config_errors.get('historical')
             if config_hist_errors:
-                actual_hist_errors = proxy._num_errors(*param_set[1], active=False)
+                actual_hist_errors = proxy.num_errors(*param_set[1], active=False)
 
                 if actual_hist_errors > config_hist_errors:
                     reason = AttributeEvaluation(
@@ -102,7 +102,7 @@ def evaluate_requests(proxy):
 
             config_active_requests = config_requests.get('active')
             if config_active_requests:
-                actual_active_requests = proxy._num_requests(active=True, success=param_set[1])
+                actual_active_requests = proxy.num_requests(active=True, success=param_set[1])
 
                 if param_set[0] == 'success':
                     if actual_active_requests < config_active_requests:
@@ -124,7 +124,7 @@ def evaluate_requests(proxy):
 
             config_hist_requests = config_requests.get('historical')
             if config_hist_requests:
-                actual_hist_requests = proxy._num_requests(active=False, success=param_set[1])
+                actual_hist_requests = proxy.num_requests(active=False, success=param_set[1])
 
                 if param_set[0] == 'success':
                     if actual_hist_requests < config_hist_requests:
@@ -154,11 +154,10 @@ def evaluate_error_rate(proxy):
 
     if limits.get('error_rate'):
         config_error_rate = limits['error_rate']
-        horizon = config_error_rate.get('horizon')
 
         config_active_rate = config_error_rate.get('active')
         if config_active_rate:
-            actual_active_rate = proxy._error_rate(active=True, horizon=horizon)
+            actual_active_rate = proxy.error_rate(active=True)
 
             if actual_active_rate > config_active_rate:
                 reason = AttributeEvaluation(
@@ -170,7 +169,7 @@ def evaluate_error_rate(proxy):
 
         config_hist_rate = config_error_rate.get('historical')
         if config_hist_rate:
-            actual_hist_rate = proxy._error_rate(active=False, horizon=horizon)
+            actual_hist_rate = proxy.error_rate(active=False)
 
             if actual_hist_rate > config_hist_rate:
                 reason = AttributeEvaluation(
@@ -196,15 +195,13 @@ def evaluate(proxy):
     """
 
     evaluations = ProxyEvaluation(reasons=[])
+    limits = config['proxies']['limits']
 
     request_eval = evaluate_requests(proxy)
     errors_eval = evaluate_errors(proxy)
     error_rate_eval = evaluate_error_rate(proxy)
 
     evaluations.merge(request_eval, errors_eval, error_rate_eval)
-
-    limits = config['proxies']['limits']
-    evaluations = ProxyEvaluation(reasons=[])
 
     # Will Have to be Included in evaluate_from_pool When We Start Manually Calculating
     if limits.get('resp_time'):
@@ -217,35 +214,3 @@ def evaluate(proxy):
             evaluations.add(reason)
 
     return evaluations
-
-
-# def evaluate_from_pool(proxy):
-#     """
-#     Determines if the proxy meets the provided standards to be used after it
-#     is dequed from the pool.
-#     """
-#     evaluations = ProxyEvaluation(reasons=[])
-
-#     request_eval = evaluate_requests(proxy)
-#     errors_eval = evaluate_errors(proxy)
-#     error_rate_eval = evaluate_error_rate(proxy)
-
-#     # [x] NOTE:
-#     # This is the same logic that we apply in the .hold() method of the proxy,
-#     # but this logic adds the evaluation reasons and outputs differently.
-
-#     # We do NOT want to increment the timeouts here, only to evaluate if they are
-#     # valid or not.
-#     for err in proxy.TIMEOUT_ERRORS:
-#         if proxy.last_active_error and proxy.last_active_error.__subtype__ == err:
-#             timeout = proxy.timeout(err)
-#             if proxy.time_since_used < timeout:
-#                 reason = AttributeEvaluation(
-#                     value=proxy.time_since_used,
-#                     relative_value=timeout,
-#                     name=f"Time Between {err} Errors",
-#                     comparison="<"
-#                 )
-#                 evaluations.add(reason)
-
-#     return evaluations

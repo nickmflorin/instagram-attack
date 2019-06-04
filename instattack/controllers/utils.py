@@ -2,10 +2,20 @@ import asyncio
 from cement import ex
 import functools
 
+LEVEL_ARGUMENT = (
+    ['-lv', '--level'],
+    {
+        'action': 'store',
+        'help': 'Override the Logging Level'
+    }
+)
 
-def proxy_command(help=None, limit=None):
 
-    arguments = []
+def proxy_command(help=None, limit=None, arguments=None):
+
+    arguments = arguments or []
+    arguments.append(LEVEL_ARGUMENT)
+
     if limit:
         arguments.append((
             ['-l', '--limit'], {'help': 'Limit the Number of Proxies', 'type': int},
@@ -35,6 +45,7 @@ def user_command(help=None):
 
         arguments = [
             (['username'], {'help': 'Username'}),
+            LEVEL_ARGUMENT
         ]
 
         return ex(help=help, arguments=arguments)(wrapped)
@@ -44,6 +55,7 @@ def user_command(help=None):
 
 def existing_user_command(help=None, arguments=None):
     new_arguments = arguments or []
+    new_arguments.append(LEVEL_ARGUMENT)
 
     def user_command_wrapper(func):
 

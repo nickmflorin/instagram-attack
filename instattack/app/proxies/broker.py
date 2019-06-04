@@ -3,12 +3,14 @@ import contextlib
 from proxybroker import Broker
 
 from instattack.config import settings, config
-
-from instattack.app.mixins import LoggerMixin
+from instattack.lib import logger
 from instattack.app.models import Proxy
 
 
-class ProxyBroker(Broker, LoggerMixin):
+log = logger.get(__name__, subname='Proxy Broker')
+
+
+class ProxyBroker(Broker):
 
     __name__ = 'Proxy Broker'
 
@@ -35,19 +37,16 @@ class ProxyBroker(Broker, LoggerMixin):
 
     @contextlib.asynccontextmanager
     async def session(self):
-        log = self.create_logger('session')
-
-        await log.debug('Opening Broker Session')
+        log.debug('Opening Broker Session')
         try:
             await self.start()
             yield self
         finally:
-            await log.debug('Closing Broker Session')
+            log.debug('Closing Broker Session')
             await self.shutdown()
 
     async def start(self):
-        log = self.create_logger('start')
-        await log.start(f'Starting Broker with Limit = {self.limit}')
+        log.start(f'Starting Broker with Limit = {self.limit}')
 
         self._started = True
 
@@ -59,8 +58,6 @@ class ProxyBroker(Broker, LoggerMixin):
         )
 
     async def collect(self, save=False):
-        log = self.create_logger('collect')
-
         if self._started:
             raise RuntimeError('Broker should not be started before collect method.')
 
@@ -77,7 +74,7 @@ class ProxyBroker(Broker, LoggerMixin):
                     )
                     yield proxy, created
                 else:
-                    await log.debug('Null Proxy Returned from Broker... Stopping')
+                    log.debug('Null Proxy Returned from Broker... Stopping')
                     break
 
     async def shutdown(self):
@@ -85,10 +82,7 @@ class ProxyBroker(Broker, LoggerMixin):
         Cannot override stop() method, because stop() method must remain synchronous
         since ProxyBroker package attaches signal handlers to it.
         """
-        log = self.create_logger('shutdown')
-
-        await log.stop('Shutting Down Proxy Broker')
-
+        log.stop('Shutting Down Proxy Broker')
         self._proxies.put_nowait(None)
 
         # I think this is throwing an error because ProxyBroker is also stopping
@@ -107,7 +101,6 @@ class ProxyBroker(Broker, LoggerMixin):
         We still use the logic in the original Proxy Broker stop method so we do
         not need to call super().
         """
-        log = self.create_logger('stop', sync=True)
         if self._stopped:
             raise RuntimeError('Proxy Broker Already Stopped')
 

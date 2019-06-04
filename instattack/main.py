@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 import asyncio
-import logging
 import pathlib
-import progressbar
 import tortoise
+import traceback
 import warnings
 import sys
 
@@ -23,18 +22,22 @@ from .controllers.base import Base, UserController, ProxyController
 from .mixins import AppMixin
 
 
+log = logger.get(__name__)
+
+
 def exception_hook(exc_type, exc_value, exc_traceback):
     """
     You can log all uncaught exceptions on the main thread by assigning a handler
     to sys.excepthook.
     """
-    log = logger.get_sync(__name__, subname='exception_hook')
     try:
         log.traceback(exc_type, exc_value, exc_traceback)
     except BlockingIOError:
-        # Don't Clog Output with Unrelated Error
-        # This will still print traceback up until point where there is a
-        # blocking issue.
+        # This will clog the output a big but at least we will have the end
+        # of the stack trace to diagnose errors.
+        tb = traceback.format_exception(exc_type, exc_value, exc_traceback)
+        lines = tb[-50:]
+        sys.stdout.write("\n".join(lines))
         pass
 
 
@@ -55,7 +58,7 @@ def handle_exception(loop, context):
     Not sure if we will keep it or not, since it might add some extra
     customization availabilities, but it works right now.
     """
-    log = logger.get_sync('handle_exception', sync=True)
+    log = logger.get('handle_exception', sync=True)
     log.debug('Handling Exception')
 
     # The only benefit including the frame has is that the filename
@@ -111,7 +114,6 @@ def setup(app):
             loop.run_until_complete(tortoise.Tortoise.generate_schemas())
 
     def setup_logger(spinner):
-
         spinner.write('Disabling External Loggers')
         logger.disable_external_loggers(
             'proxybroker',
@@ -138,7 +140,7 @@ def shutdown(*args, **kwargs):
     raise errors due to the loop state.  We check the global _shutdown status to
     make sure we avoid this and log in case it is avoidable.
     """
-    log = logger.get_sync(__name__, subname='shutdown')
+    log = logger.get(__name__, subname='shutdown')
 
     global _shutdown
     if _shutdown:
@@ -179,29 +181,7 @@ def shutdown(*args, **kwargs):
         else:
             spinner.write(f'No Leftover Tasks to Cancel')
 
-    def shutdown_async_loggers(spinner):
-        """
-        [x] TODO:
-        --------
-        aiologger is still in Beta, and we continue to get warnings about the loggers
-        not being shut down properly with .flush() and .close().  We should probably
-        remove that dependency and just stick to the sync logger, since it does not
-        improve speed by a substantial amount.
-        """
-        spinner.write('Shutting Down Async Loggers')
-
-        # This will return empty list right now.
-        loggers = [
-            logging.getLogger(name)
-            for name in logging.root.manager.loggerDict
-        ]
-
-        for lgr in loggers:
-            if isinstance(lgr, logger.AsyncLogger):
-                loop.run_until_complete(lgr.shutdown())
-
     with start_and_stop('Shutting Down') as spinner:
-        shutdown_async_loggers(spinner)
         shutdown_outstanding_tasks(spinner)
         shutdown_database(spinner)
 
@@ -209,25 +189,10 @@ def shutdown(*args, **kwargs):
         loop.close()
 
 
-def ensure_logger_enabled(app):
-
-    log = logger.get_sync(__name__)
-    if not logger._enabled:
-        log.warning('Logger Should be Enabled Before App Start')
-        logger.enable()
-
-    log = logger.get_async(__name__)
-    if not logger._enabled:
-        log.warning('Logger Should be Enabled Before App Start')
-        logger.enable()
-
-
 @spin_start_and_stop('Setting Up Loop')
 def setup_loop(app):
 
     loop = asyncio.get_event_loop()
-    setattr(loop, 'config', app.config)
-
     loop.set_exception_handler(handle_exception)
     for s in config.__SIGNALS__:
         loop.add_signal_handler(s, shutdown)
@@ -267,7 +232,6 @@ class Instattack(App, AppMixin):
 
         hooks = [
             ('pre_setup', setup),
-            ('pre_run', ensure_logger_enabled),
             ('post_run', shutdown),
         ]
 
@@ -281,7 +245,7 @@ class Instattack(App, AppMixin):
         self.loop = asyncio.get_event_loop()
         super(Instattack, self).run()
 
-    @spin_start_and_stop('Validating Config')
+    # @spin_start_and_stop('Validating Config')
     def validate_config(self):
         """
         Validates the configuration against a Cerberus schema.  If the configuration
@@ -291,17 +255,16 @@ class Instattack(App, AppMixin):
         super(Instattack, self).validate_config()
         data = self.config.get_dict()
 
-        # Validation Not Working Properly Right Now
         print('Warning: Not Validating Schema')
 
-        # Log.logging keeps failing in validation for some unknown reason.
-        # logging_config = data['log.logging']
-        # del data['log.logging']
-
+        # We will start validating the schema again once it settles down and
+        # we stop adding attributes.
         # config.validate(data, set=False)
-
-        # data['log.logging'] = logging_config
         config.set(data)
+
+        # Since we are not using the Cement logger, we have to set this
+        # manually.
+        logger.setLevel(config['instattack']['log.logging']['level'])
 
 
 class InstattackTest(TestApp, Instattack):
@@ -358,15 +321,14 @@ def main():
 
         except InstattackError as e:
             app.failure(str(e))
+            if app.debug:
+                log.traceback(e.__class__, e, e.__traceback__)
 
         except (CaughtSignal, KeyboardInterrupt) as e:
             app.failure('Caught Signal %s' % e, exit_code=0, tb=False)
-            # print('\n%s' % e)
-            # app.exit_code = 0
+            print('\n%s' % e)
+            app.exit_code = 0
 
 
 if __name__ == '__main__':
-    from instattack.config import settings
-    print(settings.Colors)
-    sys.exit()
     main()
