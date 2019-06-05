@@ -29,7 +29,12 @@ def get_remaining_tasks():
     return list(tasks)
 
 
-async def limit_as_completed(coros, batch_size, stop_event=None):
+async def limit_as_completed(
+    coros,
+    batch_size,
+    stop_callback=None,
+    stop_event=None,
+):
     """
     Takes a generator yielding coroutines and runs the coroutines concurrently,
     similarly to asyncio.as_completed(tasks), except that it limits the number
@@ -48,26 +53,31 @@ async def limit_as_completed(coros, batch_size, stop_event=None):
 
     Note sure why StopAsyncIteration works below though?
     """
-    futures = []
-    while len(futures) < batch_size:
+    pending = []
+    while len(pending) < batch_size:
         try:
             c = await asyncio.wait_for(coros.__anext__(), timeout=2.0)
-            futures.append(asyncio.create_task(c))
+            pending.append(asyncio.create_task(c))
         # except StopAsyncIteration as e:
         except asyncio.TimeoutError:
             break
 
-    while len(futures) > 0 and (stop_event is None or not stop_event.is_set()):
+    while len(pending) > 0 and (not stop_event or not stop_event.is_set()):
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
-        for f in futures:
+        for f in pending:
             if f.done():
-                futures.remove(f)
+                pending.remove(f)
                 try:
                     newc = await coros.__anext__()
-                    futures.append(asyncio.create_task(newc))
+                    pending.append(asyncio.create_task(newc))
                 except StopAsyncIteration as e:
                     pass
-                yield f
+
+                yield f, pending
+
+                if stop_callback:
+                    if stop_callback(f):
+                        break
 
 
 async def cancel_remaining_tasks(futures=None):

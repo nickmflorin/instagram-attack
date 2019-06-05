@@ -49,7 +49,7 @@ class AbstractObj(object):
 class AbstractGroup(AbstractObj):
 
     # For Now - Not allowing group to be set with a format attribute.
-    def __init__(self, *children, header=None, lines_above=0, lines_below=0, **kwargs):
+    def __init__(self, *children, header=None, lines_above=0, lines_below=0, **kwargs):  # noqa
         super(AbstractGroup, self).__init__(**kwargs)
 
         self._lines_above = lines_above
@@ -112,7 +112,8 @@ class AbstractGroup(AbstractObj):
 
     def valid(self, record):
         valid_children = self.valid_children(record)
-        return len(valid_children) != 0
+        if len(valid_children) != 0:
+            return True
 
     def valid_children(self, record):
         valid = []
@@ -131,6 +132,7 @@ class Item(AbstractObj):
         prefix=None,
         suffix=None,
         format=None,
+        show_missing=False,
         **kwargs
     ):
         super(Item, self).__init__(**kwargs)
@@ -140,6 +142,7 @@ class Item(AbstractObj):
             format=format,
             prefix=prefix,
             suffix=suffix,
+            show_missing=show_missing,
         )
 
     @property

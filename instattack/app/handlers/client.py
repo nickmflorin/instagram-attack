@@ -1,5 +1,6 @@
 import asyncio
 import re
+import ssl
 
 from instattack.config import settings, config
 from instattack.lib import logger
@@ -20,6 +21,12 @@ class client:
         self.on_success = on_success
 
     def post(self, session, url, proxy, headers=None, data=None):
+
+        # Might want to see if we can get any increases in the rate of good
+        # proxies if we start using SSL certification.
+        sslcontext = ssl.create_default_context(
+            cafile='/repos/instagram-attack/server.crt')
+
         return session.post(
             url,
             headers=headers,
@@ -115,7 +122,7 @@ class instagram_client(client):
             url=settings.INSTAGRAM_LOGIN_URL,
             proxy=proxy,
             headers=headers,
-            data=data
+            data=data,
         )
 
     async def get_token(self, session):

@@ -6,6 +6,14 @@ from artsylogger import (
 from instattack.config import settings
 
 
+def get_proxy_last_error(record):
+    if getattr(record, 'proxy', None):
+        proxy = record.proxy
+        active_errors = proxy.requests(fail=True, active=True)
+        if active_errors:
+            return active_errors[-1].error
+
+
 def get_record_message(record):
     from instattack.app.exceptions.utils import get_http_exception_message
     if isinstance(record.msg, Exception):
@@ -109,30 +117,46 @@ CONTEXT_LINES = Lines(
         indent=1,
     ),
     Lines(
-        Line(
-            Item(
-                value="proxy.humanized_active_errors",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                label=Label(
-                    constant="Active Errors",
-                    delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
-                ),
-            ),
-            indent=2,
-        ),
         # Line(
         #     Item(
-        #         value="proxy.humanized_connection_error_count",
+        #         value="proxy.humanized_active_errors",
         #         format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
         #         label=Label(
-        #             constant="Num. Connection Errors",
+        #             constant="Active Errors",
         #             delimiter=":",
         #             format=settings.RecordAttributes.LABEL_2,
         #         ),
         #     ),
         #     indent=2,
         # ),
+        Line(
+            Item(
+                value="proxy.queue_id",
+                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                # Will only show if as None if any other item in group is non-null
+                show_null='None',
+                label=Label(
+                    constant="Queue ID",
+                    delimiter=":",
+                    format=settings.RecordAttributes.LABEL_2,
+                ),
+            ),
+            indent=2,
+        ),
+        Line(
+            Item(
+                value=get_proxy_last_error,
+                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                # Will only show if as None if any other item in group is non-null
+                show_null='None',
+                label=Label(
+                    constant="Last Error",
+                    delimiter=":",
+                    format=settings.RecordAttributes.LABEL_2,
+                ),
+            ),
+            indent=2,
+        ),
     ),
     lines_above=1,
     lines_below=1,

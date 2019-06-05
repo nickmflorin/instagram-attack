@@ -1,14 +1,138 @@
 import asyncio
 
 from instattack.lib import logger
-from instattack.app.exceptions import ProxyPoolError
+from instattack.app.exceptions import ProxyPoolError, ProxyMaxTimeoutError
+
+
+NUM_CONFIRMATION_THRESHOLD = 3
+
+
+class ProxySubQueueManager(object):
+
+    def __init__(self, pool):
+        self.confirmed = ConfirmedQueue(pool)
+        self.held = HeldQueue(pool)
+
+        self.confirmed.held = self.held
+        self.held.confirmed = self.confirmed
+
+    @property
+    def num_proxies(self):
+        return self.confirmed.num_proxies + self.held.num_proxies
+
+    async def get(self):
+        proxy = await self.confirmed.get()
+        if proxy:
+            return proxy
+
+        proxy = await self.held.get()
+        if proxy:
+            return proxy
+
+    async def put(self, proxy, req):
+        """
+        [x] NOTE:
+        ---------
+        Because proxies in the ConfirmedQueue are used simultaneously by multiple
+        threads at the same time, and a proxy from the Confirmed Queue is likely to
+        cause subsequent successful responses, it is likely that the proxy is
+        already in the ConfirmedQueue.
+        """
+        last_last_request = proxy.requests(-2, active=True)
+
+        if proxy.queue_id == 'confirmed':
+            await self.confirmed.raise_if_missing(proxy)  # Sanity Check for Now
+            await self.held.raise_if_present(proxy)  # Sanity Check for Now
+
+            # Can be None for Prepopulated Confirmed Proxies
+            if last_last_request:
+                assert last_last_request.confirmed
+
+            # Request Confirmed Again - Maintain in Confirmed Queue
+            if req.confirmed:
+                return proxy
+
+            # Timeout Error in Confirmed - Don't need to increment timeout
+            elif req.was_timeout_error:
+                self.log.debug('Moving Proxy from Confirmed to Hold Queue')
+                await self.confirmed.remove(proxy)
+                await self.held.put(proxy)
+                return proxy
+
+            else:
+                requests = proxy.requests(active=True)[int(-1 * NUM_CONFIRMATION_THRESHOLD):]
+
+                # Keep in Confirmed
+                if len(requests) < NUM_CONFIRMATION_THRESHOLD:
+                    self.log.debug('Keeping Proxy in Confirmed Even w/ Error')
+                    return proxy
+                elif any([req.confirmed for req in requests]):
+                    self.log.debug('Keeping Proxy in Confirmed Even w/ Error')
+                    return proxy
+                else:
+                    self.log.debug('Moving Proxy from Confirmed to General Pool')
+                    await self.confirmed.remove(proxy)
+                    await self.pool.put_in_pool(proxy)
+                    return proxy
+
+        elif proxy.queue_id == 'hold':
+            await self.held.raise_if_missing(proxy)  # Sanity Check for Now
+            await self.confirmed.raise_if_present(proxy)  # Sanity Check for Now
+
+            assert last_last_request.was_timeout_error
+
+            # Request Confirmed - Move from Hold to Confirmed
+            if req.confirmed:
+                self.log.debug('Moving Proxy from Hold to Confirmed Queue')
+                await self.held.remove(proxy)
+                await self.confirmed.put(proxy)
+                return proxy
+
+            # Another Timeout Error - Increment Timeout and Check Max
+            elif req.was_timeout_error and req.error == last_last_request.error:
+                try:
+                    proxy.increment_timeout(req.error)
+                except ProxyMaxTimeoutError as e:
+                    self.log.debug(e)
+                    proxy.reset_timeout(req.error)
+
+                    self.log.debug('Moving Proxy from Hold to General Pool')
+                    await self.held.remove(proxy)
+                    return await self.put_in_pool(proxy)
+                else:
+                    await self.held.put(proxy)
+                    return proxy
+
+            else:
+                self.log.debug('Moving Proxy from Hold to General Pool')
+                await self.confirmed.remove(proxy)
+                await self.pool.put_in_pool(proxy)
+                return proxy
+
+        else:
+            assert proxy.queue_id == 'pool'
+            await self.held.raise_if_present(proxy)  # Sanity Check for Now
+            await self.confirmed.raise_if_present(proxy)  # Sanity Check for Now
+
+            if req.confirmed:
+                await self.confirmed.put(proxy)
+            elif req.was_timeout_error:
+                await self.held.put(proxy)
+            else:
+                raise ProxyPoolError("Invalid proxy submitted to sub queue.")
 
 
 class ProxySubQueue(asyncio.Queue):
 
-    def __init__(self):
+    def __init__(self, pool):
         super(ProxySubQueue, self).__init__(-1)
+
+        self.pool = pool
         self.lock = asyncio.Lock()
+
+    @property
+    def num_proxies(self):
+        return self.qsize()
 
     async def contains(self, proxy):
         return proxy in self._queue
@@ -45,9 +169,10 @@ class ConfirmedQueue(ProxySubQueue):
     log = logger.get(__name__, 'Confirmed Queue')
     __name__ = 'Confirmed Queue'
 
-    def __init__(self):
-        super(ConfirmedQueue, self).__init__()
+    def __init__(self, pool):
+        super(ConfirmedQueue, self).__init__(pool)
         self.rotating_index = 0
+        self.held = None
 
     async def get(self):
         """
@@ -67,10 +192,29 @@ class ConfirmedQueue(ProxySubQueue):
             async with self.lock:
                 try:
                     self.rotating_index += 1
-                    return self._queue[self.rotating_index]
+                    proxy = self._queue[self.rotating_index]
                 except IndexError:
                     self.rotating_index = 0
-                    return self._queue[self.rotating_index]
+                    proxy = self._queue[self.rotating_index]
+
+            # Sanity Check
+            last_request = proxy.last_request(active=True)
+            if last_request:
+                if last_request.error:
+                    # This is Expected Behavior!  Historically Confirmed vs. Last Request
+                    self.log.debug("Confirmed Queue Proxy's Last Request was Error.")
+
+                if last_request.was_timeout_error:
+                    if proxy.time_since_used > proxy.timeout(last_request.error):
+                        return proxy
+                    else:
+                        self.log.debug('Confirmed Queue Proxy Should be Held...')
+
+                        self.held.raise_if_present(proxy)
+                        self.held.put(proxy)
+
+                        # Recursion
+                        return await self.get()
 
     async def put(self, proxy):
         """
@@ -109,10 +253,9 @@ class HeldQueue(ProxySubQueue):
     log = logger.get(__name__, 'Held Queue')
     __name__ = 'Held Queue'
 
-    def __init__(self, confirmed, pool):
-        super(HeldQueue, self).__init__()
-        self.confirmed = confirmed
-        self.pool = pool
+    def __init__(self, pool):
+        super(HeldQueue, self).__init__(pool)
+        self.confirmed = None
 
     async def get(self):
         """

@@ -4,7 +4,8 @@ import aiohttp
 from instattack.config import config
 from instattack.lib import logger
 
-from instattack.lib.utils import limit_as_completed, start_and_stop
+from instattack.lib.utils import (
+    limit_as_completed, start_and_stop, cancel_remaining_tasks)
 
 from instattack.app.exceptions import TokenNotFound, PoolNoProxyError
 from instattack.app.proxies import AdvancedProxyPool
@@ -88,20 +89,27 @@ class AbstractLoginHandler(AbstractRequestHandler):
         batch_size = config['attempts']['batch_size']
 
         num_tries = 0
+
+        def stop_callback(fut):
+            if fut.exception():
+                return True
+
+            result = fut.result()
+            if result is not None:
+                return True
+
+            return False
+
         gen = self.generate_attempts_for_proxies(session, password)
-        async for fut in limit_as_completed(gen, batch_size, stop_event):
+        async for fut, pending in limit_as_completed(gen, batch_size, stop_callback=stop_callback):  # noqa
             if fut.exception():
                 raise fut.exception()
 
             result = fut.result()
             num_tries += 1
-
-            if result is not None:
-                stop_event.set()
-
-                # [!] IMPORTANT:  We should reimplement returning the leftover
-                # tasks somehow, or at least cancel them in the utility, because
-                # that can lead to bogging down the requests.
+            log.debug('Got Result %s' % result)
+            if result:
+                await cancel_remaining_tasks(futures=pending)
                 return result, num_tries
 
     async def handle_attempt(self, result):
@@ -151,6 +159,7 @@ class LoginHandler(AbstractLoginHandler):
             raise e
         else:
             # We might not need to stop proxy handler?
+            await self.finish()
             await self.proxy_handler.stop()
             return results[0]
 

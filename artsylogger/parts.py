@@ -12,9 +12,10 @@ __all__ = (
 
 class Part(object):
 
-    def __init__(self, value=None, constant=None):
+    def __init__(self, value=None, constant=None, show_null=None):
         self._value = value
         self._constant = constant
+        self._show_null = show_null
 
     def __call__(self, record, owner):
         if self.valid(record, owner):
@@ -22,6 +23,12 @@ class Part(object):
 
     def output(self, record, owner):
         return self.unformatted_value(record, owner)
+
+    def null(self, record, value):
+        return self.unformatted_value(record, value) is None
+
+    def non_null(self, record, value):
+        return self.unformatted_value(record, value) is not None
 
     def unformatted_value(self, record, owner):
         if self._value:
@@ -31,6 +38,12 @@ class Part(object):
         elif self._constant:
             return self._constant
         return None
+
+    def unformatted_nullable_value(self, record, owner):
+        value = self.unformatted_value(record, owner)
+        if value is None and self._show_null:
+            return self._show_null
+        return value
 
     def valid(self, record, owner):
         return self.unformatted_value(record, owner) is not None
@@ -98,7 +111,7 @@ class FormattablePart(Part):
         >>> if not formatter and (self.owner.parent and self.owner.parent._formatter):
         >>>    formatter = self.owner.parent._formatter
         """
-        unformatted = self.unformatted_value(record, owner)
+        unformatted = self.unformatted_nullable_value(record, owner)
         formatter = self.format(record, owner)
         if formatter:
             try:
@@ -137,6 +150,10 @@ class ItemValue(FormattablePart):
                     suffix = ""
 
         return "%s%s%s" % (prefix, val, suffix)
+
+    def valid(self, record, owner):
+        if super(ItemValue, self).unformatted_nullable_value(record, owner) is not None:
+            return True
 
     def formatted(self, record, owner):
         formatted = super(ItemValue, self).formatted(record, owner)

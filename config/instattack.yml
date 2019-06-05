@@ -10,7 +10,7 @@ instattack:
 connection:
     limit_per_host: 0
     timeout: 6
-    limit: 100
+    limit: 0
 
 # The higher the batch sizes, the less likely it is that we will have good
 # proxies available for each request, potentially having the opposite effect
@@ -43,13 +43,19 @@ passwords:
 
 attempts:
     # The number of concurrent requests to make for each password.
-    batch_size: 1
+    batch_size: 10
     save_method: 'end'
 
 pool:
     # The maximum amount of time to wait for a proxy from the queue before failing.
-    timeout: 25
+    timeout: 10
     collect: false
+
+    # 3 Purposes:
+    #   (1) Initial Population of Confirmed Queue
+    #   (2) Whether or Not Evaluation Can be Ignored
+    #   (3) Whether or not Error Causes Confirmed Proxy to be Removed
+    num_confirmation_threshold: 1
 
     # We do not need the confirmed fields since they already are factored
     # in based on the separate queues.
@@ -144,21 +150,21 @@ proxies:
             #     historical: 2
             #     active: 1
             connection:
-                historical: 10
-                active: 3
+                historical: 1
+                active: 1
             response:
-                historical: 5
-                active: 4
+                historical: 1
+                active: 1
             instagram:
-                historical: null
-                active: 5
+                historical: 1
+                active: 1
             ssl:
-                historical: null
-                active: null
+                historical: 1
+                active: 1
             timeout:
                 # There seem to be a lot of proxies that do get confirmed results
                 # but also have a lot of historical timeout errors.
-                historical: 2
+                historical: 1
                 active: 1
 
 

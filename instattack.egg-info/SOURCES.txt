@@ -20,7 +20,6 @@ instattack.egg-info/dependency_links.txt
 instattack.egg-info/entry_points.txt
 instattack.egg-info/top_level.txt
 instattack/app/__init__.py
-instattack/app/mixins.py
 instattack/app/version.py
 instattack/app/exceptions/__init__.py
 instattack/app/exceptions/base.py
@@ -35,7 +34,6 @@ instattack/app/handlers/base.py
 instattack/app/handlers/client.py
 instattack/app/handlers/login.py
 instattack/app/handlers/proxies.py
-instattack/app/handlers/requests.py
 instattack/app/handlers/train.py
 instattack/app/models/__init__.py
 instattack/app/models/evaluation.py
@@ -74,9 +72,7 @@ instattack/controllers/users.py
 instattack/controllers/utils.py
 instattack/lib/__init__.py
 instattack/lib/logger/__init__.py
-instattack/lib/logger/filters.py
 instattack/lib/logger/formats.py
-instattack/lib/logger/handler.py
 instattack/lib/logger/handlers.py
 instattack/lib/logger/mixins.py
 instattack/lib/utils/__init__.py

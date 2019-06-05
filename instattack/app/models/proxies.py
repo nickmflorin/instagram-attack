@@ -24,7 +24,7 @@ log = logger.get(__name__, subname='Proxy')
 
 
 @dataclass
-class ProxyResult:
+class ProxyRequest:
 
     date: datetime = field(init=False)
     error: str = None
@@ -86,7 +86,7 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         super(Proxy, self).__init__(*args, **kwargs)
 
         self.history = deque(sorted(
-            [ProxyResult.from_dict(data) for data in self.history],
+            [ProxyRequest.from_dict(data) for data in self.history],
             key=lambda x: x.date,
         ))
 
@@ -183,8 +183,8 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         self._timeouts[err]['count'] += 1
 
         if self.timeout_exceeds_max(err):
-            log.warning(f'Proxy Timeout {self.timeout(err)} Exceeded Max {self.timeout_max(err)}')
-            # raise ProxyMaxTimeoutError(err, self.timeout(err))
+            # log.warning(f'Proxy Timeout {self.timeout(err)} Exceeded Max {self.timeout_max(err)}')
+            raise ProxyMaxTimeoutError(err, self.timeout(err))
 
     @allow_exception_input
     def timeout_exceeds_max(self, *args):
@@ -194,19 +194,13 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
             if timeout > max_timeout:
                 return True
 
-    def add_error(self, exc):
+    def add_failed_request(self, req):
+        self.active_history.append(req)
+        self.history.append(req)
 
-        result = ProxyResult(
-            error=exc.__subtype__,
-            status_code=exc.status_code,
-        )
-        self.active_history.append(result)
-        self.history.append(result)
-
-    def add_success(self):
-        result = ProxyResult()
-        self.active_history.append(result)
-        self.history.append(result)
+    def add_successful_request(self, req):
+        self.active_history.append(req)
+        self.history.append(req)
 
     def error_rate(self, active=False):
         """
@@ -230,16 +224,10 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         return err_rate.get('horizon')
 
     def last_error(self, active=False):
-        errors = self.errors(active=active)
-        if len(errors) != 0:
-            return errors[-1]
-        return None
+        return self.requests(-1, active=active, fail=True)
 
     def last_request(self, active=False):
-        requests = self._history(active=active)
-        if len(requests) != 0:
-            return requests[-1]
-        return None
+        return self.requests(-1, active=active)
 
     def evaluate_for_pool(self):
         """

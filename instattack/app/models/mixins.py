@@ -21,13 +21,19 @@ class DerivedMetrics(object):
             return self.active_history
         return self.history
 
-    def requests(self, active=False, success=False, fail=False):
-        history = self._history(active=active)
+    def requests(self, *args, active=False, success=False, fail=False):
+        index = args[0] if len(args) == 1 else None
+        requests = self._history(active=active)
         if success:
-            return [request for request in history if request.confirmed]
+            requests = [request for request in requests if request.confirmed]
         elif fail:
-            return [request for request in history if not request.confirmed]
-        return history
+            requests = [request for request in requests if not request.confirmed]
+        if index:
+            try:
+                return requests[index]
+            except IndexError:
+                return None
+        return requests
 
     def num_requests(self, active=False, success=False, fail=False):
         return len(self.requests(active=active, success=success, fail=fail))
