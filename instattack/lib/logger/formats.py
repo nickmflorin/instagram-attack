@@ -61,7 +61,7 @@ MESSAGE_LINE = Line(
         value=get_record_message,
         format=get_message_formatter,
         line_index=LineIndex(
-            value='line_index',
+            attrs='line_index',
             format=settings.RecordAttributes.LINE_INDEX
         )
     ),
@@ -75,12 +75,12 @@ PRIMARY_LINE = Line(
         value=get_record_time,
     ),
     Item(
-        value="name",
+        attrs="name",
         format=settings.RecordAttributes.NAME,
         suffix=": "
     ),
     Item(
-        value="subname",
+        attrs="subname",
         format=settings.RecordAttributes.SUBNAME
     ),
     indent=1,
@@ -90,10 +90,10 @@ PRIMARY_LINE = Line(
 CONTEXT_LINES = Lines(
     Line(
         Item(
-            value='password',
+            attrs='password',
             format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_3,
             label=Label(
-                constant="Password",
+                value="Password",
                 delimiter=":",
                 format=settings.RecordAttributes.LABEL_1,
             )
@@ -102,15 +102,15 @@ CONTEXT_LINES = Lines(
     ),
     Line(
         Item(
-            value='proxy.method',
+            attrs='proxy.method',
             format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_3,
         ),
         Item(
-            value='proxy.url',
+            attrs='proxy.url',
             format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_1.format(wrapper="<%s>"),
         ),
         label=Label(
-            constant="Proxy",
+            value="Proxy",
             delimiter=":",
             format=settings.RecordAttributes.LABEL_1,
         ),
@@ -119,10 +119,10 @@ CONTEXT_LINES = Lines(
     Lines(
         # Line(
         #     Item(
-        #         value="proxy.humanized_active_errors",
+        #         attrs="proxy.humanized_active_errors",
         #         format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
         #         label=Label(
-        #             constant="Active Errors",
+        #             value="Active Errors",
         #             delimiter=":",
         #             format=settings.RecordAttributes.LABEL_2,
         #         ),
@@ -131,12 +131,11 @@ CONTEXT_LINES = Lines(
         # ),
         Line(
             Item(
-                value="proxy.queue_id",
+                attrs="proxy.queue_id",
                 format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 # Will only show if as None if any other item in group is non-null
-                show_null='None',
                 label=Label(
-                    constant="Queue ID",
+                    value="Queue ID",
                     delimiter=":",
                     format=settings.RecordAttributes.LABEL_2,
                 ),
@@ -148,9 +147,8 @@ CONTEXT_LINES = Lines(
                 value=get_proxy_last_error,
                 format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 # Will only show if as None if any other item in group is non-null
-                show_null='None',
                 label=Label(
-                    constant="Last Error",
+                    value="Last Error",
                     delimiter=":",
                     format=settings.RecordAttributes.LABEL_2,
                 ),
@@ -165,18 +163,18 @@ CONTEXT_LINES = Lines(
 
 TRACEBACK_LINE = Line(
     Item(
-        value=["frame.filename", "pathname"],
+        attrs=["frame.filename", "pathname"],
         format=settings.RecordAttributes.PATHNAME,
         prefix="(",
         suffix=", "
     ),
     Item(
-        value=["frame.function", "funcName"],
+        attrs=["frame.function", "funcName"],
         format=settings.RecordAttributes.FUNCNAME,
         suffix=", "
     ),
     Item(
-        value=["frame.lineno", "lineno"],
+        attrs=["frame.lineno", "lineno"],
         format=settings.RecordAttributes.LINENO,
         suffix=")"
     ),
@@ -193,7 +191,7 @@ LOG_FORMAT_STRING = Lines(
     MESSAGE_LINE,
     Line(
         Item(
-            value="other",
+            attrs="other",
             format=settings.RecordAttributes.OTHER_MESSAGE
         ),
         indent=1,
@@ -206,7 +204,7 @@ LOG_FORMAT_STRING = Lines(
         char="-",
         length=25,
         label=Label(
-            value='level.name',
+            attrs='level.name',
             format=get_level_formatter(),
             delimiter=None,
         ),
