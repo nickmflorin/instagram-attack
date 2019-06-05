@@ -1,12 +1,8 @@
 import inspect
 import logging
 import os
-import sys
-import traceback
 
 from instattack.config import settings
-
-from .handlers import SIMPLE_SYNC_HANDLERS, SYNC_HANDLERS
 
 
 class LoggerMixin(object):

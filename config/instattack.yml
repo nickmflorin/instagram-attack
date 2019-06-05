@@ -5,7 +5,7 @@ instattack:
 
     log.logging:
         level: 'debug'
-        request_errors: true
+        request_errors: false
 
 connection:
     limit_per_host: 0
@@ -55,7 +55,8 @@ pool:
     #   (1) Initial Population of Confirmed Queue
     #   (2) Whether or Not Evaluation Can be Ignored
     #   (3) Whether or not Error Causes Confirmed Proxy to be Removed
-    num_confirmation_threshold: 1
+    confirmation_threshold: 1
+    confirmation_horizon: 3  # Optional
 
     # We do not need the confirmed fields since they already are factored
     # in based on the separate queues.

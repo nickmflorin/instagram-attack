@@ -33,6 +33,7 @@ async def limit_as_completed(
     coros,
     batch_size,
     stop_callback=None,
+    done_callback=None,
     stop_event=None,
 ):
     """
@@ -62,10 +63,12 @@ async def limit_as_completed(
         except asyncio.TimeoutError:
             break
 
+    num_tries = 0
     while len(pending) > 0 and (not stop_event or not stop_event.is_set()):
         await asyncio.sleep(0)  # Not sure why this is necessary but it is.
         for f in pending:
             if f.done():
+                num_tries += 1
                 pending.remove(f)
                 try:
                     newc = await coros.__anext__()
@@ -73,10 +76,13 @@ async def limit_as_completed(
                 except StopAsyncIteration as e:
                     pass
 
-                yield f, pending
+                yield f, pending, num_tries
+
+                if done_callback:
+                    done_callback(f, pending, num_tries)
 
                 if stop_callback:
-                    if stop_callback(f):
+                    if stop_callback(f, pending, num_tries):
                         break
 
 

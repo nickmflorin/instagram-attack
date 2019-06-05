@@ -229,6 +229,49 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
     def last_request(self, active=False):
         return self.requests(-1, active=active)
 
+    def confirmations_in_horizon(self, active=False, horizon=None):
+        """
+        Returns the number of confirmed requests in the last `horizon` requests.
+        If `horizon` not specified, uses the entire history.
+        """
+        requests = self.requests(active=active, success=True)
+        if horizon:
+            requests = requests[-horizon:]
+        return requests
+
+    def confirmed_in_horizon(self, horizon):
+        """
+        Returns True if the proxy has a certain number of confirmations in the
+        `horizon` most recent requests.
+        """
+        requests = self.confirmations_in_horizon(horizon=horizon)
+        return len(requests) != 0
+
+    def confirmed_over_threshold(self, threshold, active=False, requests=None):
+        """
+        Returns True if the proxy has a certain number of confirmations in it's
+        history.
+        """
+        if requests:
+            assert all([err.confirmed for err in requests])
+            num_confirmed = len(requests)
+        else:
+            num_confirmed = self.num_requests(active=active, success=True)
+
+        return num_confirmed >= threshold
+
+    def confirmed_over_threshold_in_horizon(self):
+        """
+        Based on a `horizon` and `threshold` set in configuration, determines if
+        there were either a certain number of confirmations in the most recent
+        `horizon` of request history, or if there were a certain number of
+        confirmations in all of the request history.
+        """
+        threshold = config['pool']['confirmation_threshold']
+        horizon = config['pool'].get('confirmation_horizon')
+        requests = self.confirmations_in_horizon(horizon=horizon)
+        return self.confirmed_over_threshold(threshold, requests=requests)
+
     def evaluate_for_pool(self):
         """
         Called before a proxy is put into the Pool.

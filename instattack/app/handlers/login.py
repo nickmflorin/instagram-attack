@@ -84,13 +84,9 @@ class AbstractLoginHandler(AbstractRequestHandler):
 
         # Stop Event: Notifies limit_as_completed to stop creating additional tasks
         # so that we can cancel the leftover ones.
-        stop_event = asyncio.Event()
-
         batch_size = config['attempts']['batch_size']
 
-        num_tries = 0
-
-        def stop_callback(fut):
+        def stop_callback(fut, pending, num_tries):
             if fut.exception():
                 return True
 
@@ -101,13 +97,12 @@ class AbstractLoginHandler(AbstractRequestHandler):
             return False
 
         gen = self.generate_attempts_for_proxies(session, password)
-        async for fut, pending in limit_as_completed(gen, batch_size, stop_callback=stop_callback):  # noqa
+
+        async for fut, pending, num_tries in limit_as_completed(gen, batch_size, stop_callback=stop_callback):  # noqa
             if fut.exception():
                 raise fut.exception()
 
             result = fut.result()
-            num_tries += 1
-            log.debug('Got Result %s' % result)
             if result:
                 await cancel_remaining_tasks(futures=pending)
                 return result, num_tries

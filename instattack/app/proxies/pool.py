@@ -1,97 +1,15 @@
-import asyncio
-import itertools
-
 from instattack.lib import logger
 from instattack.config import config
 
-from instattack.app.exceptions import PoolNoProxyError
 from instattack.app.models import Proxy, ProxyRequest
 
-from .queues import ProxySubQueueManager
-
-
-__all__ = (
-    'SimpleProxyPool',
-    'BrokeredProxyPool',
-    'AdvancedProxyPool',
-)
-
-
-log = logger.get(__name__, subname='Proxy Pool')
-
-
-class AbstractProxyPool(asyncio.PriorityQueue):
-
-    def __init__(self, loop, start_event=None):
-        super(AbstractProxyPool, self).__init__(-1)
-
-        self.loop = loop
-        self.start_event = start_event
-        self.timeout = config['pool']['timeout']
-
-        # Tuple Comparison Breaks in Python3 -  The entry count serves as a
-        # tie-breaker so that two tasks with the same priority are returned in
-        # the order they were added.
-        self.proxy_counter = itertools.count()
-
-        self.last_logged_qsize = None
-        self.original_num_proxies = 0
-
-    @property
-    def num_proxies(self):
-        return self.qsize()
-
-    async def log_pool_size(self):
-        """
-        Log Running Low on Proxies Periodically if Change Noticed
-        """
-        if self.num_proxies <= 20:
-            if not self.last_logged_qsize or self.last_logged_qsize != self.num_proxies:
-                log.warning(f'Running Low on Proxies: {self.num_proxies}')
-                self.last_logged_qsize = self.num_proxies
-
-    async def get(self):
-        """
-        Remove and return the lowest priority proxy in the pool.
-
-        Raise a PoolNoProxyError if it is taking too long.  We do not want to raise
-        PoolNoProxyError if the queue is empty (and other sources are empty) since
-        proxies actively being used may be momentarily put back in the queue or
-        other sources.
-
-        [!] IMPORTANT:
-        -------------
-        We need to figure out a way to trigger more proxies from being collected
-        if we wind up running out of proxies - this might involve adjusting the
-        timeout so it does not think there are no more proxies when they are just
-        all currently being used.
-        """
-        try:
-            return await asyncio.wait_for(self._get_proxy(), timeout=self.timeout)
-        except asyncio.TimeoutError:
-            raise PoolNoProxyError()
-
-    async def _get_proxy(self):
-        """
-        Proxies are always evaluated before being put in queue so we do
-        not have to reevaluate.
-        """
-        ret = await super(AbstractProxyPool, self).get()
-        proxy = ret[1]
-        return proxy
-
-    async def put(self, proxy):
-        count = next(self.proxy_counter)
-        priority = proxy.priority(count)
-        proxy.queue_id = 'pool'
-
-        await super(AbstractProxyPool, self).put((priority, proxy))
-        return proxy
+from .manager import ProxySubQueueManager
+from .base import AbstractProxyPool
 
 
 class SimpleProxyPool(AbstractProxyPool):
 
-    __name__ = 'Simple Proxy Pool'
+    log = logger.get(__name__, subname='Simple Proxy Pool')
 
     async def prepopulate(self, limit=None, confirmed=False):
         """
@@ -101,7 +19,7 @@ class SimpleProxyPool(AbstractProxyPool):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        log.debug('Prepopulating Proxies')
+        self.log.debug('Prepopulating Proxies')
 
         self.original_num_proxies = 0
 
@@ -118,11 +36,11 @@ class SimpleProxyPool(AbstractProxyPool):
             self.original_num_proxies += 1
 
         if self.original_num_proxies == 0:
-            log.error('No Proxies to Prepopulate')
+            self.log.error('No Proxies to Prepopulate')
             return
 
         # Non-Broker Proxy Pool: Set start event after prepopulation.
-        log.debug(f"Prepopulated {self.original_num_proxies} Proxies")
+        self.log.info(f"Prepopulated {self.original_num_proxies} Proxies")
         self.start_event.set()
 
     async def on_proxy_error(self, proxy, exc):
@@ -130,24 +48,6 @@ class SimpleProxyPool(AbstractProxyPool):
         For training proxies, we only care about storing the state variables
         on the proxy model, and we do not need to put the proxy back in the
         pool, or a designated pool.
-
-        Case: Error -> Hold Error
-        ------------------------
-        - Do not include error in historical errors
-        - Record error as proxy's last recent error
-        - Put in General Pool
-
-        Case: Error -> Not Hold Error
-        -----------------------------
-        - Record error as proxy's last recent error
-        - Include error in proxy's historical errors
-        - Put in General Pool
-
-        [x] TODO:
-        --------
-        For the case of the pool (and not the login handler) the callbacks for
-        request and response errors of the proxy are exactly the same, so these
-        two methods can be consolidated.
         """
         assert not type(exc) is str
         req = ProxyRequest(
@@ -170,7 +70,7 @@ class SimpleProxyPool(AbstractProxyPool):
 
 class BrokeredProxyPool(SimpleProxyPool):
 
-    __name__ = 'Brokered Proxy Pool'
+    log = logger.get(__name__, subname='Brokered Proxy Pool')
 
     def __init__(self, loop, broker, start_event=None):
         super(BrokeredProxyPool, self).__init__(loop, start_event=start_event)
@@ -191,7 +91,7 @@ class BrokeredProxyPool(SimpleProxyPool):
         based on the prepopulated limit.
         >>> collect_limit = max(self._maxsize - self.qsize(), 0)
         """
-        log.debug('Collecting Proxies')
+        self.log.debug('Collecting Proxies')
 
         count = 0
         collect_limit = 10000  # Arbitrarily high for now.
@@ -204,7 +104,7 @@ class BrokeredProxyPool(SimpleProxyPool):
                 # Set Start Event on First Proxy Retrieved from Broker
                 if self.start_event and not self.start_event.is_set():
                     self.start_event.set()
-                    log.debug('Setting Start Event', extra={
+                    self.log.debug('Setting Start Event', extra={
                         'other': 'Broker Started Sending Proxies'
                     })
 
@@ -214,6 +114,8 @@ class BrokeredProxyPool(SimpleProxyPool):
 
 
 class AdvancedProxyPool(BrokeredProxyPool):
+
+    log = logger.get(__name__, subname='Advanced Proxy Pool')
 
     def __init__(self, loop, broker, start_event=None):
         super(AdvancedProxyPool, self).__init__(loop, broker, start_event=start_event)
@@ -227,7 +129,7 @@ class AdvancedProxyPool(BrokeredProxyPool):
         Prepopulating the proxies from the designated text file can help and
         dramatically increase speeds.
         """
-        log.debug('Prepopulating Proxies')
+        self.log.debug('Prepopulating Proxies')
 
         self.original_num_proxies = 0
 
@@ -244,11 +146,11 @@ class AdvancedProxyPool(BrokeredProxyPool):
                 self.original_num_proxies += 1
 
         if self.original_num_proxies == 0:
-            log.error('No Proxies to Prepopulate')
+            self.log.error('No Proxies to Prepopulate')
             return
 
-        log.debug(f"Prepopulated {self.original_num_proxies} Proxies")
-        log.debug(f"Prepopulated {self.subqueue.confirmed.qsize()} Good Proxies")
+        self.log.info(f"Prepopulated {self.original_num_proxies} Proxies")
+        self.log.info(f"Prepopulated {self.subqueue.confirmed.qsize()} Good Proxies")
 
     @property
     def num_proxies(self):
@@ -293,10 +195,9 @@ class AdvancedProxyPool(BrokeredProxyPool):
         if last_request:
             assert not last_request.confirmed
 
-        # Note that the last request can be a timeout error if it maxed out.
-        # last_request = proxy.requests(-1, active=True)
-        # assert not last_request.was_timeout_error
-        # Also, the proxy can be confirmed, if it had enough recent errors.
+        # Note that the last request can be a timeout error if it maxed out, and
+        # would not be in Hold Queue.  The following will fail:
+        # >>> assert not last_request.was_timeout_error
 
         return proxy
 
@@ -310,16 +211,13 @@ class AdvancedProxyPool(BrokeredProxyPool):
         If `req` is None, that means the put method is being called from the
         prepopulation, and the proxy has no active history.
         """
-        threshold = config['pool']['num_confirmation_threshold']
-
         if not req:
             assert proxy.queue_id is None
 
             last_request = proxy.requests(-1, active=True)
             assert last_request is None
 
-            # [x] TODO: Move the threshold for historical confirmations to config.
-            if proxy.num_requests(active=False, success=True) >= threshold:  # noqa
+            if proxy.confirmed_over_threshold_in_horizon():
                 await self.subqueue.confirmed.raise_if_present(proxy)
                 await self.subqueue.confirmed.put(proxy)
             else:
@@ -357,8 +255,22 @@ class AdvancedProxyPool(BrokeredProxyPool):
                     last_last_request = proxy.requests(-2, active=True)
                     if last_last_request:
                         # [x] Not So Sure About These
-                        assert not last_last_request.was_timeout_error
+
+                        # This really only applies depending on the horizon chosen,
+                        # but we can be sure the confirmation horizon will at least
+                        # be 1 so this is okay for the time being.
                         assert not last_last_request.confirmed
+
+                        # The last last request can be a timeout error if the
+                        # most recent request was a normal error, which causes
+                        # it to be put in the pool.
+                        # [x] TODO: Maybe for proxies in hold queue, if it is
+                        # a normal error, we should keep in hold queue unless
+                        # we keep seeing normal errors.  It might be that a 403
+                        # proxy auth error is caused from requesting immediately after
+                        # a 429 error.
+                        # >>> assert not last_last_request.was_timeout_error
+
                     return await self.put_in_pool(proxy)
 
     async def put_in_pool(self, proxy):
@@ -371,13 +283,17 @@ class AdvancedProxyPool(BrokeredProxyPool):
         ---------
         Do not evaluate for confirmed proxies, that have a number of historical
         confirmations above a threshold.
-        """
-        threshold = config['pool']['num_confirmation_threshold']
 
-        if not proxy.num_requests(active=False, success=True) < threshold:  # noqa
+        We do not want to check confirmation based on the threshold and horizon,
+        because that is the definition for confirmed proxies, which should not
+        be put in the general pool.
+        """
+        threshold = config['pool']['confirmation_threshold']
+        if not proxy.confirmed_over_threshold(threshold):
+
             evaluation = proxy.evaluate_for_pool()
             if not evaluation.passed:
-                log.debug('Cannot Add Proxy to Pool', extra={
+                self.log.debug('Cannot Add Proxy to Pool', extra={
                     'other': str(evaluation)
                 })
                 return

