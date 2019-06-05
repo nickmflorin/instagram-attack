@@ -133,7 +133,6 @@ CONTEXT_LINES = Lines(
             Item(
                 attrs="proxy.queue_id",
                 format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                # Will only show if as None if any other item in group is non-null
                 label=Label(
                     value="Queue ID",
                     delimiter=":",
@@ -146,7 +145,6 @@ CONTEXT_LINES = Lines(
             Item(
                 value=get_proxy_last_error,
                 format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-                # Will only show if as None if any other item in group is non-null
                 label=Label(
                     value="Last Error",
                     delimiter=":",
