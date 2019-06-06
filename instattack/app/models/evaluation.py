@@ -44,7 +44,7 @@ class ProxyEvaluation:
 
 def evaluate_errors(proxy):
 
-    errors = config['proxies']['limits'].get('errors', {})
+    errors = config['proxies']['pool']['limits'].get('errors', {})
     evaluations = ProxyEvaluation(reasons=[])
 
     max_params = [
@@ -88,7 +88,7 @@ def evaluate_errors(proxy):
 def evaluate_requests(proxy):
 
     evaluations = ProxyEvaluation(reasons=[])
-    requests = config['proxies']['limits'].get('requests', {})
+    requests = config['proxies']['pool']['limits'].get('requests', {})
 
     max_params = [
         ('all', (None, ), ),
@@ -150,7 +150,7 @@ def evaluate_requests(proxy):
 def evaluate_error_rate(proxy):
 
     evaluations = ProxyEvaluation(reasons=[])
-    limits = config['proxies']['limits']
+    limits = config['proxies']['pool']['limits']
 
     if limits.get('error_rate'):
         config_error_rate = limits['error_rate']
@@ -195,7 +195,7 @@ def evaluate(proxy):
     """
 
     evaluations = ProxyEvaluation(reasons=[])
-    limits = config['proxies']['limits']
+    limits = config['proxies']['pool']['limits']
 
     request_eval = evaluate_requests(proxy)
     errors_eval = evaluate_errors(proxy)

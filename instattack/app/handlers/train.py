@@ -6,9 +6,8 @@ from instattack.config import config
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, progress
 
-from instattack.app.proxies import SimpleProxyPool
+from instattack.app.proxies import SimpleProxyPool, SimpleProxyManager
 
-from .proxies import SimpleProxyHandler
 from .base import AbstractRequestHandler
 from .client import train_client
 
@@ -23,7 +22,7 @@ log = logger.get(__name__, 'Train Handler')
 class TrainHandler(AbstractRequestHandler):
 
     __name__ = 'Train Handler'
-    __proxy_handler__ = SimpleProxyHandler
+    __proxy_manager__ = SimpleProxyManager
     __proxy_pool__ = SimpleProxyPool
     __client__ = train_client
 
@@ -31,15 +30,15 @@ class TrainHandler(AbstractRequestHandler):
         try:
             results = await asyncio.gather(
                 self._train(limit=limit),
-                self.proxy_handler.run(limit=limit, confirmed=confirmed),
+                self.proxy_manager.start(limit=limit, confirmed=confirmed),
             )
         except Exception as e:
             await self.finish()
-            await self.proxy_handler.stop()
+            await self.proxy_manager.stop()
             raise e
         else:
             # We might not need to stop proxy handler?
-            await self.proxy_handler.stop()
+            await self.proxy_manager.stop()
             return results[0]
 
     async def _train(self, limit=None):
@@ -64,7 +63,7 @@ class TrainHandler(AbstractRequestHandler):
         proxies we have.
         """
         while True:
-            proxy = await self.proxy_handler.pool.get()
+            proxy = await self.proxy_manager.get()
             if proxy:
                 yield self.client.request(session, proxy)
 
@@ -94,7 +93,7 @@ class TrainHandler(AbstractRequestHandler):
                 log.debug(result)
 
                 self.num_completed += 1
-                pct = progress(self.num_completed, self.proxy_handler.pool.original_num_proxies)
+                pct = progress(self.num_completed, self.proxy_manager.original_num_proxies)
                 log.info(pct)
 
         await asyncio.sleep(0)

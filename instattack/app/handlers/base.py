@@ -19,11 +19,10 @@ class Handler(object):
 
     SCHEDULER_LIMIT = 1000
 
-    def __init__(self, loop, start_event=None, stop_event=None):
+    def __init__(self, loop, start_event=None):
 
         self.loop = loop
         self.start_event = start_event
-        self.stop_event = stop_event
 
         self.scheduler = self.loop.run_until_complete(aiojobs.create_scheduler(
             limit=self.SCHEDULER_LIMIT,
@@ -39,7 +38,7 @@ class Handler(object):
 
 class AbstractRequestHandler(Handler):
 
-    __proxy_handler__ = None
+    __proxy_manager__ = None
     __proxy_pool__ = None
     __client__ = None
 
@@ -54,11 +53,10 @@ class AbstractRequestHandler(Handler):
         self.start_event = asyncio.Event()
         self.stop_event = asyncio.Event()
 
-        self.proxy_handler = self.__proxy_handler__(
+        self.proxy_manager = self.__proxy_manager__(
             loop,
             pool_cls=self.__proxy_pool__,
             start_event=self.start_event,
-            stop_event=self.stop_event,
         )
 
         self.client = self.__client__(
@@ -73,7 +71,7 @@ class AbstractRequestHandler(Handler):
             loop=self.loop,
             ssl=False,
             force_close=True,
-            limit=config['connection']['limit'],
+            limit=config['connection']['connection_limit'],
             limit_per_host=config['connection']['limit_per_host'],
             enable_cleanup_closed=True,
         )
@@ -81,7 +79,7 @@ class AbstractRequestHandler(Handler):
     @property
     def timeout(self):
         return aiohttp.ClientTimeout(
-            total=config['connection']['timeout']
+            total=config['connection']['connection_timeout']
         )
 
     async def save_proxy(self, proxy):
@@ -115,7 +113,7 @@ class AbstractRequestHandler(Handler):
             raise e
 
         assert not type(e) is str
-        await self.proxy_handler.pool.on_proxy_error(proxy, err)
+        await self.proxy_manager.on_proxy_error(proxy, err)
 
         if config['proxies']['save_method'] == 'live':
             await self.schedule_task(proxy.save())
@@ -126,7 +124,7 @@ class AbstractRequestHandler(Handler):
 
     async def on_proxy_success(self, proxy):
 
-        await self.proxy_handler.pool.on_proxy_success(proxy)
+        await self.proxy_manager.on_proxy_success(proxy)
 
         if config['proxies']['save_method'] == 'live':
             await self.schedule_task(self.save_proxy(proxy))

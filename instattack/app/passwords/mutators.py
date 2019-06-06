@@ -11,7 +11,7 @@ class mutator(object):
 
     def __init__(self, base):
         self.base = base
-        self.Config = config['passwords']['generator']
+        self.Config = config['login']['passwords']['generator']
         self.generated = []
 
     def __call__(self, *args):

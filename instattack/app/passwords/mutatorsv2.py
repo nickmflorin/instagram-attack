@@ -7,7 +7,7 @@ class mutator_v2(object):
 
     def __init__(self, spec):
         self.spec = spec
-        self.Config = config['passwords']['generator']
+        self.Config = config['login']['passwords']['generator']
         self.generated = []
 
     def safe_yield(self, iterable):

@@ -47,6 +47,19 @@ class _Config(dict):
     def set(self, data):
         self.update(**data)
 
+    def override_with_args(self, args):
+
+        def recusively_update(data, argkey, argval):
+            for key, val in data.items():
+                if isinstance(val, dict):
+                    recusively_update(val, argkey, argval)
+                else:
+                    if key == argkey:
+                        data[key] = argval
+
+        for argkey, argval in args:
+            recusively_update(self, argkey, argval)
+
     def validate(self, conf, set=True):
         """
         Validates the configuration to be of the correct schema and then sets the

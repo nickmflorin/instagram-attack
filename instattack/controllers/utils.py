@@ -33,7 +33,9 @@ def proxy_command(help=None, limit=None, arguments=None):
     return proxy_command_wrapper
 
 
-def user_command(help=None):
+def user_command(help=None, arguments=None):
+    arguments = arguments or []
+    arguments = [(['username'], {'help': 'Username'})] + arguments
 
     def user_command_wrapper(func):
 
@@ -43,19 +45,14 @@ def user_command(help=None):
             new_args = (instance.app.pargs.username, ) + args
             return func(instance, *new_args, **kwargs)
 
-        arguments = [
-            (['username'], {'help': 'Username'}),
-            LEVEL_ARGUMENT
-        ]
-
         return ex(help=help, arguments=arguments)(wrapped)
 
     return user_command_wrapper
 
 
 def existing_user_command(help=None, arguments=None):
-    new_arguments = arguments or []
-    new_arguments.append(LEVEL_ARGUMENT)
+    arguments = arguments or []
+    arguments = [(['username'], {'help': 'Username'})] + arguments
 
     def user_command_wrapper(func):
 
@@ -68,10 +65,6 @@ def existing_user_command(help=None, arguments=None):
 
             new_args = (user, ) + args
             return func(instance, *new_args, **kwargs)
-
-        arguments = [
-            (['username'], {'help': 'Username'}),
-        ] + new_arguments
 
         return ex(help=help, arguments=arguments)(wrapped)
 

@@ -30,14 +30,14 @@ class ProxyBroker(Broker):
         self._stopped = False
         self._started = False
 
-        self.limit = int(limit or config['broker'].get('limit', 10000))
+        self.limit = int(limit or config['proxies']['broker'].get('limit', 10000))
         self._proxies = asyncio.Queue()
 
         super(ProxyBroker, self).__init__(
             self._proxies,
-            max_tries=config['broker']['max_tries'],
-            max_conn=config['broker']['max_conn'],
-            timeout=config['broker']['timeout'],
+            max_tries=config['proxies']['broker']['broker_max_tries'],
+            max_conn=config['proxies']['broker']['broker_max_conn'],
+            timeout=config['proxies']['broker']['broker_timeout'],
             verify_ssl=False,
         )
 

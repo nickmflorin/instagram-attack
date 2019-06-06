@@ -230,6 +230,8 @@ class Instattack(App, AppMixin):
         log_handler = config.__LOG_HANDLER__
         output_handler = config.__OUTPUT_HANDLER__
 
+        arguments_override_config = True
+
         hooks = [
             ('pre_setup', setup),
             ('post_run', shutdown),
@@ -245,7 +247,7 @@ class Instattack(App, AppMixin):
         self.loop = asyncio.get_event_loop()
         super(Instattack, self).run()
 
-    # @spin_start_and_stop('Validating Config')
+    @spin_start_and_stop('Validating Config')
     def validate_config(self):
         """
         Validates the configuration against a Cerberus schema.  If the configuration

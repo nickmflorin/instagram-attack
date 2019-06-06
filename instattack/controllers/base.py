@@ -1,6 +1,6 @@
 from cement.utils.version import get_version_banner
 
-from instattack.config import settings
+from instattack.config import settings, config
 from instattack.lib import logger
 
 from instattack.app.version import get_version
@@ -56,16 +56,18 @@ class Base(InstattackController, UserInterface):
 
         # Controller Level Arguments. ex: 'instattack --version'
         arguments = [
-            (
-                ['-v', '--version'],
-                {'action': 'version', 'version': VERSION_BANNER}
-            ),
+            (['-v', '--version'],
+             dict(version=VERSION_BANNER, action='version')),
+            (['-l', '--level'],
+             dict(help='Override the Logging Level', action='store')),
+            (['-re', '--request_errors'],
+             dict(help='Log Request Errors', action='store_true')),
         ]
 
     def _post_argument_parsing(self):
         if self.app.pargs.level is not None:
-            print('Setting Level')
             logger.setLevel(self.app.pargs.level)
+        config.override_with_args(self.app.pargs._get_kwargs())
 
     def _default(self):
         """
@@ -73,7 +75,15 @@ class Base(InstattackController, UserInterface):
         """
         self.app.args.print_help()
 
-    @existing_user_command(help="Perform Attack Attempt", arguments=ATTACK_ARGUMENTS)
+    @existing_user_command(
+        help="Perform Attack Attempt",
+        arguments=[
+            (['-l', '--limit'],
+             dict(help='Limit the Number of Passwords to Try', default=100, type=int)),
+            (['-nl', '--nolimit'],
+             dict(help='Do Not Limit the Number of Passwords to Try', action='store_true')),  # noqa
+        ]
+    )
     def attack(self, user):
         """
         Iteratively tries each password for the given user with the provided

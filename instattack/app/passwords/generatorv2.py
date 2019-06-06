@@ -36,7 +36,7 @@ class AlterationSpec:
             alpha_gen(self, alteration)
 
     def include_numeric_alterations(self, user):
-        if config['passwords']['generator']['numerics']['birthday']['provided']:
+        if config['login']['passwords']['generator']['numerics']['birthday']['provided']:
             if user.birthday:
                 autogenerate_birthdays(user, self.numerics)
 

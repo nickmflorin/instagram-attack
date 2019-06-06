@@ -1,2 +1,3 @@
 from .broker import ProxyBroker  # noqa
-from .pool import *  # noqa
+from .managers import *  # noqa
+from .queues import *  # noqa

