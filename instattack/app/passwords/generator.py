@@ -1,11 +1,15 @@
 from collections import Counter
 
 from instattack.config import config
+from instattack.lib import logger
 from instattack.lib.utils import join
 
 from .mutators import character_mutator, additive_mutator
 
 from .utils import autogenerate_birthdays
+
+
+log = logger.get(__name__)
 
 
 class abstract_password_gen(object):
@@ -70,13 +74,11 @@ class password_gen(abstract_password_gen):
 
     def apply_base_alterations(self, base):
         generate_alterations = additive_mutator(base, mode='alterations')
-
         for alteration in self.alterations:
             yield from generate_alterations(alteration)
 
     def apply_base_numeric_alterations(self, base):
         generate_numerics = additive_mutator(base, mode='numerics')
-
         for numeric in self.numerics:
             yield from generate_numerics(numeric)
 
@@ -115,7 +117,7 @@ class password_gen(abstract_password_gen):
                 )
 
         yield from self.safe_yield(base_generator())
-        print(
+        log.debug(
             f'There Were {len(self.duplicates)} '
             'Duplicates Removed from Generated Passwords'
         )

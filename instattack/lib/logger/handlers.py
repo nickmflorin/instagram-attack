@@ -3,14 +3,18 @@ import sys
 
 from artsylogger import ArtsyHandlerMixin
 
-from instattack.config import settings
+from instattack.config import constants
 from instattack.lib.utils import relative_to_root
 
-from .formats import (
-    SIMPLE_FORMATTER, LOG_FORMAT_STRING, BARE_FORMAT_STRING, SIMPLE_FORMAT_STRING)
+from .formats import LOG_FORMAT_STRING, SIMPLE_FORMAT_STRING
 
 
 class TypeFilter(logging.Filter):
+    """
+    Used to use when we had simultaneous use of both simple, bar and artsy
+    output.  Since we do not do that anymore, we do not need this but will
+    keep the code around temporarily.
+    """
 
     def __init__(self, require=None, disallow=None, *args, **kwargs):
         super(TypeFilter, self).__init__(*args, **kwargs)
@@ -36,7 +40,7 @@ class CustomHandlerMixin(ArtsyHandlerMixin):
         self.default(record, 'is_exception', default=False)
 
         if not getattr(record, 'level', None):
-            setattr(record, 'level', settings.LoggingLevels[record.levelname])
+            setattr(record, 'level', constants.LoggingLevels[record.levelname])
 
         if isinstance(record.msg, Exception):
             record.is_exception = True
@@ -44,10 +48,10 @@ class CustomHandlerMixin(ArtsyHandlerMixin):
         record.pathname = relative_to_root(record.pathname)
 
 
-class SimpleSyncHandler(logging.StreamHandler):
+class SimpleHandler(logging.StreamHandler):
 
     def __init__(self, filter=None, formatter=None):
-        super(SimpleSyncHandler, self).__init__(stream=sys.stderr)
+        super(SimpleHandler, self).__init__(stream=sys.stderr)
 
         if formatter:
             self.setFormatter(formatter)
@@ -55,44 +59,46 @@ class SimpleSyncHandler(logging.StreamHandler):
             self.addFilter(filter)
 
 
-class SyncHandler(SimpleSyncHandler, CustomHandlerMixin):
+class ArtsyHandler(SimpleHandler, CustomHandlerMixin):
 
     def __init__(self, filter=None, format_string=None):
-        super(SyncHandler, self).__init__(filter=filter)
+        super(ArtsyHandler, self).__init__(filter=filter)
         self.useArtsyFormatter(format_string=format_string)
 
     def emit(self, record):
         self.prepare_record(record)
-        super(SyncHandler, self).emit(record)
+        super(ArtsyHandler, self).emit(record)
 
 
-SIMPLE_SYNC_HANDLERS = [
-    SimpleSyncHandler(
-        formatter=SIMPLE_FORMATTER,
-        filter=TypeFilter(require=['bare']),
-    ),
-    SimpleSyncHandler(
-        formatter=SIMPLE_FORMATTER,
-        filter=TypeFilter(require=['simple']),
-    ),
-    SimpleSyncHandler(
-        formatter=SIMPLE_FORMATTER,
-        filter=TypeFilter(disallow=['bare', 'simple'])
-    ),
+class DiagnosticsHandler(ArtsyHandler):
+
+    def __init__(self, window):
+        logging.Handler.__init__(self)
+        self.window = window
+        self.x = 1
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+
+            fs = "%s\r"
+            self.window.addstr(fs % msg)
+            self.window.refresh()
+
+            y, x = self.window.getyx()
+            self.window.move(y + 1, self.x)
+
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except:
+            self.handleError(record)
+
+
+SIMPLE_HANDLERS = [
+    SimpleHandler(formatter=SIMPLE_FORMAT_STRING),
 ]
 
 
-SYNC_HANDLERS = [
-    SyncHandler(
-        format_string=BARE_FORMAT_STRING,
-        filter=TypeFilter(require=['bare']),
-    ),
-    SyncHandler(
-        format_string=SIMPLE_FORMAT_STRING,
-        filter=TypeFilter(require=['simple']),
-    ),
-    SyncHandler(
-        format_string=LOG_FORMAT_STRING,
-        filter=TypeFilter(disallow=['bare', 'simple'])
-    ),
+ARTSY_HANDLERS = [
+    ArtsyHandler(format_string=LOG_FORMAT_STRING),
 ]

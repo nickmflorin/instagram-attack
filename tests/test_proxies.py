@@ -5,7 +5,7 @@ from instattack.app.proxies.broker import ProxyBroker
 from instattack.app.proxies.pool import ProxyPool
 from instattack.app.proxies.models import Proxy
 
-from instattack.main import InstattackTest
+from .main import InstattackTest
 
 
 ERRORS = {

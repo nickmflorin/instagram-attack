@@ -87,7 +87,7 @@ class AttackHandler(AbstractLoginHandler):
                 f'Generating {limit} '
                 f'Attempts for User {self.user.username}.'
             )
-        log.start(message)
+        log.info(message)
 
         passwords = await self.user.get_new_attempts(self.loop, limit=limit)
         if len(passwords) == 0:
@@ -97,7 +97,7 @@ class AttackHandler(AbstractLoginHandler):
         for password in passwords:
             await self.passwords.put(password)
 
-        log.success(f"Prepopulated {self.passwords.qsize()} Password Attempts")
+        log.info(f"Prepopulated {self.passwords.qsize()} Password Attempts")
 
     async def generate_attempts_for_passwords(self, session):
         """

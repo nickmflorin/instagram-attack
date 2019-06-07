@@ -1,4 +1,7 @@
-from instattack.config import settings
+import sys
+import traceback
+
+from instattack.config import constants
 from instattack.lib.utils import break_before
 
 
@@ -6,12 +9,11 @@ class AppMixin(object):
 
     @break_before
     def success(self, text):
-        print(settings.LoggingLevels.SUCCESS(text))
+        sys.stdout.write("%s\n" % constants.LoggingLevels.SUCCESS(text))
 
     @break_before
     def failure(self, text, exit_code=1, tb=True):
-        import traceback
-        print(settings.LoggingLevels.ERROR(text))
+        sys.stdout.write("%s\n" % constants.LoggingLevels.ERROR(text))
 
         self.exit_code = exit_code
 

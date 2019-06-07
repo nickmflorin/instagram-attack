@@ -1,6 +1,6 @@
 from itertools import product
 
-from instattack.config import settings, config
+from instattack.config import constants, config
 
 from .utils import (
     find_indices_with_char, mutate_char_at_index, flatten_replacements,
@@ -35,7 +35,7 @@ class case_mutator(mutator):
         """
         yield self.base.lower()
 
-        # Move Threshold to Settings or Config
+        # Move Threshold to constants or Config
         THRESHOLD = 3
         if len(self.base) <= THRESHOLD:
             yield self.base.upper()
@@ -87,7 +87,7 @@ class char_mutator(mutator):
     """
 
     def base_generator(self):
-        for char, new_chars in settings.COMMON_CHAR_REPLACEMENTS.items():
+        for char, new_chars in constants.COMMON_CHAR_REPLACEMENTS.items():
             altered = self.replace_character(char, new_chars)
             for alteration in altered:
                 yield alteration

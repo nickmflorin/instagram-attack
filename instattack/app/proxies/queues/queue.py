@@ -1,9 +1,10 @@
 import asyncio
+import collections
 
 from instattack.lib import logger
 from instattack.config import config
 
-from instattack.app.exceptions import ProxyPoolError
+from instattack.app.exceptions import ProxyPoolError, QueueEmpty
 from instattack.app.proxies.interfaces import ProxyQueueInterface
 
 
@@ -68,6 +69,10 @@ class ProxyQueue(asyncio.Queue, ProxyQueueInterface):
             self._queue.remove(proxy)
 
 
+# Move to Config
+MAX_CONFIRMED_PROXIES = 3
+
+
 class ConfirmedQueue(ProxyQueue):
 
     __NAME__ = 'Confirmed Queue'
@@ -80,6 +85,7 @@ class ConfirmedQueue(ProxyQueue):
         self.pool = pool
         self.rotating_index = 0
         self.hold = None
+        self.times_used = collections.Counter()
 
     def validate_for_queue(self, proxy):
         return True
@@ -95,32 +101,98 @@ class ConfirmedQueue(ProxyQueue):
         if not proxy.confirmed():
             raise ProxyPoolError(f"Found Unconfirmed Proxy in {self.__NAME__}")
 
-        last_request = proxy.last_request(active=True)
-        if last_request and last_request.was_timeout_error:
-            raise ProxyPoolError(f"Found Holdable Proxy in {self.__NAME__}")
+        # THIS CAN HAPPEN
+        # If one thread times out with a proxy, it will set it's value to a timeout
+        # value before it is necessarily removed from the confirmed queue.
+        # last_request = proxy.last_request(active=True)
+        # if last_request and last_request.was_timeout_error:
+        #     raise ProxyPoolError(f"Found Holdable Proxy in {self.__NAME__}")
 
     async def get(self):
         """
-        Retrieves a proxy from the queue but does not remove it from
-        the queue.  This allows multiple threads access to the same proxy.
+        Retrieves a proxy from the queue and removes it from the queue after
+        a certain number of threads have retrieved it.
 
-        Chosen proxy is based on a rotating index that increments on each get()
-        call, but resets if it exceeds the limit.  This allows us to not get stuck
-        on the first confirmed proxy and allow them to be spread more evenly.
+        This allows multiple threads access to the same proxy, but does not get
+        stuck maxing out with timeout errors due to a large number of threads
+        simultaneously using the same proxy.
         """
-        if self.qsize() != 0:
+        try:
             proxy = await self._get_proxy()
+        except QueueEmpty as e:
+            self.log.warning(e)
+            return None
+        else:
             self.raise_for_queue(proxy)
+
+            # Temporarily Removing Proxies from Confirmed Queue:
+            # Issue is that if a proxy from the confirmed queue raises a too many
+            # requests exception, it is likely being used at the same time for
+            # several requests, which causes it to timeout immediately.
+            # await self.remove(proxy)
+
             return proxy
 
-    async def _get_proxy(self):
+    def _delete_nth(self, n):
+        self._queue.rotate(-n)
+        self._queue.popleft()
+        self._queue.rotate(n)
+
+    async def remove(self, proxy):
+        """
+        [x] Note:
+        ---------
+        Because proxies in the ConfirmedQueue are used simultaneously by multiple
+        threads at the same time (not the case for HeldQueue), it is possible
+        that the proxy is already removed from the ConfirmedQueue by the time another
+        thread determines it should be removed.
+        """
         async with self.lock:
             try:
-                self.rotating_index += 1
-                return self._queue[self.rotating_index]
-            except IndexError:
-                self.rotating_index = 0
-                return self._queue[self.rotating_index]
+                ind = self._queue.index(proxy)
+            except ValueError:
+                raise ProxyPoolError(
+                    f'Cannot Remove Proxy from {self.__NAME__}',
+                    extra={'proxy': proxy}
+                )
+            else:
+                self._delete_nth(ind)
+                del self.times_used[proxy.id]
+
+    async def _get_proxy(self):
+        """
+        [x] TODO:
+        --------
+        There may be a smarter way to do this, that involves staggering the
+        retrieval of the same proxy with asyncio.sleep() based on the number
+        of times it was already pulled out.
+        """
+        async with self.lock:
+            least_common = self.times_used.most_common()
+            if not least_common == 0:
+                raise QueueEmpty(self)
+
+            proxy, count = least_common[:-2:-1][0]
+
+            # As proxies are confirmed and put back in, this might cause issues,
+            # since there may wind up being more proxies than the limit of giving
+            # out.  We will have to decrement the count when a proxy is put back
+            # in.
+            if count >= MAX_CONFIRMED_PROXIES:
+                raise ProxyPoolError('Count %s exceeds %s.' % (count, MAX_CONFIRMED_PROXIES))
+
+            count = self.times_used[proxy.id]
+
+            # As proxies are confirmed and put back in,
+            if count == MAX_CONFIRMED_PROXIES - 1:
+                self.log.info(
+                    'Using Last Allowed Usage of %s' % MAX_CONFIRMED_PROXIES,
+                    extra={'proxy': proxy}
+                )
+                await self.remove(proxy)
+
+            self.times_used[proxy.id] += 1
+            return proxy
 
     async def move_to_hold(self, proxy):
         if config['instattack']['log.logging']['log_proxy_queue']:
@@ -134,17 +206,6 @@ class ConfirmedQueue(ProxyQueue):
 
         await self.remove(proxy)
         await self.hold.put(proxy)
-
-    async def move_to_pool(self, proxy):
-        if config['instattack']['log.logging']['log_proxy_queue']:
-            self.log.debug(
-                f'Moving Proxy from {self.__NAME__} to {self.pool.__NAME__}',
-                extra={'proxy': proxy}
-            )
-
-        # Skips validation of pool for confirmed proxies.
-        await self.remove(proxy)
-        await self.pool.put(proxy, evaluate=False)
 
     async def put(self, proxy):
         """
@@ -217,8 +278,12 @@ class HoldQueue(ProxyQueue):
                 # the risk of proxies getting stuck in here after their timeouts
                 # have passed?
                 last_request = proxy.last_request(active=True)
-                if not proxy.time_since_used > proxy.timeout(last_request.error):
-                    await self.remove(proxy)
+                self.log.critical(f'Checking if Hold Proxy OK {proxy.time_since_used} > {proxy.timeout(last_request.error)}?',
+                extra={'proxy': proxy}) # noqa
+                if proxy.time_since_used > proxy.timeout(last_request.error):
+                    # await self.remove(proxy)
+                    self.log.critical('Hold Proxy Ok')
+                    self._queue.remove(proxy)
                     return proxy
 
         if len(self._queue) == 0:

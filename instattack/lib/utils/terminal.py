@@ -1,4 +1,15 @@
+import re
 import sys
+
+
+def escape_ansi_string(value):
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', value)
+
+
+def measure_ansi_string(value):
+    bare = escape_ansi_string(value)
+    return len(bare)
 
 
 class cursor:

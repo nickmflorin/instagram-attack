@@ -88,31 +88,31 @@ def draw_panels(stdscr):
     k = 0
 
     # Clear and refresh the screen for a blank canvas
-    while (k != ord('q')):
-        stdscr.clear()
-        stdscr.refresh()
+    # while (k != ord('q')):
+    stdscr.clear()
+    stdscr.refresh()
 
-        curses.echo()
-        curses.start_color()
-        curses.use_default_colors()
+    curses.echo()
+    curses.start_color()
+    curses.use_default_colors()
 
-        p = ApplicationPanel(stdscr)
-        p2 = StatsPanel(stdscr)
-        l1 = LogPanel1(stdscr)
-        l2 = LogPanel2(stdscr)
+    p = ApplicationPanel(stdscr)
+    p2 = StatsPanel(stdscr)
+    l1 = LogPanel1(stdscr)
+    l2 = LogPanel2(stdscr)
 
-        mh = CursesHandler(p.window)
+    mh = CursesHandler(p.window)
 
-        formatterDisplay = logging.Formatter(
-            '%(asctime)-8s|%(name)-12s|%(levelname)-6s|%(message)-s', '%H:%M:%S')
-        mh.setFormatter(formatterDisplay)
-        logger = logging.getLogger('myLog')
-        logger.addHandler(mh)
+    formatterDisplay = logging.Formatter(
+        '%(asctime)-8s|%(name)-12s|%(levelname)-6s|%(message)-s', '%H:%M:%S')
+    mh.setFormatter(formatterDisplay)
+    logger = logging.getLogger('myLog')
+    logger.addHandler(mh)
 
-        p.window.move(4, 1)
-        for i in range(10):
-            logger.error('message ' + str(i))
-            time.sleep(1)
+    p.window.move(4, 1)
+    for i in range(10):
+        logger.error('message ' + str(i))
+        time.sleep(1)
 
         # curses.curs_set(1)
         # curses.nocbreak()

@@ -2,7 +2,7 @@ from plumbum.path import LocalPath
 import os
 import site
 
-from instattack.config import settings
+from instattack.config import constants
 
 
 def relative_to_root(path):
@@ -12,12 +12,12 @@ def relative_to_root(path):
 
     # This only happens for the test.py file...  We should remove this conditional
     # when we do not need that functionality anymore.
-    if settings.APP_NAME in path.parts:
-        ind = path.parts.index(settings.APP_NAME)
+    if constants.APP_NAME in path.parts:
+        ind = path.parts.index(constants.APP_NAME)
         parts = path.parts[ind:]
         path = LocalPath(*parts)
 
-    return settings.DIR_STR(path)
+    return constants.DIR_STR(path)
 
 
 def task_is_third_party(task):
@@ -26,7 +26,7 @@ def task_is_third_party(task):
     sure that we are not raising exceptions for external tasks.
     """
     directory = get_task_path(task)
-    return not directory.startswith(settings.APP_DIR)
+    return not directory.startswith(constants.APP_DIR)
 
 
 def get_coro_path(coro):
@@ -70,6 +70,6 @@ def is_site_package_file(path):
 
 
 def is_app_file(path):
-    if path.startswith(settings.APP_PATH):
+    if path.startswith(constants.APP_PATH):
         return True
     return False

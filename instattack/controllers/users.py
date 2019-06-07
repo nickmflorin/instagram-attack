@@ -3,7 +3,7 @@ from cement import ex
 
 from instattack.lib.utils import start_and_stop
 
-from instattack.config import settings, config
+from instattack.config import constants, config
 
 from instattack.app.models import User
 from instattack.app.handlers import LoginHandler
@@ -225,11 +225,11 @@ class UserController(InstattackController, UserInterface):
             if not user.directory.exists():
                 user.initialize_directory()
 
-        directory = settings.USER_PATH
+        directory = constants.USER_PATH
         for user_dir in directory.iterdir():
             if user_dir.is_file():
                 print_action(user_dir.name, 'Deleting File')
-                print('Deleting File', label=user_dir.name, directory=settings.USER_PATH)
+                print('Deleting File', label=user_dir.name, directory=constants.USER_PATH)
                 if not self.app.pargs.safe:
                     user_dir.delete()
             else:
@@ -262,7 +262,7 @@ class UserController(InstattackController, UserInterface):
                                     other.delete()
                             else:
                                 other_name = other.name.split('.txt')[0]
-                                if other_name not in settings.FILES:
+                                if other_name not in constants.FILES:
                                     print_action(
                                         f"Deleting Invalid File",
                                         label=other.name,

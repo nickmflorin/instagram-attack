@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import functools
 
+from instattack.config import config
 from instattack.lib.utils import humanize_list
+from instattack.app.exceptions import ConfigError
 
 
 def allow_exception_input(func):
@@ -14,29 +16,75 @@ def allow_exception_input(func):
     return wrapped
 
 
-class DerivedMetrics(object):
+class RequestMetrics(object):
 
     def _history(self, active=False):
         if active:
             return self.active_history
         return self.history
 
-    def requests(self, *args, active=False, success=False, fail=False):
-        index = args[0] if len(args) == 1 else None
+    def successful_requests(self, active=False, horizon=None):
         requests = self._history(active=active)
-        if success:
-            requests = [request for request in requests if request.confirmed]
-        elif fail:
-            requests = [request for request in requests if not request.confirmed]
-        if index:
-            try:
-                return requests[index]
-            except IndexError:
-                return None
+        requests = [request for request in requests if request.confirmed]
+        if horizon:
+            return requests[int(-1 * horizon):]
         return requests
 
-    def num_requests(self, active=False, success=False, fail=False):
-        return len(self.requests(active=active, success=success, fail=fail))
+    def failed_requests(self, active=False, horizon=None):
+        requests = self._history(active=active)
+        requests = [request for request in requests if request.error]
+        if horizon:
+            return requests[int(-1 * horizon):]
+        return requests
+
+    def timeout_requests(self, active=False, horizon=None):
+        requests = self._history(active=active)
+        requests = [request for request in requests if request.was_timeout_error]
+        if horizon:
+            return requests[int(-1 * horizon):]
+        return requests
+
+    def requests(self, *args, active=False, horizon=None, **kwargs):
+
+        if kwargs.get('success'):
+            return self.successful_requests(active=active, horizon=horizon)
+
+        elif kwargs.get('fail'):
+            return self.failed_requests(active=active, horizon=horizon)
+
+        elif kwargs.get('timeout'):
+            return self.timeout_requests(active=active, horizon=horizon)
+
+        else:
+            requests = self._history(active=active)
+            if horizon:
+                requests = requests[int(-1 * horizon):]
+            if args:
+                try:
+                    return requests[args[0]]
+                except IndexError:
+                    return None
+            else:
+                return requests
+
+    def num_requests(self, **kwargs):
+        return len(self.requests(**kwargs))
+
+    def last_request(self, active=False):
+        return self.requests(-1, active=active)
+
+    def requests_in_horizon(self, horizon, active=False):
+        """
+        Returns the number of confirmed requests in the last `horizon` requests.
+        If `horizon` not specified, uses the entire history.
+        """
+        requests = self.requests(active=active, success=True)
+        if horizon:
+            requests = requests[-horizon:]
+        return requests
+
+
+class ErrorMetrics(object):
 
     @property
     def active_error_rate(self):
@@ -73,9 +121,103 @@ class DerivedMetrics(object):
     def num_errors(self, *args, active=False):
         return len(self.errors(*args, active=active))
 
+    def error_rate(self, active=False):
+        """
+        Counts the error_rate as 0.0 until there are a sufficient number of
+        requests.
+        """
+        failed = self.num_requests(active=active, fail=True)
+        total = self.num_requests(active=active)
+
+        if total >= self.error_rate_horizon:
+            return float(failed) / float(total)
+        return 0.0
+
     @property
-    def confirmed(self):
-        return self.num_requests(active=False, success=True) != 0
+    def error_rate_horizon(self):
+        """
+        The sufficicent number of requests that are required for thte error-rate
+        to be a non-zero value.
+        """
+        err_rate = config['proxies']['pool']['limits'].get('error_rate', {})
+        return err_rate.get('horizon')
+
+    def last_error(self, active=False):
+        return self.requests(-1, active=active, fail=True)
+
+    def errors_in_horizon(self, horizon=None, active=False):
+        """
+        Returns the number of errored requests in the last `horizon` requests.
+        """
+        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        horizon = horizon or confirmed_config.get('horizon')
+        if not horizon:
+            raise ConfigError("Horizon Not Specified in Config")
+
+        requests = self.requests(active=active, success=False)
+        return requests[int(-1 * horizon):]
+
+
+class ConfirmedMetrics(object):
+
+    def confirmations_in_horizon(self, horizon=None, active=False):
+        """
+        Returns the number of confirmed requests in the last `horizon` requests.
+        """
+        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        horizon = horizon or confirmed_config.get('horizon')
+        if not horizon:
+            raise ConfigError("Horizon Not Specified in Config")
+
+        requests = self.requests(active=active, success=True)
+        return requests[int(-1 * horizon):]
+
+    def confirmed_in_horizon(self, horizon=None, active=False):
+        """
+        Returns True if the proxy has a certain number of confirmations in the
+        `horizon` most recent requests.
+        """
+        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        horizon = horizon or confirmed_config.get('horizon')
+        if not horizon:
+            raise ConfigError("Horizon Not Specified in Config")
+
+        requests = self.confirmations_in_horizon(horizon, active=active)
+        return len(requests) != 0
+
+    def confirmed_over_threshold(self, threshold=None, active=False, requests=None):
+        """
+        Returns True if the proxy has a certain number of confirmations in it's
+        history.
+        """
+        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        threshold = threshold or confirmed_config.get('threshold')
+        if not threshold:
+            raise ConfigError("Threshold Not Specified in Config")
+
+        requests = self.num_requests(active=active, success=True)
+        return requests >= threshold
+
+    def confirmed_over(self, threshold=None, horizon=None, active=False):
+        """
+        Based on a `horizon` and `threshold` set in configuration, determines if
+        there were either a certain number of confirmations in the most recent
+        `horizon` of request history, or if there were a certain number of
+        confirmations in all of the request history.
+        """
+        if not threshold and not horizon:
+            raise ValueError("Must specify threshold or horizon.")
+
+        if horizon and not threshold:
+            return self.confirmed_in_horizon(horizon, active=active)
+        elif threshold and not horizon:
+            return self.confirmed_over_threshold(threshold, active=active)
+        else:
+            requests = self.confirmations_in_horizon(horizon=horizon)
+            return len(requests) >= threshold
+
+
+class TimeoutMetrics(object):
 
     @allow_exception_input
     def timeout_start(self, err):
@@ -123,6 +265,33 @@ class DerivedMetrics(object):
 
 
 class HumanizedMetrics(object):
+    """
+    Property accessable and human readable metrics for loggign output
+    purposes.
+    """
+    @property
+    def active_times_used(self):
+        num_requests = self.num_requests(active=True)
+        num_confirmed = self.num_requests(active=True, success=True)
+        num_timeouts = self.num_requests(active=True, timeout=True)
+
+        if not num_requests:
+            return 'None'
+        return (
+            f"{num_requests} "
+            f"(Confirmed {num_confirmed}/{num_requests}) "
+            f"(Time Out Errors {num_timeouts}/{num_requests})"
+        )
+
+    @property
+    def active_recent_history(self):
+        requests = self.requests(active=True, horizon=5)
+        readable_history = [
+            req.error or "confirmed"
+            for req in requests
+        ]
+        readable_history.reverse()
+        return humanize_list(readable_history)
 
     @property
     def humanized_active_errors(self):
@@ -156,18 +325,76 @@ class HumanizedMetrics(object):
         num_active_errors = self.num_errors('ssl', active=True)
         return f"{num_errors} (Active: {num_active_errors})"
 
-    @property
-    def num_active_successful_requests(self):
-        return self.num_requests(active=True, success=True)
 
-    @property
-    def num_active_failed_requests(self):
-        return self.num_requests(active=True, fail=True)
+class ProxyMetrics(
+    RequestMetrics,
+    ErrorMetrics,
+    ConfirmedMetrics,
+    HumanizedMetrics,
+    TimeoutMetrics,
+):
+    def priority(self, count):
+        """
+        We do not need the confirmed fields since they already are factored
+        in based on the separate queues.
 
-    @property
-    def num_successful_requests(self):
-        return self.num_requests(success=True)
+        [!] IMPORTANT:
+        -------------
+        Tuple comparison for priority in Python3 breaks if two tuples are the
+        same, so we have to use a counter to guarantee that no two tuples are
+        the same and priority will be given to proxies placed first.
+        """
+        PROXY_PRIORITY_VALUES = []
+        raw_priority_values = config['proxies']['pool']['priority']
 
-    @property
-    def num_failed_requests(self):
-        return self.num_requests(fail=True)
+        for priority in raw_priority_values:
+            multiplier = int(priority[0])
+
+            metric = priority[1][0]
+            params = []
+            if len(priority[1]) > 1:
+                params = priority[1][1:]
+            value = self.get_metric(metric, *params)
+
+            PROXY_PRIORITY_VALUES.append((multiplier, value))
+
+        return tuple([
+            field[0] * field[1]
+            for field in PROXY_PRIORITY_VALUES
+        ] + [count])
+
+    def get_metric(self, metric, *args):
+        """
+        Arguments can be 1 and up to 3.  The first argument is the metric
+        type, the second argument specifies if it is active or historical,
+        and the third argument specifies an additional context parameter.
+
+        Certain metrics require a certain number of arguments.
+
+        This is solely so we can define required metrics in configuration and
+        more easily and consistently create a method of referencing certain
+        metrics.
+
+        [x] TODO
+        --------
+        Expand on list of metrics and options.
+        """
+        metrics = ['requests', 'error_rate', 'avg_resp_time']
+        if metric not in metrics:
+            raise ConfigError("Invalid metric %s." % metric)
+
+        if metric == 'requests':
+            active = True if args[0] == 'active' else False
+            success = fail = False
+            if len(args) > 1:
+                success = args[1] == 'success'
+                fail = args[1] == 'fail'
+
+            return self.num_requests(active=active, success=success, fail=fail)
+
+        elif metric == 'error_rate':
+            active = True if args[0] == 'active' else False
+            return self.error_rate(active=active)
+
+        else:
+            return self.avg_resp_time

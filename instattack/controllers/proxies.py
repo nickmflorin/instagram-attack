@@ -28,6 +28,15 @@ class ProxyInterface(Interface):
             created, updated = await save_iteratively(iterable)
         return created, updated
 
+    def get_proxy(self, host, port):
+
+        async def _get_proxy():
+            try:
+                return await Proxy.get(host=host, port=port)
+            except tortoise.exceptions.DoesNotExist:
+                return None
+        return self.loop.run_until_complete(_get_proxy())
+
     def get_proxies(self):
 
         async def _get_proxies():
@@ -63,7 +72,7 @@ class ProxyInterface(Interface):
             created = []
             for proxy in proxy_args:
                 try:
-                    Proxy.get(host=proxy['host'], port=proxy['port'])
+                    await Proxy.get(host=proxy['host'], port=proxy['port'])
                 except tortoise.exceptions.DoesNotExist:
                     proxy = await Proxy.create(**proxy)
                     created.append(proxy)
@@ -83,27 +92,6 @@ class ProxyController(InstattackController, ProxyInterface):
         interfaces = [
             ProxyInterface,
         ]
-
-    @proxy_command(help="Clear Historical Error and Request History of Proxies")
-    def migrate_history(self):
-
-        async def _migrate_history():
-            to_save = []
-            async for proxy in Proxy.all():
-                proxy.active_errors = {}
-                if proxy.errors:
-                    proxy.errors = proxy.errors['all']
-                    if proxy.errors.get('most_recent'):
-                        proxy.last_error = proxy.errors['most_recent']
-                to_save.append(proxy)
-            return to_save
-
-        with start_and_stop("Migrating Proxy History") as spinner:
-            loop = asyncio.get_event_loop()
-            to_save = loop.run_until_complete(_migrate_history())
-
-            spinner.write(f"> Updating {len(to_save)} Proxies")
-            loop.run_until_complete(self._save_proxies(to_save))
 
     @proxy_command(help="Clear Historical Error and Request History of Proxies")
     def clear_history(self):
@@ -139,12 +127,9 @@ class ProxyController(InstattackController, ProxyInterface):
     def scrape(self):
 
         with start_and_stop("Scraping Proxies") as spinner:
-            proxy_args = scrape_proxies(limit=self.app.pargs.limit)
-
-            proxies = self.get_proxies()
-            spinner.write(f"Currently {len(proxies)} Proxies")
 
             # Have to Set a Default Value for Average Response Time for Now
+            proxy_args = scrape_proxies(limit=self.app.pargs.limit)
             for proxy in proxy_args:
                 proxy['avg_resp_time'] = 0.1
 
@@ -153,10 +138,7 @@ class ProxyController(InstattackController, ProxyInterface):
 
             spinner.indent()
             if len(created) != 0:
-                spinner.write(f"Created {len(created)} Proxies", success=True)
-
-                proxies = self.get_proxies()
-                spinner.write(f"Now {len(proxies)} Proxies")
+                spinner.write(f"Created {len(created)} New Proxies", success=True)
             else:
                 spinner.write('No New Proxies from Scrape', failure=True)
 

@@ -1,4 +1,4 @@
-from instattack.config import settings
+from instattack.config import constants
 
 
 class InstattackError(Exception):
@@ -68,6 +68,15 @@ class ConfigError(InstattackError):
     pass
 
 
+class QueueEmpty(InstattackError):
+
+    def __init__(self, queue):
+        self.queue = queue
+
+    def __str__(self):
+        return f"The queue `{self.queue.__NAME__}` is empty."
+
+
 class ConfigurationError(InstattackError):
     def __init__(self, errors):
         self.errors = errors
@@ -108,9 +117,9 @@ class ConfigurationError(InstattackError):
         humanized = []
         for error in tuples:
 
-            label_formatter = settings.Colors.MED_GRAY
-            formatted_attr = settings.Colors.BLACK.format(bold=True)(error[0])
-            formatted_error = settings.Colors.ALT_RED.format(bold=True)(error[1].title())
+            label_formatter = constants.Colors.MED_GRAY
+            formatted_attr = constants.Colors.BLACK.format(bold=True)(error[0])
+            formatted_error = constants.Colors.ALT_RED.format(bold=True)(error[1].title())
 
             humanize = (
                 f"{label_formatter('Attr')}: {formatted_attr} "

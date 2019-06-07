@@ -88,10 +88,10 @@ async def limit_as_completed(
 
 async def cancel_remaining_tasks(futures=None):
 
-    futures = futures or asyncio.Task.all_tasks()
+    futures = futures or asyncio.all_tasks()
     futures = [
         task for task in futures
-        if task is not asyncio.tasks.Task.current_task()
+        if task is not asyncio.tasks.current_task()
     ]
 
     async def cancel_task(task):

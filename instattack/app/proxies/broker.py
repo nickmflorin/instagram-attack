@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 from proxybroker import Broker
 
-from instattack.config import settings, config
+from instattack.config import constants, config
 from instattack.lib import logger
 from instattack.app.models import Proxy
 
@@ -64,8 +64,8 @@ class ProxyBroker(Broker):
         await self.find(
             limit=self.limit,
             post=True,
-            countries=settings.PROXY_COUNTRIES,
-            types=settings.PROXY_TYPES,  # HTTP Only
+            countries=constants.PROXY_COUNTRIES,
+            types=constants.PROXY_TYPES,  # HTTP Only
         )
 
     async def collect(self, save=False):

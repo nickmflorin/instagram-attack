@@ -2,26 +2,26 @@ import inspect
 import logging
 import os
 
-from instattack.config import settings
+from instattack.config import constants
 
 
 class LoggerMixin(object):
 
     def success(self, msg, *args, **kwargs):
-        if self.isEnabledFor(settings.LoggingLevels.SUCCESS.num):
-            self._log(settings.LoggingLevels.SUCCESS.num, msg, args, **kwargs)
+        if self.isEnabledFor(constants.LoggingLevels.SUCCESS.num):
+            self._log(constants.LoggingLevels.SUCCESS.num, msg, args, **kwargs)
 
     def start(self, msg, *args, **kwargs):
-        if self.isEnabledFor(settings.LoggingLevels.START.num):
-            self._log(settings.LoggingLevels.START.num, msg, args, **kwargs)
+        if self.isEnabledFor(constants.LoggingLevels.START.num):
+            self._log(constants.LoggingLevels.START.num, msg, args, **kwargs)
 
     def stop(self, msg, *args, **kwargs):
-        if self.isEnabledFor(settings.LoggingLevels.STOP.num):
-            self._log(settings.LoggingLevels.STOP.num, msg, args, **kwargs)
+        if self.isEnabledFor(constants.LoggingLevels.STOP.num):
+            self._log(constants.LoggingLevels.STOP.num, msg, args, **kwargs)
 
     def complete(self, msg, *args, **kwargs):
-        if self.isEnabledFor(settings.LoggingLevels.COMPLETE.num):
-            self._log(settings.LoggingLevels.COMPLETE.num, msg, args, **kwargs)
+        if self.isEnabledFor(constants.LoggingLevels.COMPLETE.num):
+            self._log(constants.LoggingLevels.COMPLETE.num, msg, args, **kwargs)
 
     def simple(self, msg, color=None, *args, **kwargs):
         kwargs.setdefault('extra', {})
@@ -29,7 +29,7 @@ class LoggerMixin(object):
             'color': color,
             'simple': True,
         })
-        self._log(settings.LoggingLevels.INFO.num, msg, args, **kwargs)
+        self._log(constants.LoggingLevels.INFO.num, msg, args, **kwargs)
 
     def findCaller(self, *args):
         """

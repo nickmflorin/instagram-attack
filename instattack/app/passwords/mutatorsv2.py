@@ -32,7 +32,7 @@ class case_mutator_v2(mutator_v2):
         """
         yield self.base.lower()
 
-        # Move Threshold to Settings or Config
+        # Move Threshold to constants or Config
         THRESHOLD = 3
         if len(self.base) <= THRESHOLD:
             yield self.base.upper()

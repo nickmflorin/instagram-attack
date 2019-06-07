@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from collections import deque
 from datetime import datetime
 from dataclasses import dataclass, field
 from dacite import from_dict
@@ -11,13 +10,13 @@ import tortoise
 from tortoise import fields
 from tortoise.models import Model
 
-from instattack.config import settings, config
+from instattack.config import constants, config
 from instattack.lib import logger
 
 from instattack.app.exceptions import ConfigError, ProxyMaxTimeoutError
 
 from .evaluation import evaluate
-from .mixins import HumanizedMetrics, DerivedMetrics, allow_exception_input
+from .mixins import ProxyMetrics, allow_exception_input
 
 
 log = logger.get(__name__, subname='Proxy')
@@ -45,7 +44,7 @@ class ProxyRequest:
     @property
     def was_timeout_error(self):
         if self.error is not None:
-            if self.error in settings.TIMEOUT_ERRORS:
+            if self.error in constants.TIMEOUT_ERRORS:
                 return True
         return False
 
@@ -65,7 +64,7 @@ class ProxyRequest:
         return data
 
 
-class Proxy(Model, HumanizedMetrics, DerivedMetrics):
+class Proxy(Model, ProxyMetrics):
 
     id = fields.IntField(pk=True)
     host = fields.CharField(max_length=30)
@@ -94,7 +93,7 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         if len(self.history) > 1:
             assert self.history[0].date <= self.history[-1].date
 
-        self.active_history = deque([])
+        self.active_history = []
         self.queue_id = None
 
         timeout_config = config['proxies']['pool']['timeouts']
@@ -137,50 +136,26 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
             return delta.total_seconds()
         return 0.0
 
-    def priority(self, count):
-        """
-        We do not need the confirmed fields since they already are factored
-        in based on the separate queues.
-
-        [!] IMPORTANT:
-        -------------
-        Tuple comparison for priority in Python3 breaks if two tuples are the
-        same, so we have to use a counter to guarantee that no two tuples are
-        the same and priority will be given to proxies placed first.
-        """
-        PROXY_PRIORITY_VALUES = []
-        raw_priority_values = config['proxies']['pool']['priority']
-
-        for priority in raw_priority_values:
-            if not hasattr(self, priority[1]):
-                raise ConfigError("Invalid priority value %s." % priority[1])
-
-            PROXY_PRIORITY_VALUES.append((
-                int(priority[0]), getattr(self, priority[1])
-            ))
-
-        return tuple([
-            field[0] * field[1]
-            for field in PROXY_PRIORITY_VALUES
-        ] + [count])
-
     @allow_exception_input
     def reset_timeout(self, err):
         self._timeouts[err]['count'] = 0
 
     def reset_timeouts(self):
-        for err in settings.TIMEOUT_ERRORS:
+        for err in constants.TIMEOUT_ERRORS:
             self.reset_timeout(err)
 
     @allow_exception_input
     def increment_timeout(self, err):
-        if config['instattack']['log.logging']['log_proxy_queue']:
-            log.debug('Incrementing %s Timeout Count to %s' % (
-                err, self.timeout_count(err) + 1))
+        current_timeout = self.timeout(err)
         self._timeouts[err]['count'] += 1
+        new_timeout = self.timeout(err)
+
+        log.debug(f'Incrementing Timeout Count from {current_timeout} to {new_timeout}', extra={
+            'proxy': self,
+        })
 
         if self.timeout_exceeds_max(err):
-            # log.warning(f'Proxy Timeout {self.timeout(err)} Exceeded Max {self.timeout_max(err)}')
+            log.warning(f'Proxy Timeout {self.timeout(err)} Exceeded Max {self.timeout_max(err)}')
             raise ProxyMaxTimeoutError(err, self.timeout(err))
 
     @allow_exception_input
@@ -195,131 +170,19 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         self.active_history.append(req)
         self.history.append(req)
 
+        # Probably Not Necessary but Just in Case
+        self.history = sorted(self.history, key=lambda x: x.date)
+        self.active_history = sorted(self.active_history, key=lambda x: x.date)
+
     def add_successful_request(self, req):
         self.active_history.append(req)
         self.history.append(req)
 
-    def error_rate(self, active=False):
-        """
-        Counts the error_rate as 0.0 until there are a sufficient number of
-        requests.
-        """
-        failed = self.num_requests(active=active, fail=True)
-        total = self.num_requests(active=active)
+        # Probably Not Necessary but Just in Case
+        self.history = sorted(self.history, key=lambda x: x.date)
+        self.active_history = sorted(self.active_history, key=lambda x: x.date)
 
-        if total >= self.error_rate_horizon:
-            return float(failed) / float(total)
-        return 0.0
-
-    @property
-    def error_rate_horizon(self):
-        """
-        The sufficicent number of requests that are required for thte error-rate
-        to be a non-zero value.
-        """
-        err_rate = config['proxies']['pool']['limits'].get('error_rate', {})
-        return err_rate.get('horizon')
-
-    def last_error(self, active=False):
-        return self.requests(-1, active=active, fail=True)
-
-    def last_request(self, active=False):
-        return self.requests(-1, active=active)
-
-    def requests_in_horizon(self, horizon, active=False):
-        """
-        Returns the number of confirmed requests in the last `horizon` requests.
-        If `horizon` not specified, uses the entire history.
-        """
-        requests = self.requests(active=active, success=True)
-        if horizon:
-            requests = requests[-horizon:]
-        return requests
-
-    def errors_in_horizon(self, horizon=None, active=False):
-        """
-        Returns the number of errored requests in the last `horizon` requests.
-
-        [x] TODO:
-        --------
-        Should we set configuration defaults for the threshold, horizon and
-        threshold in horizon parameters?
-        """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
-        horizon = horizon or confirmed_config.get('horizon')
-        if not horizon:
-            raise ConfigError("Horizon Not Specified in Config")
-
-        requests = self.requests(active=active, success=False)
-        return requests[int(-1 * horizon):]
-
-    def confirmations_in_horizon(self, horizon=None, active=False):
-        """
-        Returns the number of confirmed requests in the last `horizon` requests.
-
-        [x] TODO:
-        --------
-        Should we set configuration defaults for the threshold, horizon and
-        threshold in horizon parameters?
-        """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
-        horizon = horizon or confirmed_config.get('horizon')
-        if not horizon:
-            raise ConfigError("Horizon Not Specified in Config")
-
-        requests = self.requests(active=active, success=True)
-        return requests[int(-1 * horizon):]
-
-    def confirmed_in_horizon(self, horizon=None, active=False):
-        """
-        Returns True if the proxy has a certain number of confirmations in the
-        `horizon` most recent requests.
-
-        [x] TODO:
-        --------
-        Should we set configuration defaults for the threshold, horizon and
-        threshold in horizon parameters?
-        """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
-        horizon = horizon or confirmed_config.get('horizon')
-        if not horizon:
-            raise ConfigError("Horizon Not Specified in Config")
-
-        requests = self.confirmations_in_horizon(horizon, active=active)
-        return len(requests) != 0
-
-    def confirmed_over_threshold(self, threshold=None, active=False, requests=None):
-        """
-        Returns True if the proxy has a certain number of confirmations in it's
-        history.
-        """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
-        threshold = threshold or confirmed_config.get('threshold')
-        if not threshold:
-            raise ConfigError("Threshold Not Specified in Config")
-
-        requests = self.num_requests(active=active, success=True)
-        return requests >= threshold
-
-    def confirmed_over(self, threshold=None, horizon=None, active=False):
-        """
-        Based on a `horizon` and `threshold` set in configuration, determines if
-        there were either a certain number of confirmations in the most recent
-        `horizon` of request history, or if there were a certain number of
-        confirmations in all of the request history.
-        """
-        if not threshold and not horizon:
-            raise ValueError("Must specify threshold or horizon.")
-
-        if horizon and not threshold:
-            return self.confirmed_in_horizon(horizon, active=active)
-        elif threshold and not horizon:
-            return self.confirmed_over_threshold(threshold, active=active)
-        else:
-            requests = self.confirmations_in_horizon(horizon=horizon)
-            return len(requests) >= threshold
-
-    def confirmed(self, active=False):
+    def confirmed(self):
         """
         [x] TODO:
         --------
@@ -337,7 +200,7 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
         threshold_in_horizon = confirmed_config.get('threshold_in_horizon')
 
         if threshold:
-            if not self.confirmed_over_threshold(threshold, active=active):
+            if not self.confirmed_over_threshold(threshold):
                 return False
 
         if horizon:
@@ -345,14 +208,10 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
                 if not self.confirmed_over(
                     threshold=threshold_in_horizon,
                     horizon=horizon,
-                    active=active
                 ):
                     return False
             else:
-                if not self.confirmed_in_horizon(
-                    horizon=horizon,
-                    active=active
-                ):
+                if not self.confirmed_in_horizon(horizon=horizon):
                     return False
 
         return True
@@ -411,10 +270,10 @@ class Proxy(Model, HumanizedMetrics, DerivedMetrics):
     def translate_proxybroker_history(cls, broker_proxy):
         errors = []
         for err, count in broker_proxy.stat['errors'].__dict__.items():
-            if err in settings.PROXY_BROKER_ERROR_TRANSLATION:
+            if err in constants.PROXY_BROKER_ERROR_TRANSLATION:
                 for i in range(count):
                     errors.append(ProxyResult(
-                        error=settings.PROXY_BROKER_ERROR_TRANSLATION[err]))
+                        error=constants.PROXY_BROKER_ERROR_TRANSLATION[err]))
             else:
                 log.warning(f'Unexpected Proxy Broker Error: {err}.')
         return errors

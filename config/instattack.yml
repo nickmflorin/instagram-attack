@@ -5,12 +5,12 @@ instattack:
 
     log.logging:
         level: 'debug'
-        log_request_errors: false
+        log_request_errors: true
         log_proxy_queue: false
 
 connection:
     limit_per_host: 0
-    connection_timeout: 6
+    connection_timeout: 14
     connection_limit: 0
 
 
@@ -88,11 +88,11 @@ proxies:
         # We do not need the confirmed fields since they already are factored
         # in based on the separate queues.
         priority: [
-            [-1, 'num_active_successful_requests'],
-            [1, 'active_error_rate'],
-            [-1, 'num_successful_requests'],
-            [1, 'historical_error_rate'],
-            [1, 'avg_resp_time'],
+            [-1, ['requests', 'active', 'success']],
+            [1, ['error_rate', 'active']],
+            [-1, ['requests', 'historical', 'success']],
+            [1, ['error_rate', 'historical']],
+            [1, ['avg_resp_time']]
         ]
 
         # The amount of time to wait before using a proxy that raises an error

@@ -276,7 +276,7 @@ class SmartProxyManager(BrokeredProxyManager):
 
     async def put_from_confirmed(self, proxy):
         """
-        Takes a proxy that is currently in the Confirmed Queue and determines how to
+        Takes a proxy that was taken from the Confirmed Queue and determines how to
         handle it based on the new request appended to the proxy's history.
 
         Since we do not remove proxies from the Confirmed Queue until they fail,
@@ -306,7 +306,10 @@ class SmartProxyManager(BrokeredProxyManager):
         Remove sanity checks `raise_if_` once we are more confident in operation
         of the manager.
         """
-        await self.confirmed.raise_if_missing(proxy)
+
+        # We are temporarily removing proxies from the Confirmed Queue to test out
+        # the timeout issues.
+        # await self.confirmed.raise_if_missing(proxy)
         await self.hold.warn_if_present(proxy)
 
         last_request = proxy.requests(-1, active=True)
@@ -315,7 +318,11 @@ class SmartProxyManager(BrokeredProxyManager):
         # This check has to be done first: proxy can be confirmed over a horizon
         # but still have a more recent timeout error.
         if last_request.was_timeout_error:
-            await self.confirmed.move_to_hold(proxy)
+
+            # Since we are removing from Confirmed right now, we don't have to
+            # move it, just to put it in.
+            await self.hold.put(proxy)
+            # await self.confirmed.move_to_hold(proxy)
 
         # Proxy Still Confirmed Over Horizon - Dont Move Out Yet
         elif proxy.confirmed():
@@ -330,12 +337,14 @@ class SmartProxyManager(BrokeredProxyManager):
                             })
 
         else:
-            # Proxy No Longer Confirmed -> Discard
+            # Proxy No Longer Confirmed -> Discard by Removing
+            # Temporarily Removing from Confirmed on Get
+            # await self.confirmed.remove(proxy)
             pass
 
     async def put_from_hold(self, proxy):
         """
-        Takes a proxy that is currently in the Hold Queue and determines how to
+        Takes a proxy that was taken from the Hold Queue and determines how to
         handle it based on the new request appended to the proxy's history.
 
         [x] NOTE:
@@ -358,8 +367,10 @@ class SmartProxyManager(BrokeredProxyManager):
         Remove sanity checks `raise_if_` once we are more confident in operation
         of the manager.
         """
-        await self.hold.raise_if_missing(proxy)
-        await self.confirmed.raise_if_present(proxy)
+        # await self.hold.raise_if_present(proxy)  # Racee Condition - Another thread might be you to it.
+        #
+        # Don't know why this is failing.
+        # await self.confirmed.raise_if_present(proxy)
 
         # [x] TODO:
         # This Keeps Failing - Only thing I can think of is a Race Condition?
@@ -376,7 +387,10 @@ class SmartProxyManager(BrokeredProxyManager):
 
         # Request Confirmed - Move from Hold to Confirmed ^
         if last_request.confirmed:
-            await self.hold.move_to_confirmed(proxy)
+            # Why were we moving it?  Proxy was removed from hold, it's not
+            # in there anymore...
+            await self.confirmed.put(proxy)
+            # await self.hold.move_to_confirmed(proxy)
 
         # Another Timeout Error - Increment Timeout and Check Max
         elif last_request.was_timeout_error:

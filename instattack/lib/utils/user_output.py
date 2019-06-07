@@ -3,13 +3,15 @@ import contextlib
 from functools import wraps
 import sys
 
-from instattack.config import settings
+from instattack.config import constants
 
-from .yaspin import SyncYaspin
+from .yaspin import CustomYaspin
 
 
 def yaspin(*args, **kwargs):
-    return SyncYaspin(*args, **kwargs)
+    # if not _spin:
+    #     return MockYaspin(*args, **kwargs)
+    return CustomYaspin(*args, **kwargs)
 
 
 class DisableLogger():
@@ -31,15 +33,15 @@ def start_and_stop(text, numbered=False):
     """
     from instattack.lib import logger
 
-    logger.disable()
-    spinner = yaspin(text=settings.Colors.GRAY(text), color="red", numbered=numbered)
+    spinner = yaspin(text=text, color="red", numbered=numbered)
+
     try:
+        logger.disable()
         spinner.start()
         yield spinner
-    finally:
-        spinner.text = settings.Colors.GREEN(text)
-        spinner.ok(settings.Colors.GREEN("✔"))
 
+    finally:
+        spinner.ok()
         spinner.stop()
         logger.enable()
 
@@ -94,7 +96,7 @@ def spin_start_and_stop(text, numbered=False):
             raise NotImplementedError('Decorator only for synchronous methods.')
 
         spinner = yaspin(
-            text=settings.Colors.GRAY(text),
+            text=constants.Colors.GRAY(text),
             color="red",
             numbered=numbered
         )
@@ -108,9 +110,7 @@ def spin_start_and_stop(text, numbered=False):
 
             results = fn(*args, **kwargs)
 
-            spinner.text = settings.Colors.GREEN(text)
-            spinner.ok(settings.Colors.GREEN("✔"))
-
+            spinner.ok()
             spinner.stop()
             logger.enable()
 

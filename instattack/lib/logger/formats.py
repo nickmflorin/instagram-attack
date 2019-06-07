@@ -3,15 +3,7 @@ import logging
 
 from artsylogger import (
     Item, Line, Lines, Header, Label, LineIndex)
-from instattack.config import settings
-
-
-def get_proxy_last_error(record):
-    if getattr(record, 'proxy', None):
-        proxy = record.proxy
-        active_errors = proxy.requests(fail=True, active=True)
-        if active_errors:
-            return active_errors[-1].error
+from instattack.config import constants
 
 
 def get_record_message(record):
@@ -22,7 +14,7 @@ def get_record_message(record):
 
 
 def get_record_time(record):
-    return datetime.now().strftime(settings.DATE_FORMAT)
+    return datetime.now().strftime(constants.DATE_FORMAT)
 
 
 def get_level_formatter(without_text_decoration=False, without_wrapping=False):
@@ -47,11 +39,13 @@ def get_level_formatter(without_text_decoration=False, without_wrapping=False):
 
 
 def get_message_formatter(record):
-    fmt = record.level.format()
-    return fmt.without_text_decoration().without_wrapping()
+    if record.level.name != 'DEBUG':
+        fmt = record.level.format()
+        return fmt.without_text_decoration().without_wrapping()
+    return constants.RecordAttributes.MESSAGE
 
 
-SIMPLE_FORMATTER = logging.Formatter(
+SIMPLE_FORMAT_STRING = logging.Formatter(
     '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
@@ -62,7 +56,7 @@ MESSAGE_LINE = Line(
         format=get_message_formatter,
         line_index=LineIndex(
             attrs='line_index',
-            format=settings.RecordAttributes.LINE_INDEX
+            format=constants.RecordAttributes.LINE_INDEX
         )
     ),
     indent=1,
@@ -71,17 +65,17 @@ MESSAGE_LINE = Line(
 
 PRIMARY_LINE = Line(
     Item(
-        format=settings.RecordAttributes.DATETIME,
+        format=constants.RecordAttributes.DATETIME,
         value=get_record_time,
     ),
     Item(
         attrs="name",
-        format=settings.RecordAttributes.NAME,
+        format=constants.RecordAttributes.NAME,
         suffix=": "
     ),
     Item(
         attrs="subname",
-        format=settings.RecordAttributes.SUBNAME
+        format=constants.RecordAttributes.SUBNAME
     ),
     indent=1,
 )
@@ -91,11 +85,11 @@ CONTEXT_LINES = Lines(
     Line(
         Item(
             attrs='password',
-            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_3,
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_3,
             label=Label(
                 value="Password",
                 delimiter=":",
-                format=settings.RecordAttributes.LABEL_1,
+                format=constants.RecordAttributes.LABEL,
             )
         ),
         indent=1,
@@ -103,52 +97,52 @@ CONTEXT_LINES = Lines(
     Line(
         Item(
             attrs='proxy.method',
-            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_3,
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_3,
         ),
         Item(
             attrs='proxy.url',
-            format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_1.format(wrapper="<%s>"),
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_1.format(wrapper="<%s>"),
         ),
         label=Label(
             value="Proxy",
             delimiter=":",
-            format=settings.RecordAttributes.LABEL_1,
+            format=constants.RecordAttributes.LABEL,
         ),
         indent=1,
     ),
     Lines(
-        # Line(
-        #     Item(
-        #         attrs="proxy.humanized_active_errors",
-        #         format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
-        #         label=Label(
-        #             value="Active Errors",
-        #             delimiter=":",
-        #             format=settings.RecordAttributes.LABEL_2,
-        #         ),
-        #     ),
-        #     indent=2,
-        # ),
         Line(
             Item(
                 attrs="proxy.queue_id",
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
                     value="Queue ID",
                     delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
+                    format=constants.RecordAttributes.LABEL,
                 ),
             ),
             indent=2,
         ),
         Line(
             Item(
-                value=get_proxy_last_error,
-                format=settings.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                attrs="proxy.active_times_used",
+                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_2,
                 label=Label(
-                    value="Last Error",
+                    value="Times Used",
                     delimiter=":",
-                    format=settings.RecordAttributes.LABEL_2,
+                    format=constants.RecordAttributes.LABEL,
+                ),
+            ),
+            indent=2,
+        ),
+        Line(
+            Item(
+                attrs="proxy.active_recent_history",
+                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                label=Label(
+                    value="Recent Requests",
+                    delimiter=":",
+                    format=constants.RecordAttributes.LABEL,
                 ),
             ),
             indent=2,
@@ -159,29 +153,40 @@ CONTEXT_LINES = Lines(
 )
 
 
-TRACEBACK_LINE = Line(
+THREAD_LINE = Line(
     Item(
-        attrs=["frame.filename", "pathname"],
-        format=settings.RecordAttributes.PATHNAME,
+        attrs=["thread"],
+        format=constants.RecordAttributes.FUNCNAME,
         prefix="(",
         suffix=", "
     ),
     Item(
-        attrs=["frame.function", "funcName"],
-        format=settings.RecordAttributes.FUNCNAME,
-        suffix=", "
-    ),
-    Item(
-        attrs=["frame.lineno", "lineno"],
-        format=settings.RecordAttributes.LINENO,
+        attrs=["threadName"],
+        format=constants.RecordAttributes.PATHNAME,
         suffix=")"
     ),
     indent=1,
 )
 
-
-BARE_FORMAT_STRING = MESSAGE_LINE
-SIMPLE_FORMAT_STRING = PRIMARY_LINE
+TRACEBACK_LINE = Line(
+    Item(
+        attrs=["frame.filename", "pathname"],
+        format=constants.RecordAttributes.PATHNAME,
+        prefix="(",
+        suffix=", "
+    ),
+    Item(
+        attrs=["frame.function", "funcName"],
+        format=constants.RecordAttributes.FUNCNAME,
+        suffix=", "
+    ),
+    Item(
+        attrs=["frame.lineno", "lineno"],
+        format=constants.RecordAttributes.LINENO,
+        suffix=")"
+    ),
+    indent=1,
+)
 
 
 LOG_FORMAT_STRING = Lines(
@@ -190,11 +195,12 @@ LOG_FORMAT_STRING = Lines(
     Line(
         Item(
             attrs="other",
-            format=settings.RecordAttributes.OTHER_MESSAGE
+            format=constants.RecordAttributes.OTHER_MESSAGE
         ),
         indent=1,
     ),
     CONTEXT_LINES,
+    THREAD_LINE,
     TRACEBACK_LINE,
     lines_above=0,
     lines_below=1,

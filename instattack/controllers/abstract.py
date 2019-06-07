@@ -3,16 +3,16 @@ from cement import Controller, shell
 import sys
 
 from instattack.lib import logger
-from instattack.config import settings
+from instattack.config import constants
 
 
 class PrintableMixin(object):
 
     def success(self, text):
-        sys.stdout.write("%s\n" % settings.LoggingLevels.SUCCESS(text))
+        sys.stdout.write("%s\n" % constants.LoggingLevels.SUCCESS(text))
 
     def failure(self, text):
-        sys.stdout.write("%s\n" % settings.LoggingLevels.ERROR(text))
+        sys.stdout.write("%s\n" % constants.LoggingLevels.ERROR(text))
 
     def breakline(self):
         sys.stdout.write("\n")
@@ -26,7 +26,7 @@ class InstattackController(Controller, PrintableMixin):
 
     def proceed(self, message):
 
-        fmt = settings.Colors.BLACK.format(bold=True)
+        fmt = constants.Colors.BLACK.format(bold=True)
         message = fmt(f"{message}") + ", (Press Enter to Continue)"
 
         p = shell.Prompt(message, default="ENTER")

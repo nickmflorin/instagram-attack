@@ -6,7 +6,7 @@ import signal
 
 from instattack.app.exceptions import ConfigurationError
 
-from .settings import APP_NAME, ROOT_DIR
+from .constants import APP_NAME, ROOT_DIR
 from .schema import Schema
 
 
@@ -15,7 +15,7 @@ _configuration = {}
 
 class _Config(dict):
 
-    settings = importlib.import_module('.settings', package=__name__)
+    constants = importlib.import_module('.constants', package=__name__)
 
     __CONFIG_SECTION__ = APP_NAME
 
@@ -29,8 +29,6 @@ class _Config(dict):
     __EXTENSIONS__ = ['yaml', 'colorlog', 'jinja2']
     __CONFIG_HANDLER__ = 'yaml'
     __CONFIG_FILE_SUFFIX__ = '.yml'
-
-    __LOG_HANDLER__ = 'colorlog'
     __OUTPUT_HANDLER__ = 'jinja2'
 
     __EXIT_ON_CLOSE__ = True
@@ -39,10 +37,6 @@ class _Config(dict):
 
     def __init__(self, data):
         super(_Config, self).__init__(data)
-
-        # Used to prevent race conditions in the global application shutdown
-        # with asyncio.
-        self.shutdown = False
 
     def set(self, data):
         self.update(**data)
