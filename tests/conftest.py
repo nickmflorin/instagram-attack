@@ -1,9 +1,6 @@
-"""
-PyTest Fixtures.
-"""
-
 import pytest
 from cement import fs
+
 
 @pytest.fixture(scope="function")
 def tmp(request):

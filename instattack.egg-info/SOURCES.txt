@@ -5,6 +5,7 @@ requirements.txt
 setup.cfg
 setup.py
 instattack/__init__.py
+instattack/hooks.py
 instattack/main.py
 instattack/mixins.py
 instattack.egg-info/PKG-INFO

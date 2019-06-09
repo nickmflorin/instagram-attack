@@ -38,8 +38,13 @@ def get_level_formatter(without_text_decoration=False, without_wrapping=False):
     return _level_formatter
 
 
+def get_level_color(record):
+    fmt = record.level.format()
+    return fmt.colors[0]
+
+
 def get_message_formatter(record):
-    if record.level.name != 'DEBUG':
+    if record.level.name not in ['DEBUG', 'WARNING', 'INFO']:
         fmt = record.level.format()
         return fmt.without_text_decoration().without_wrapping()
     return constants.RecordAttributes.MESSAGE
@@ -101,7 +106,7 @@ CONTEXT_LINES = Lines(
         ),
         Item(
             attrs='proxy.url',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_1.format(wrapper="<%s>"),
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_1,
         ),
         label=Label(
             value="Proxy",
@@ -207,11 +212,11 @@ LOG_FORMAT_STRING = Lines(
     header=Header(
         char="-",
         length=25,
+        color='level.color',
         label=Label(
             attrs='level.name',
             format=get_level_formatter(),
             delimiter=None,
         ),
-        format=get_level_formatter(without_wrapping=True, without_text_decoration=True),
     )
 )
