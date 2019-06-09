@@ -1,6 +1,5 @@
 import asyncio
 from cement import Controller, shell
-from plumbum import colors
 import sys
 
 from instattack.lib import logger
@@ -10,10 +9,10 @@ from instattack.config import constants
 class PrintableMixin(object):
 
     def success(self, text):
-        sys.stdout.write("%s\n" % constants.LoggingLevels.SUCCESS(text))
+        sys.stdout.write("%s\n" % constants.Formats.State.SUCCESS(text))
 
     def failure(self, text):
-        sys.stdout.write("%s\n" % constants.LoggingLevels.ERROR(text))
+        sys.stdout.write("%s\n" % constants.Formats.State.FAIL(text))
 
     def breakline(self):
         sys.stdout.write("\n")
@@ -27,7 +26,7 @@ class InstattackController(Controller, PrintableMixin):
 
     def proceed(self, message):
 
-        fmt = constants.Colors.BLACK.format_with(colors.bold)
+        fmt = constants.Formats.Text.NORMAL.with_bold()
         message = fmt(f"{message}") + ", (Press Enter to Continue)"
 
         p = shell.Prompt(message, default="ENTER")

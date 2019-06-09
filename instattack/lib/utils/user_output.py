@@ -3,8 +3,6 @@ import contextlib
 from functools import wraps
 import sys
 
-from instattack.config import constants
-
 from .yaspin import CustomYaspin
 
 
@@ -33,7 +31,11 @@ def start_and_stop(text, numbered=False):
     """
     from instattack.lib import logger
 
-    spinner = yaspin(text=text, color="red", numbered=numbered)
+    spinner = yaspin(
+        text=text,
+        color="red",
+        numbered=numbered
+    )
 
     try:
         logger.disable()
@@ -96,7 +98,7 @@ def spin_start_and_stop(text, numbered=False):
             raise NotImplementedError('Decorator only for synchronous methods.')
 
         spinner = yaspin(
-            text=constants.Colors.GRAY(text),
+            text=text,
             color="red",
             numbered=numbered
         )

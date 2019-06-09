@@ -25,9 +25,7 @@ def get_level_formatter(without_text_decoration=False, without_wrapping=False):
     the format object.
     """
     def _level_formatter(record):
-        fmt = record.level
-        fmt.bold()
-        return fmt
+        return record.level
     return _level_formatter
 
 
@@ -85,7 +83,7 @@ CONTEXT_LINES = Lines(
     Line(
         Item(
             attrs='password',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_3,
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
             label=Label(
                 value="Password",
                 delimiter=":",
@@ -97,11 +95,11 @@ CONTEXT_LINES = Lines(
     Line(
         Item(
             attrs='proxy.method',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_3,
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
         ),
         Item(
             attrs='proxy.url',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_1,
+            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
         ),
         label=Label(
             value="Proxy",
@@ -114,7 +112,7 @@ CONTEXT_LINES = Lines(
         Line(
             Item(
                 attrs="proxy.queue_id",
-                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
                 label=Label(
                     value="Queue ID",
                     delimiter=":",
@@ -126,7 +124,7 @@ CONTEXT_LINES = Lines(
         Line(
             Item(
                 attrs="proxy.active_times_used",
-                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
                 label=Label(
                     value="Times Used",
                     delimiter=":",
@@ -138,7 +136,7 @@ CONTEXT_LINES = Lines(
         Line(
             Item(
                 attrs="proxy.active_recent_history",
-                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE_2,
+                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
                 label=Label(
                     value="Recent Requests",
                     delimiter=":",

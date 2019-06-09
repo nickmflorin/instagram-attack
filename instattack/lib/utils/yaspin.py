@@ -33,29 +33,9 @@ class CustomYaspin(Yaspin):
     >>> (Cursor Position)
     """
 
-    POINTER_COLORS = {
-        1: constants.Colors.GRAY,
-        2: constants.Colors.MED_GRAY,
-        3: constants.Colors.LIGHT_GRAY,
-    }
-    STATE_COLORS = {
-        (True, True, False): constants.Colors.GREEN,
-        (True, False, False): constants.Colors.GREEN,
-        (False, True, False): constants.Colors.RED,
-        (False, False, True): constants.Colors.YELLOW,
-        (False, False, False): constants.Colors.GRAY,
-    }
-    STATE_ICONS = {
-        (True, False, False): "✔",
-        (False, True, False): "✘",
-        (False, False, True): "\u26A0",
-        (False, False, False): "",
-    }
-    DEFAULT_POINTED_TEXT_COLOR = constants.Colors.LIGHT_GRAY
-    DEFAULT_POINTED_ICON_COLOR = constants.Colors.MED_GRAY
-
-    def __init__(self, numbered=False, *args, **kwargs):
-        super(CustomYaspin, self).__init__(*args, **kwargs)
+    def __init__(self, text=None, numbered=False, *args, **kwargs):
+        text = constants.Formats.Text.NORMAL(text)
+        super(CustomYaspin, self).__init__(text=text, *args, **kwargs)
 
         self._current_indent = 0
         self._index_counter = Counter()
@@ -82,7 +62,7 @@ class CustomYaspin(Yaspin):
         self._clear_line()
 
     def warning(self, text):
-        text = self.STATE_COLORS[(False, False, True)]("Warning: ") + text
+        text = constants.Formats.State.WARNING.without_icon()("Warning: %s" % text)
         self.write(text, warning=True)
 
     def write(self, text, indent=False, failure=False, warning=False, success=False):
@@ -95,9 +75,7 @@ class CustomYaspin(Yaspin):
 
         message = self._compose_out(
             text=text,
-            failure=failure,
-            success=success,
-            warning=warning,
+            state=(success, failure, warning),
             pointed=True
         )
 
@@ -130,26 +108,18 @@ class CustomYaspin(Yaspin):
     def number(self):
         self._numbered = True
 
-    def _compose_out(self, frame=None, success=False, failure=False, warning=False,
-            text=None, pointed=False):
+    def _compose_out(self, frame=None, text=None, pointed=False, state=(False, False, False)):
 
         text = text or self._text
-        icon = self.STATE_ICONS[(success, failure, warning)]
-
-        text_color = icon_color = self.STATE_COLORS[(success, failure, warning)]
-        if pointed:
-            text_color = self.POINTER_COLORS.get(
-                self._current_indent, self.DEFAULT_POINTED_TEXT_COLOR)
 
         parts = (
             self._line_start(pointed=pointed),
             self._index(),
             self._decorated_text(
                 text=text,
-                icon=icon,
                 frame=frame,
-                text_color=text_color,
-                icon_color=icon_color,
+                pointed=pointed,
+                state=state,
             )
         )
 
@@ -164,7 +134,7 @@ class CustomYaspin(Yaspin):
 
         return to_unicode("\r%s%s%s" % (message, separated, date_message))
 
-    def _decorated_text(self, text, icon=None, frame=None, text_color=None, icon_color=None):
+    def _decorated_text(self, text, frame=None, pointed=False, state=(False, False, False)):
         """
         >>> ✔_Preparing                     -> Indentation 0
         >>> __> ✘_Something Happened         -> Indentation 0
@@ -172,22 +142,21 @@ class CustomYaspin(Yaspin):
         Decorated Text: ✔_Preparing
         Decorated Text: ✘_Something Happened
         """
-        decorator = " "
-        if text_color:
-            text = text_color(text)
+        icon = constants.Formats.State.get_icon_for(state)
+        text_format = icon_format = constants.Formats.State.get_format_for(state).without_icon()
+        if pointed:
+            text_format = constants.Formats.Text.get_hierarchal_format(self._current_indent)
 
         if frame:
-            decorator = frame
             if self._color_func:
-                decorator = self._color_func(frame)
-            return "%s %s" % (decorator, text)
+                frame = self._color_func(frame)
+            return "%s %s" % (frame, text_format.without_icon()(text))
 
-        elif icon_color and icon:
-            decorator = icon_color(icon)
-            return "%s %s" % (decorator, text)
+        elif icon:
+            return "%s %s" % (icon_format(icon), text_format(text))
 
         else:
-            return text
+            return text_format(text)
 
     def _line_start(self, pointed=False):
         """
@@ -210,10 +179,8 @@ class CustomYaspin(Yaspin):
         """
         if pointed:
             indentation = "  " * self._current_indent
-            pointed_color = self.POINTER_COLORS.get(
-                self._current_indent, self.DEFAULT_POINTED_ICON_COLOR)
-            # >_✔_User_Directory_Already_Exists
-            pointer = pointed_color("> ")
+            pointer_color = constants.Formats.Pointer.get_hierarchal_format(self._current_indent)
+            pointer = pointer_color("> ")
             return "%s%s" % (indentation, pointer)
         return ""
 
@@ -221,8 +188,7 @@ class CustomYaspin(Yaspin):
         if self._numbered:
             index = self._index_counter[self._current_indent] + 1
             self._index_counter[self._current_indent] += 1
-            index_string = "[%s] " % index
-            return constants.Colors.GRAY(index_string)
+            return constants.Formats.Wrapper.INDEX(index)
         return ""
 
     def _move_up(self, nlines):
@@ -253,7 +219,7 @@ class CustomYaspin(Yaspin):
 
     def _freeze(self, failure=False, success=False):
 
-        text = self._compose_out(failure=failure, success=success)
+        text = self._compose_out(state=(success, failure, False))
 
         # Should be stopped here, otherwise prints after
         # self._freeze call will mess up the spinner

@@ -74,7 +74,7 @@ class QueueEmpty(InstattackError):
         self.queue = queue
 
     def __str__(self):
-        return f"The queue `{self.queue.__NAME__}` is empty."
+        return f"The queue {self.queue.__NAME__} is empty."
 
 
 class ConfigurationError(InstattackError):
