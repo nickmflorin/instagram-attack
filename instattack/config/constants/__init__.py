@@ -5,7 +5,7 @@ from .proxies import *  # noqa
 from .users import *  # noqa
 from .passwords import *  # noqa
 
-from artsylogger import FormattedEnum, ColorEnum, Format, colors
+from artsylogger import FormatEnum, ColorEnum, Format, colors
 
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
@@ -21,7 +21,7 @@ class Colors(ColorEnum):
     ALT_RED = colors.fg('Red1')
     LIGHT_RED = colors.fg('IndianRed')
 
-    YELLOW = colors.fg('#F3DB14')
+    YELLOW = colors.fg('Gold3')
     LIGHT_YELLOW = colors.fg('LightYellow3')
 
     BLUE = colors.fg('#007bff')
@@ -46,34 +46,31 @@ class Colors(ColorEnum):
     HEAVY_BLACK = colors.black
 
 
-class RecordAttributes(FormattedEnum):
+class RecordAttributes(FormatEnum):
 
-    LINE_INDEX = Colors.BLACK.format(bold=True)
-    DATETIME = Colors.LIGHT_YELLOW.format(wrapper="[%s]")
-    MESSAGE = Colors.BLACK.format()
-    OTHER_MESSAGE = Colors.MED_GRAY.format()
-    NAME = Colors.GRAY.format()
-    SUBNAME = Colors.GRAY.format(bold=True)
+    LINE_INDEX = Format(Colors.BLACK.value, colors.bold)
+    DATETIME = Format(Colors.LIGHT_YELLOW.value, wrapper="[%s]")
+    MESSAGE = Format(Colors.GRAY.value)
+    OTHER_MESSAGE = Format(Colors.MED_GRAY.value)
+    NAME = Format(Colors.GRAY.value)
+    SUBNAME = Format(Colors.GRAY.value, colors.bold)
 
     # Exception Messages
-    STATUS_CODE = Colors.BLUE.format(bold=True)
-    METHOD = Colors.ALT_GRAY.format()
-    REASON = Colors.ALT_GRAY.format()
+    STATUS_CODE = Format(Colors.BLUE.value, colors.bold)
+    METHOD = Format(Colors.ALT_GRAY.value)
+    REASON = Format(Colors.ALT_GRAY.value)
 
     # Context
-    CONTEXT_ATTRIBUTE_1 = Colors.BLACK.format()
-    CONTEXT_ATTRIBUTE_2 = Colors.ALT_GRAY.format()
-    CONTEXT_ATTRIBUTE_3 = Colors.BLACK.format()
+    CONTEXT_ATTRIBUTE_1 = Format(Colors.BLACK.value)
+    CONTEXT_ATTRIBUTE_2 = Format(Colors.ALT_GRAY.value)
+    CONTEXT_ATTRIBUTE_3 = Format(Colors.BLACK.value)
 
-    LABEL = Colors.MED_GRAY.format()
+    LABEL = Format(Colors.MED_GRAY.value)
 
     # Traceback
-    PATHNAME = Colors.LIGHT_GRAY.format()
-    LINENO = Colors.LIGHT_GRAY.format(bold=True)
-    FUNCNAME = Colors.EXTRA_LIGHT_GRAY.format()
-
-    def __init__(self, color):
-        FormattedEnum.__init__(self, color)
+    PATHNAME = Format(Colors.EXTRA_LIGHT_GRAY.value)
+    LINENO = Format(Colors.LIGHT_GRAY.value)
+    FUNCNAME = Format(Colors.EXTRA_LIGHT_GRAY.value)
 
 
 class Icons:
@@ -82,23 +79,21 @@ class Icons:
     FAIL = ERROR = "✘"
     SUCCESS = "✔"
     STOP = "\u25A3"
-    INFO = "ⓘ"
-    DEBUG = "⚙️"
-    WARNING = "\u26A0"
+    INFO = "📍"
+    DEBUG = "⚙️ "
+    WARNING = "🚸"
 
 
-class LoggingLevels(FormattedEnum):
+class LoggingLevels(FormatEnum):
 
-    CRITICAL = (Colors.RED.format(bold=True), Icons.CRITICAL, 50)
-    ERROR = (Colors.RED, Icons.ERROR, 40)
-    WARNING = (Colors.YELLOW, Icons.WARNING, 30)
-    SUCCESS = (Colors.GREEN, Icons.SUCCESS, 22)
-    COMPLETE = (Colors.LIGHT_RED, Icons.SUCCESS, 21)
-    INFO = (Colors.BLUE, Icons.INFO, 20)
-    DEBUG = (Colors.ALT_GRAY, Icons.DEBUG, 10)
+    CRITICAL = (Colors.RED.format_with(colors.bold, icon=Icons.CRITICAL), 50)
+    ERROR = (Colors.RED.format_with(icon=Icons.ERROR), 40)
+    WARNING = (Colors.YELLOW.format_with(icon=Icons.WARNING), 30)
+    SUCCESS = (Colors.GREEN.format_with(icon=Icons.SUCCESS), 22)
+    COMPLETE = (Colors.LIGHT_RED.format_with(icon=Icons.SUCCESS), 21)
+    INFO = (Colors.BLUE.format_with(icon=Icons.INFO), 20)
+    DEBUG = (Colors.ALT_GRAY.format_with(icon=Icons.DEBUG), 10)
 
-    def __init__(self, color, icon, num):
-        FormattedEnum.__init__(self, color, icon=icon, icon_before=True)
+    def __init__(self, format, num):
+        FormatEnum.__init__(self, format)
         self.num = num
-        self.color = color
-        self.icon = icon

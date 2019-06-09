@@ -1,5 +1,6 @@
 import asyncio
 from cement import Controller, shell
+from plumbum import colors
 import sys
 
 from instattack.lib import logger
@@ -26,7 +27,7 @@ class InstattackController(Controller, PrintableMixin):
 
     def proceed(self, message):
 
-        fmt = constants.Colors.BLACK.format(bold=True)
+        fmt = constants.Colors.BLACK.format_with(colors.bold)
         message = fmt(f"{message}") + ", (Press Enter to Continue)"
 
         p = shell.Prompt(message, default="ENTER")

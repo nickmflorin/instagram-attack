@@ -25,28 +25,22 @@ def get_level_formatter(without_text_decoration=False, without_wrapping=False):
     the format object.
     """
     def _level_formatter(record):
-        fmt = record.level.format()
-
-        if without_text_decoration and without_wrapping:
-            return fmt.without_text_decoration().without_wrapping()
-        elif without_text_decoration:
-            return fmt.without_text_decoration()
-        elif without_wrapping:
-            return fmt.without_wrapping()
-        else:
-            return fmt
+        fmt = record.level
+        fmt.bold()
+        return fmt
     return _level_formatter
 
 
 def get_level_color(record):
-    fmt = record.level.format()
-    return fmt.colors[0]
+    return record.level.colors[0]
 
 
 def get_message_formatter(record):
     if record.level.name not in ['DEBUG', 'WARNING', 'INFO']:
         fmt = record.level.format()
-        return fmt.without_text_decoration().without_wrapping()
+        fmt.remove_text_decoration()
+        fmt.remove_wrapping()
+        return fmt
     return constants.RecordAttributes.MESSAGE
 
 
@@ -57,6 +51,7 @@ SIMPLE_FORMAT_STRING = logging.Formatter(
 
 MESSAGE_LINE = Line(
     Item(
+        prefix="> ",
         value=get_record_message,
         format=get_message_formatter,
         line_index=LineIndex(
@@ -64,7 +59,7 @@ MESSAGE_LINE = Line(
             format=constants.RecordAttributes.LINE_INDEX
         )
     ),
-    indent=1,
+    indent=2,
 )
 
 
@@ -158,21 +153,6 @@ CONTEXT_LINES = Lines(
 )
 
 
-THREAD_LINE = Line(
-    Item(
-        attrs=["thread"],
-        format=constants.RecordAttributes.FUNCNAME,
-        prefix="(",
-        suffix=", "
-    ),
-    Item(
-        attrs=["threadName"],
-        format=constants.RecordAttributes.PATHNAME,
-        suffix=")"
-    ),
-    indent=1,
-)
-
 TRACEBACK_LINE = Line(
     Item(
         attrs=["frame.filename", "pathname"],
@@ -200,19 +180,19 @@ LOG_FORMAT_STRING = Lines(
     Line(
         Item(
             attrs="other",
-            format=constants.RecordAttributes.OTHER_MESSAGE
+            format=constants.RecordAttributes.OTHER_MESSAGE,
+            prefix="> ",
         ),
-        indent=1,
+        indent=4,
     ),
     CONTEXT_LINES,
-    THREAD_LINE,
     TRACEBACK_LINE,
     lines_above=0,
     lines_below=1,
     header=Header(
         char="-",
         length=25,
-        color='level.color',
+        color=get_level_color,
         label=Label(
             attrs='level.name',
             format=get_level_formatter(),
