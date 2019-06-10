@@ -17,7 +17,6 @@ class LoggingIcons:
 
 class RecordAttributes(FormatEnum):
 
-    LINE_INDEX = Formats.Text.NORMAL.with_bold()
     DATETIME = Formats.Text.FADED.with_wrapper("[%s]")
     MESSAGE = Formats.Text.NORMAL
     OTHER_MESSAGE = Formats.Text.MEDIUM
@@ -26,11 +25,6 @@ class RecordAttributes(FormatEnum):
 
     # Exception Messages
     STATUS_CODE = Format(Colors.BLUE).with_bold()
-    METHOD = Formats.Text.MEDIUM
-    REASON = Formats.Text.MEDIUM
-
-    # Context
-    CONTEXT_ATTRIBUTE = Formats.Text.NORMAL
     LABEL = Formats.Text.MEDIUM
 
     # Traceback

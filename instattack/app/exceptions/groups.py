@@ -3,8 +3,8 @@ import concurrent.futures
 from itertools import chain
 import ssl
 
-from .utils import get_http_exception_status_code
 from .http import *  # noqa
+from .http import get_http_exception_status_code
 
 
 EXCEPTION_STATUS_CODES = {

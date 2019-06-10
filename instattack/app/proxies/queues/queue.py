@@ -5,6 +5,7 @@ from instattack.lib import logger
 from instattack.config import config
 
 from instattack.app.exceptions import ProxyPoolError, QueueEmpty
+from instattack.app.models import Proxy
 from instattack.app.proxies.interfaces import ProxyQueueInterface
 
 
@@ -29,30 +30,36 @@ class ProxyQueue(asyncio.Queue, ProxyQueueInterface):
             return
 
         self.raise_for_queue(proxy)
+
         if config['instattack']['log.logging']['log_proxy_queue']:
             self.log.debug(f'Putting Proxy in {self.__NAME__}', extra={'proxy': proxy})
+
         await super(ProxyQueue, self).put(proxy)
 
-    async def safe_put(self, proxy):
+    async def safe_put(self, proxy, log=False):
         """
         Used ONLY when we cannot be guaranteed of proxy's presence due to race
         conditions.
         """
-        async with self.lock:
-            if not await self.contains(proxy):
-                await self.put(proxy)
+        try:
+            await self.put(proxy)
+        except ProxyPoolError as e:
+            if log:
+                self.log.warning(e)
 
     async def contains(self, proxy):
         return proxy in self._queue
 
-    async def safe_remove(self, proxy):
+    async def safe_remove(self, proxy, log=False):
         """
         Used ONLY when we cannot be guaranteed of proxy's presence due to race
         conditions.
         """
-        async with self.lock:
-            if await self.contains(proxy):
-                await self.remove(proxy)
+        try:
+            await self.remove(proxy)
+        except ProxyPoolError as e:
+            if log:
+                self.log.warning(e)
 
     async def remove(self, proxy):
         """
@@ -85,7 +92,9 @@ class ConfirmedQueue(ProxyQueue):
         self.pool = pool
         self.rotating_index = 0
         self.hold = None
+
         self.times_used = collections.Counter()
+        self.mapped = {}
 
     def validate_for_queue(self, proxy):
         return True
@@ -138,6 +147,12 @@ class ConfirmedQueue(ProxyQueue):
         self._queue.popleft()
         self._queue.rotate(n)
 
+    def _get_nth(self, n):
+        self._queue.rotate(-n)
+        proxy = self._queue.popleft()
+        self._queue.rotate(n)
+        return proxy
+
     async def remove(self, proxy):
         """
         [x] Note:
@@ -148,16 +163,16 @@ class ConfirmedQueue(ProxyQueue):
         thread determines it should be removed.
         """
         async with self.lock:
-            try:
-                ind = self._queue.index(proxy)
-            except ValueError:
+            if proxy not in self._queue:
                 raise ProxyPoolError(
                     f'Cannot Remove Proxy from {self.__NAME__}',
                     extra={'proxy': proxy}
                 )
-            else:
-                self._delete_nth(ind)
-                del self.times_used[proxy.id]
+
+            ind = self._queue.index(proxy)
+            self._delete_nth(ind)
+            del self.times_used[proxy.id]
+            del self.mapped[proxy.id]
 
     async def _get_proxy(self):
         """
@@ -169,10 +184,11 @@ class ConfirmedQueue(ProxyQueue):
         """
         async with self.lock:
             least_common = self.times_used.most_common()
-            if not least_common == 0:
+            if not least_common:
                 raise QueueEmpty(self)
 
-            proxy, count = least_common[:-2:-1][0]
+            proxy_id, count = least_common[:-2:-1][0]
+            proxy = self.mapped[proxy_id]
 
             # As proxies are confirmed and put back in, this might cause issues,
             # since there may wind up being more proxies than the limit of giving
@@ -180,8 +196,6 @@ class ConfirmedQueue(ProxyQueue):
             # in.
             if count >= MAX_CONFIRMED_PROXIES:
                 raise ProxyPoolError('Count %s exceeds %s.' % (count, MAX_CONFIRMED_PROXIES))
-
-            count = self.times_used[proxy.id]
 
             # As proxies are confirmed and put back in,
             if count == MAX_CONFIRMED_PROXIES - 1:
@@ -228,6 +242,14 @@ class ConfirmedQueue(ProxyQueue):
             # from the queue!
             if await self.contains(proxy):
                 raise ProxyPoolError(f'Cannot Add Proxy to {self.__NAME__}')
+
+            if proxy.id in self.times_used:
+                raise ProxyPoolError('Did not expect proxy to be in count.')
+
+            # Have to initialize so that the _get_proxy() method can find it.
+            self.times_used[proxy.id] = 0
+            self.mapped[proxy.id] = proxy
+
             await super(ConfirmedQueue, self).put(proxy)
 
 

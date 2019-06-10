@@ -1,8 +1,4 @@
 from .base import InstattackError
-from .utils import (
-    get_http_exception_err_no, get_http_exception_request_method, get_http_exception_status_code,
-    filtered_array)
-
 
 __all__ = (
     'HttpResponseError',
@@ -22,9 +18,36 @@ __all__ = (
 )
 
 
+def get_http_exception_err_no(exc):
+    if hasattr(exc, 'errno'):
+        return exc.errno
+    return None
+
+
+def get_http_exception_status_code(exc):
+
+    if hasattr(exc, 'status'):
+        return exc.status
+    elif hasattr(exc, 'status_code'):
+        return exc.status_code
+    else:
+        return None
+
+
+def get_http_exception_message(exc):
+
+    message = f"{exc.__class__.__name__}"
+    content = getattr(exc, 'message', None) or str(exc)
+    if content:
+        message += content
+
+    if hasattr(exc, 'errno') and exc.errno is not None:
+        message += f"(Err No: {exc.errno})"
+    return message
+
+
 class HttpException(InstattackError):
 
-    __message__ = None
     __hold__ = False
 
     def __init__(self, exception):
@@ -47,23 +70,19 @@ class HttpException(InstattackError):
         return get_http_exception_status_code(self.exception)
 
     @property
-    def request_method(self):
-        return get_http_exception_request_method(self.exception)
-
-    @property
     def errno(self):
-        return get_http_exception_err_no(self.exception)
+        errno = get_http_exception_err_no(self.exception)
+        if self.status_code and errno != self.status_code:
+            return errno
 
     def __str__(self):
-        parts = filtered_array(*(
-            f"{self.__class__.__name__}({self.exception.__class__.__name__}):",
-            self.request_method,
-            ("[%s]", self.status_code),
-            self.__message__,
-        ))
-        if self.errno and self.errno != self.status_code:
-            parts += ("Err No: %s", self.errno)
-        return ' '.join(parts)
+        message = f"{self.__class__.__name__}({self.exception.__class__.__name__})"
+        content = getattr(self.exception, 'message', None) or str(self.exception)
+        if content:
+            message += content
+        if self.errno is not None:
+            message += f"(Err No: {self.errno})"
+        return message
 
 
 class HttpRequestError(HttpException):
@@ -123,7 +142,7 @@ class HttpTooManyOpenConnections(HttpRequestError):
     """
     [503]
     """
-    __message__ = 'Too many open connections'
+    message = 'Too many open connections'
     __subtype__ = 'too_many_open_connections'
     __hold__ = True
 
@@ -158,6 +177,3 @@ class InstagramResultError(HttpResponseError):
 
     def __init__(self, message):
         self.message = message
-
-    def __str__(self):
-        return f"[{self.status_code}]: {self.message}"

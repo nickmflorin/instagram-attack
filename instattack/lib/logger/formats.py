@@ -1,15 +1,27 @@
 from datetime import datetime
 import logging
 
-from artsylogger import (
-    Item, Line, Lines, Header, Label, LineIndex)
+from artsylogger import Segment, Line, Lines, Header, Label, Format, LogFormat
 from instattack.config import constants
 
 
 def get_record_message(record):
-    from instattack.app.exceptions.utils import get_http_exception_message
+    from instattack.app.exceptions.http import HttpException, get_http_exception_message
     if isinstance(record.msg, Exception):
-        return get_http_exception_message(record.msg)
+        if isinstance(record.msg, HttpException):
+            return str(record.msg)
+        else:
+            return get_http_exception_message(record.msg)
+    return record.msg
+
+
+def get_record_status_code(record):
+    from instattack.app.exceptions.http import HttpException, get_http_exception_status_code
+    if isinstance(record.msg, Exception):
+        if isinstance(record.msg, HttpException):
+            return record.status_code
+        else:
+            return get_http_exception_status_code(record.msg)
     return record.msg
 
 
@@ -35,10 +47,7 @@ def get_level_color(record):
 
 def get_message_formatter(record):
     if record.level.name not in ['DEBUG', 'WARNING', 'INFO']:
-        fmt = record.level.format()
-        fmt.remove_text_decoration()
-        fmt.remove_wrapping()
-        return fmt
+        return record.level.without_text_decoration().without_wrapping()
     return constants.RecordAttributes.MESSAGE
 
 
@@ -47,146 +56,147 @@ SIMPLE_FORMAT_STRING = logging.Formatter(
 )
 
 
-MESSAGE_LINE = Line(
-    Item(
-        prefix="> ",
-        value=get_record_message,
-        format=get_message_formatter,
-        line_index=LineIndex(
-            attrs='line_index',
-            format=constants.RecordAttributes.LINE_INDEX
-        )
+MESSAGE_LINES = Lines(
+    Line(
+        Segment(
+            value=get_record_message,
+            format=get_message_formatter,
+        ),
+        prefix=constants.Formats.Text.LIGHT("> "),
     ),
-    indent=2,
-)
-
-
-PRIMARY_LINE = Line(
-    Item(
-        format=constants.RecordAttributes.DATETIME,
-        value=get_record_time,
+    Line(
+        Segment(
+            attrs="other",
+            format=Format(constants.Colors.LIGHT_RED, bold=True)
+        ),
+        prefix=constants.Formats.Text.LIGHT("> "),
     ),
-    Item(
-        attrs="name",
-        format=constants.RecordAttributes.NAME,
-        suffix=": "
-    ),
-    Item(
-        attrs="subname",
-        format=constants.RecordAttributes.SUBNAME
+    Line(
+        Segment(
+            attrs="other",
+            format=constants.RecordAttributes.OTHER_MESSAGE,
+        ),
+        prefix=constants.Formats.Text.LIGHT("> "),
     ),
     indent=1,
 )
 
 
+PRIMARY_LINE = Lines(
+    Line(
+        Segment(
+            format=constants.RecordAttributes.DATETIME,
+            value=get_record_time,
+        ),
+        Segment(
+            attrs="name",
+            format=constants.RecordAttributes.NAME,
+        ),
+        Segment(
+            attrs="subname",
+            format=constants.RecordAttributes.SUBNAME
+        ),
+    ),
+)
+
+
 CONTEXT_LINES = Lines(
     Line(
-        Item(
+        Segment(
             attrs='password',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
+            color=constants.Colors.LIGHT_RED,
             label=Label(
                 value="Password",
                 delimiter=":",
                 format=constants.RecordAttributes.LABEL,
             )
         ),
-        indent=1,
+        prefix=constants.Formats.Text.LIGHT(">"),
     ),
     Line(
-        Item(
-            attrs='proxy.method',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
-        ),
-        Item(
+        Segment(
             attrs='proxy.url',
-            format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
+            color=constants.Colors.LIGHT_RED,
+            label=Label(
+                value="Proxy",
+                delimiter=":",
+                format=constants.RecordAttributes.LABEL,
+            ),
         ),
-        label=Label(
-            value="Proxy",
-            delimiter=":",
-            format=constants.RecordAttributes.LABEL,
-        ),
-        indent=1,
+        prefix=constants.Formats.Text.LIGHT(">"),
     ),
-    Lines(
-        Line(
-            Item(
-                attrs="proxy.queue_id",
-                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
-                label=Label(
-                    value="Queue ID",
-                    delimiter=":",
-                    format=constants.RecordAttributes.LABEL,
-                ),
+    Line(
+        Segment(
+            attrs="proxy.queue_id",
+            color=constants.Colors.LIGHT_RED,
+            label=Label(
+                value="Queue ID",
+                delimiter=":",
+                format=constants.RecordAttributes.LABEL,
             ),
-            indent=2,
         ),
-        Line(
-            Item(
-                attrs="proxy.active_times_used",
-                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
-                label=Label(
-                    value="Times Used",
-                    delimiter=":",
-                    format=constants.RecordAttributes.LABEL,
-                ),
+        indent=2,
+        prefix=constants.Formats.Text.LIGHT(">"),
+    ),
+    Line(
+        Segment(
+            attrs="proxy.active_times_used",
+            color=constants.Colors.BLACK,
+            label=Label(
+                value="Times Used",
+                delimiter=":",
+                format=constants.RecordAttributes.LABEL,
             ),
-            indent=2,
         ),
-        Line(
-            Item(
-                attrs="proxy.active_recent_history",
-                format=constants.RecordAttributes.CONTEXT_ATTRIBUTE,
-                label=Label(
-                    value="Recent Requests",
-                    delimiter=":",
-                    format=constants.RecordAttributes.LABEL,
-                ),
+        indent=2,
+        prefix=constants.Formats.Text.LIGHT(">"),
+    ),
+    Line(
+        Segment(
+            attrs="proxy.active_recent_history",
+            color=constants.Colors.BLACK,
+            prefix=constants.Formats.Text.LIGHT(">"),
+            label=Label(
+                value="Recent Requests",
+                delimiter=":",
+                format=constants.RecordAttributes.LABEL,
             ),
-            indent=2,
         ),
+        prefix=constants.Formats.Text.LIGHT("> "),
+        indent=2,
     ),
     lines_above=1,
     lines_below=1,
-)
-
-
-TRACEBACK_LINE = Line(
-    Item(
-        attrs=["frame.filename", "pathname"],
-        format=constants.RecordAttributes.PATHNAME,
-        prefix="(",
-        suffix=", "
-    ),
-    Item(
-        attrs=["frame.function", "funcName"],
-        format=constants.RecordAttributes.FUNCNAME,
-        suffix=", "
-    ),
-    Item(
-        attrs=["frame.lineno", "lineno"],
-        format=constants.RecordAttributes.LINENO,
-        suffix=")"
-    ),
     indent=1,
 )
 
 
-LOG_FORMAT_STRING = Lines(
-    PRIMARY_LINE,
-    MESSAGE_LINE,
+TRACEBACK_LINE = Lines(
     Line(
-        Item(
-            attrs="other",
-            format=constants.RecordAttributes.OTHER_MESSAGE,
-            prefix="> ",
+        Segment(
+            attrs=["frame.filename", "pathname"],
+            format=constants.RecordAttributes.PATHNAME,
         ),
-        indent=4,
+        Segment(
+            attrs=["frame.function", "funcName"],
+            format=constants.RecordAttributes.FUNCNAME,
+        ),
+        Segment(
+            attrs=["frame.lineno", "lineno"],
+            format=constants.RecordAttributes.LINENO,
+        ),
+        delimiter=', ',
+        prefix="(",
+        suffix=")"
     ),
+)
+
+
+LOG_FORMAT_STRING = LogFormat(
+    PRIMARY_LINE,
+    MESSAGE_LINES,
     CONTEXT_LINES,
     TRACEBACK_LINE,
-    lines_above=0,
-    lines_below=1,
     header=Header(
         char="-",
         length=25,
@@ -196,5 +206,8 @@ LOG_FORMAT_STRING = Lines(
             format=get_level_formatter(),
             delimiter=None,
         ),
-    )
+    ),
+    width=140,
+    lines_above=0,
+    lines_below=1,
 )
