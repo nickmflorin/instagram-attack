@@ -4,7 +4,7 @@ from proxybroker import Broker
 
 from instattack.config import constants, config
 from instattack.lib import logger
-from instattack.app.models import Proxy
+from instattack.core.models import Proxy
 
 
 log = logger.get(__name__, subname='Proxy Broker')

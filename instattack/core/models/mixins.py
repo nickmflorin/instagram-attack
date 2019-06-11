@@ -3,7 +3,7 @@ import functools
 
 from instattack.config import config
 from instattack.lib.utils import humanize_list
-from instattack.app.exceptions import ConfigError
+from instattack.core.exceptions import ConfigError
 
 
 def allow_exception_input(func):

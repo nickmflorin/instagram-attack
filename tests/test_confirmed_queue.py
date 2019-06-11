@@ -2,8 +2,8 @@ import asyncio
 from datetime import datetime
 import pytest
 
-from instattack.app.proxies import ConfirmedQueue, SimpleProxyPool
-from instattack.app.models.proxies import Proxy
+from instattack.core.proxies import ConfirmedQueue, SimpleProxyPool
+from instattack.core.models.proxies import Proxy
 
 from .main import InstattackTest
 

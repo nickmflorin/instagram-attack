@@ -5,9 +5,9 @@ from instattack.config import config
 from instattack.lib import logger
 from instattack.lib.utils import percentage, limit_as_completed, cancel_remaining_tasks
 
-from instattack.app.exceptions import NoPasswordsError
-from instattack.app.models import InstagramResults
-from instattack.app.proxies import ManagedProxyPool, SmartProxyManager
+from instattack.core.exceptions import NoPasswordsError
+from instattack.core.models import InstagramResults
+from instattack.core.proxies import ManagedProxyPool, SmartProxyManager
 
 from .login import AbstractLoginHandler
 

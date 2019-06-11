@@ -8,8 +8,8 @@ from instattack.config import constants
 from instattack.lib import logger
 from instattack.lib.utils import stream_raw_data, read_raw_data
 
-from instattack.app.exceptions import DirExists, UserFileExists
-from instattack.app.passwords import password_gen
+from instattack.core.exceptions import DirExists, UserFileExists
+from instattack.core.passwords import password_gen
 
 
 log = logger.get(__name__, subname='User')

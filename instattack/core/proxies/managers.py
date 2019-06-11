@@ -3,8 +3,8 @@ import asyncio
 from instattack.lib import logger
 from instattack.config import config
 
-from instattack.app.exceptions import ProxyPoolError, ProxyMaxTimeoutError
-from instattack.app.models.proxies import ProxyRequest, Proxy
+from instattack.core.exceptions import ProxyPoolError, ProxyMaxTimeoutError
+from instattack.core.models.proxies import ProxyRequest, Proxy
 
 from .broker import ProxyBroker
 from .queues import HoldQueue, ConfirmedQueue

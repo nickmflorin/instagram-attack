@@ -1,6 +1,7 @@
 from collections import Counter
 import contextlib
 from datetime import datetime
+from enum import Enum
 import shutil
 import sys
 import time
@@ -10,6 +11,18 @@ from yaspin.helpers import to_unicode
 from instattack.config import constants
 
 from .terminal import cursor, measure_ansi_string
+
+
+class SpinnerStates(Enum):
+
+    OK = ("Ok", constants.Formats.State.SUCCESS)
+    WARNING = ("Warning", constants.Formats.State.WARNING)
+    FAIL = ("Failed", constants.Formats.State.FAIL)
+    NOTSET = ("Not Set", constants.Formats.State.NOTSET)
+
+    def __init__(self, desc, fmt):
+        self.desc = desc
+        self.fmt = fmt
 
 
 class CustomYaspin(Yaspin):
@@ -43,11 +56,27 @@ class CustomYaspin(Yaspin):
         self._current_line = 1
         self._lines = 0
 
+        self.state = SpinnerStates.NOTSET
+
     def start(self):
         self._current_line += 1
         self._lines += 1
         super(CustomYaspin, self).start()
         self.indent()
+
+    def done(self):
+        if self.state == SpinnerStates.NOTSET:
+            self.state = SpinnerStates.OK
+        # Freeze also calls stop.
+        import time
+        time.sleep(2)
+        self._freeze()
+
+    def warned(self):
+        self.state = SpinnerStates.WARNING
+
+    def error(self, error):
+        self.state = SpinnerStates.FAIL
 
     def stop(self):
         # Reset registered signal handlers to default ones
@@ -62,10 +91,11 @@ class CustomYaspin(Yaspin):
         self._clear_line()
 
     def warning(self, text):
-        text = constants.Formats.State.WARNING.without_icon()("Warning: %s" % text)
-        self.write(text, warning=True)
+        self.state = SpinnerStates.WARNING
+        # text = constants.Formats.State.WARNING.without_icon()("Warning: %s" % text)
+        self.write(text)
 
-    def write(self, text, indent=False, failure=False, warning=False, success=False):
+    def write(self, text, indent=False):
         """
         Write text in the terminal without breaking the spinner.
         """
@@ -73,11 +103,7 @@ class CustomYaspin(Yaspin):
         if indent:
             self.indent()
 
-        message = self._compose_out(
-            text=text,
-            state=(success, failure, warning),
-            pointed=True
-        )
+        message = self._compose_out(text=text, pointed=True)
 
         with self._stdout_lock:
             self._move_down(self._lines - 1)
@@ -93,12 +119,6 @@ class CustomYaspin(Yaspin):
         finally:
             self.unindent()
 
-    def ok(self):
-        self._freeze(success=True)
-
-    def fail(self):
-        self._freeze(failure=True)
-
     def indent(self):
         self._current_indent += 1
 
@@ -108,7 +128,7 @@ class CustomYaspin(Yaspin):
     def number(self):
         self._numbered = True
 
-    def _compose_out(self, frame=None, text=None, pointed=False, state=(False, False, False)):
+    def _compose_out(self, frame=None, text=None, pointed=False):
 
         text = text or self._text
 
@@ -119,7 +139,6 @@ class CustomYaspin(Yaspin):
                 text=text,
                 frame=frame,
                 pointed=pointed,
-                state=state,
             )
         )
 
@@ -134,7 +153,7 @@ class CustomYaspin(Yaspin):
 
         return to_unicode("\r%s%s%s" % (message, separated, date_message))
 
-    def _decorated_text(self, text, frame=None, pointed=False, state=(False, False, False)):
+    def _decorated_text(self, text, frame=None, pointed=False):
         """
         >>> ✔_Preparing                     -> Indentation 0
         >>> __> ✘_Something Happened         -> Indentation 0
@@ -142,19 +161,15 @@ class CustomYaspin(Yaspin):
         Decorated Text: ✔_Preparing
         Decorated Text: ✘_Something Happened
         """
-        icon = constants.Formats.State.get_icon_for(state)
-        text_format = icon_format = constants.Formats.State.get_format_for(state).without_icon()
+        text_format = self.state.fmt
         if pointed:
-            text_format = constants.Formats.Text.get_hierarchal_format(self._current_indent)
+            text_format = constants.Formats.Text.get_hierarchal_format(
+                self._current_indent)
 
         if frame:
             if self._color_func:
                 frame = self._color_func(frame)
-            return "%s %s" % (frame, text_format.without_icon()(text))
-
-        elif icon:
-            return "%s %s" % (icon_format(icon), text_format(text))
-
+            return "%s %s" % (frame, self.state.fmt.without_icon()(text))
         else:
             return text_format(text)
 
@@ -217,9 +232,9 @@ class CustomYaspin(Yaspin):
 
             time.sleep(self._interval)
 
-    def _freeze(self, failure=False, success=False):
+    def _freeze(self):
 
-        text = self._compose_out(state=(success, failure, False))
+        text = self._compose_out()
 
         # Should be stopped here, otherwise prints after
         # self._freeze call will mess up the spinner
@@ -230,54 +245,3 @@ class CustomYaspin(Yaspin):
 
             # Add Break After Spinner by Not Going Down lines - 1
             self._move_down(self._lines + 1)
-
-
-class MockYaspin(CustomYaspin):
-    """
-    Threadless Yaspin
-
-    Used in conjunction with the --nospin flag to make the output synchronous
-    and just simple sys.stdout.write() operations, so we can more easily drop
-    in and debug.
-    """
-
-    def start(self):
-        self._current_line += 1
-        self._lines += 1
-        self._spin()
-        self.indent()
-
-    def write(self, text, indent=False, failure=False, success=False):
-        """
-        Write text in the terminal without breaking the spinner.
-        """
-        self._lines += 1
-        if indent:
-            self.indent()
-
-        message = self._compose_out(
-            text=text,
-            failure=failure,
-            success=success,
-            pointed=True
-        )
-
-        with self._stdout_lock:
-            self._move_down(self._lines - 1)
-            sys.stdout.write(message)
-            self._move_up(self._lines - 1)
-
-    def _freeze(self, failure=False, success=False):
-        text = self._compose_out(failure=failure, success=success)
-        self.stop()
-        sys.stdout.write(text)
-
-    def _spin(self):
-        # Compose output
-        spin_phase = next(self._cycle)
-        out = self._compose_out(frame=spin_phase)
-        sys.stdout.write(out)
-
-    def stop(self):
-        sys.stdout.write("\r")
-        self._clear_line()

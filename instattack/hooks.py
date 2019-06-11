@@ -7,8 +7,7 @@ import sys
 from instattack.config import constants
 
 from instattack.lib import logger
-from instattack.lib.utils import (
-    task_is_third_party, cancel_remaining_tasks, start_and_stop)
+from instattack.lib.utils import task_is_third_party, cancel_remaining_tasks, spin
 
 
 log = logger.get(__name__)
@@ -104,7 +103,7 @@ async def setup(loop):
             'tortoise'
         )
 
-    with start_and_stop('Preparing') as spinner:
+    with spin('Setting Up') as spinner:
         await setup_logger(spinner)
         await setup_directories(spinner)
         await setup_database(spinner)
@@ -156,6 +155,6 @@ async def shutdown(loop):
         else:
             spinner.write(f'No Leftover Tasks to Cancel')
 
-    with start_and_stop('Shutting Down') as spinner:
+    with spin('Shutting Down') as spinner:
         await shutdown_outstanding_tasks(loop, spinner)
         await shutdown_database(loop, spinner)

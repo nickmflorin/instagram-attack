@@ -83,13 +83,6 @@ class Formats:
             WARNING = "[!]"
             NOTSET = Icons.NOTSET
 
-            ICONS = {
-                (True, False, False): SUCCESS,
-                (False, True, False): FAIL,
-                (False, False, True): WARNING,
-                (False, False, False): NOTSET,
-            }
-
         class Color:
 
             FAIL = Colors.RED
@@ -97,24 +90,10 @@ class Formats:
             WARNING = Colors.YELLOW
             NOTSET = Colors.GRAY
 
-            COLORS = {
-                (True, False, False): SUCCESS,
-                (False, True, False): FAIL,
-                (False, False, True): WARNING,
-                (False, False, False): NOTSET,
-            }
-
         FAIL = Format(Color.FAIL, icon=Icon.FAIL)
         SUCCESS = Format(Color.SUCCESS, icon=Icon.SUCCESS)
         WARNING = Format(Color.WARNING, icon=Icon.WARNING)
         NOTSET = Format(Color.NOTSET, icon=Icon.NOTSET)
-
-        FORMATS = {
-            (True, False, False): SUCCESS,
-            (False, True, False): FAIL,
-            (False, False, True): WARNING,
-            (False, False, False): NOTSET,
-        }
 
         @classmethod
         def state(cls, *args, success=False, fail=False, warning=False):

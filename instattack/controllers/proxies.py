@@ -2,15 +2,14 @@ import asyncio
 from cement import Interface
 import tortoise
 
-from instattack.lib.utils import (
-    save_iteratively, save_concurrently, start_and_stop)
+from instattack.lib.utils import save_iteratively, save_concurrently, spin
 
-from instattack.app.models import Proxy
+from instattack.core.models import Proxy
 
-from instattack.app.proxies import ProxyBroker
-from instattack.app.proxies.utils import scrape_proxies
+from instattack.core.proxies import ProxyBroker
+from instattack.core.proxies.utils import scrape_proxies
 
-from instattack.app.handlers import TrainHandler
+from instattack.core.handlers import TrainHandler
 
 from .abstract import InstattackController
 from .utils import proxy_command
@@ -106,9 +105,9 @@ class ProxyController(InstattackController, ProxyInterface):
             await asyncio.gather(*tasks)
             return tasks
 
-        with start_and_stop("Clearing Proxy History") as spinner:
+        with spin("Clearing Proxy History") as spinner:
             tasks = self.loop.run_until_complete(_clear_history())
-            spinner.write(f"> Cleared History for {len(tasks)} Proxies")
+            spinner.write(f"Cleared History for {len(tasks)} Proxies")
 
     @proxy_command(help="Train Proxies with Test Requests", limit=True, arguments=[
         (['-c', '--confirmed'], {'help': 'Limit to Confirmed Proxies', 'action': 'store_true'})
@@ -126,7 +125,7 @@ class ProxyController(InstattackController, ProxyInterface):
     @proxy_command(help="Scrape Proxies and Save to DB", limit=True)
     def scrape(self):
 
-        with start_and_stop("Scraping Proxies") as spinner:
+        with spin("Scraping Proxies") as spinner:
 
             # Have to Set a Default Value for Average Response Time for Now
             proxy_args = scrape_proxies(limit=self.app.pargs.limit)
@@ -169,7 +168,7 @@ class ProxyController(InstattackController, ProxyInterface):
             self.failure('No Duplicates to Remove')
             return
 
-        with start_and_stop(f"Deleting {len(duplicates)} Duplicates"):
+        with spin(f"Deleting {len(duplicates)} Duplicates"):
 
             tasks = []
             for key, dups in duplicates.items():
@@ -192,7 +191,7 @@ class ProxyController(InstattackController, ProxyInterface):
                     updated.append(proxy)
             return updated, created
 
-        with start_and_stop("Collecting Proxies") as spinner:
+        with spin("Collecting Proxies") as spinner:
 
             broker = ProxyBroker(
                 self.app.config,
@@ -202,8 +201,8 @@ class ProxyController(InstattackController, ProxyInterface):
             loop = asyncio.get_event_loop()
             updated, created = loop.run_until_complete(_collect(broker))
 
-            spinner.write(f"> Creating {len(created)} Proxies")
+            spinner.write(f"Creating {len(created)} Proxies")
             loop.run_until_complete(self._save_proxies(created))
 
-            spinner.write(f"> Updating {len(updated)} Proxies")
+            spinner.write(f"Updating {len(updated)} Proxies")
             loop.run_until_complete(self._save_proxies(updated))

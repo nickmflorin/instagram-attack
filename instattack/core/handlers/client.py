@@ -4,8 +4,8 @@ import re
 from instattack.config import constants, config
 from instattack.lib import logger
 
-from instattack.app.models import InstagramResult
-from instattack.app.exceptions import (InstagramResultError, HTTP_RESPONSE_ERRORS,
+from instattack.core.models import InstagramResult
+from instattack.core.exceptions import (InstagramResultError, HTTP_RESPONSE_ERRORS,
     HTTP_REQUEST_ERRORS)
 
 

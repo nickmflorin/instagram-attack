@@ -10,7 +10,6 @@ from .formats import LOG_FORMAT_STRING, SIMPLE_FORMAT_STRING
 
 
 _enabled = True
-_config = None
 
 
 def disable():
@@ -21,6 +20,15 @@ def disable():
 def enable():
     global _enabled
     _enabled = True
+
+
+class DisableLogger():
+
+    def __enter__(self):
+        disable()
+
+    def __exit__(self, a, b, c):
+        enable()
 
 
 for level in constants.LoggingLevels:
@@ -49,9 +57,7 @@ def configure_diagnostics(window):
 
 def configure(config):
 
-    global _config
-
-    level = _config['instattack']['log.logging']['level']
+    level = config['instattack']['log.logging']['level']
     root = logging.getLogger()
     root.setLevel(level.upper())
 
@@ -78,11 +84,6 @@ class SimpleLogger(LoggerMixin, logging.Logger):
         if _enabled:
             return super(SimpleLogger, self)._log(*args, **kwargs)
 
-
-class ArtsyLogger(SimpleLogger):
-
-    __handlers__ = ARTSY_HANDLERS
-
     def traceback(self, *exc_info):
         """
         We are having problems with logbook and asyncio in terms of logging
@@ -93,6 +94,11 @@ class ArtsyLogger(SimpleLogger):
 
         sys.stderr.write("\n")
         traceback.print_exception(*exc_info, limit=None, file=sys.stderr)
+
+
+class ArtsyLogger(SimpleLogger):
+
+    __handlers__ = ARTSY_HANDLERS
 
 
 class DiagnosticsLogger(SimpleLogger):

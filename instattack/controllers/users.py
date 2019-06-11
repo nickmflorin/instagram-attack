@@ -1,25 +1,17 @@
 import asyncio
 from cement import ex
 
-from instattack.lib.utils import start_and_stop
+from instattack.lib.utils import spin
 
 from instattack.config import constants, config
 
-from instattack.app.models import User
-from instattack.app.handlers import LoginHandler
+from instattack.core.models import User
+from instattack.core.handlers import LoginHandler
 
 from .abstract import InstattackController
 from .prompts import BirthdayPrompt
 from .utils import user_command, existing_user_command
 from .interfaces import UserInterface
-
-LEVEL_ARGUMENT = (
-    ['-lv', '--level'],
-    {
-        'action': 'store',
-        'help': 'Override the Logging Level'
-    }
-)
 
 
 class UserController(InstattackController, UserInterface):
@@ -49,7 +41,7 @@ class UserController(InstattackController, UserInterface):
         prompt = BirthdayPrompt()
         birthday = prompt.prompt()
 
-        with start_and_stop('Creating New User') as spinner:
+        with spin('Creating New User') as spinner:
             self.create_user(username, birthday=birthday)
             spinner.write('Successfully Created User %s' % username)
 
@@ -59,13 +51,13 @@ class UserController(InstattackController, UserInterface):
         Same thing as the .create() method, just for convenience and the fact that
         I am always using both of them interchangeably.
         """
-        with start_and_stop('Creating New User') as spinner:
+        with spin('Creating New User') as spinner:
             self.create_user(username)
             spinner.write('Successfully Created User %s' % username)
 
     @existing_user_command(help="Delete a User")
     def delete(self, user):
-        with start_and_stop('Deleting User') as spinner:
+        with spin('Deleting User') as spinner:
             self.delete_user(user=user)
             spinner.write(f"User {user.username} Successfully Deleted")
             spinner.finished_break()
@@ -79,7 +71,7 @@ class UserController(InstattackController, UserInterface):
         prompt = BirthdayPrompt()
         birthday = prompt.prompt()
 
-        with start_and_stop('Editing User') as spinner:
+        with spin('Editing User') as spinner:
             self.edit_user(user, birthday=birthday)
             spinner.write('Successfully Edited User %s' % user.username)
 
@@ -157,7 +149,7 @@ class UserController(InstattackController, UserInterface):
             else:
                 proceed = self.proceed(f"About to Clear {len(attempts)} Attempts")
                 if proceed:
-                    with start_and_stop(
+                    with spin(
                         f"Clearing {len(attempts)} Attempts "
                         f" for User {user.username} Attempts"
                     ):
@@ -217,7 +209,7 @@ class UserController(InstattackController, UserInterface):
                 message += f" in Directory {directory}."
             else:
                 message += "."
-            print(message)
+            sys.stdout.write(message)
 
         loop = asyncio.get_event_loop()
         users = loop.run_until_complete(self._get_users(loop))
@@ -230,13 +222,13 @@ class UserController(InstattackController, UserInterface):
         for user_dir in directory.iterdir():
             if user_dir.is_file():
                 print_action(user_dir.name, 'Deleting File')
-                print('Deleting File', label=user_dir.name, directory=constants.USER_PATH)
+                sys.stdout.write('Deleting File', label=user_dir.name, directory=constants.USER_PATH)
                 if not self.app.pargs.safe:
                     user_dir.delete()
             else:
                 # Remove Directory if User Does Not Exist
                 if user_dir.name not in [user.username for user in users]:
-                    print('Deleting Leftover Directory', label=user_dir.name)
+                    sys.stdout.write('Deleting Leftover Directory', label=user_dir.name)
                     if not self.app.pargs.safe:
                         user_dir.delete()
                 else:
@@ -246,7 +238,7 @@ class UserController(InstattackController, UserInterface):
                     for file in User.FILES:
                         pt = user.file_path(file)
                         if not pt.exists() or not pt.is_file():
-                            print(f'File {pt.name} Missing for User {user.username}')
+                            sys.stdout.write(f'File {pt.name} Missing for User {user.username}')
                             if not self.app.pargs.safe:
                                 pt.touch()
 

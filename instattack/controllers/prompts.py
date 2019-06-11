@@ -1,7 +1,7 @@
 from cement import shell
 from datetime import datetime
 
-from instattack.app.exceptions import InstattackError
+from instattack.core.exceptions import InstattackError
 from .abstract import PrintableMixin
 
 

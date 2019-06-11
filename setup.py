@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-from instattack.app.version import get_version
+from instattack.version import get_version
 
 VERSION = get_version()
 

@@ -4,11 +4,10 @@ import aiohttp
 from instattack.config import config
 from instattack.lib import logger
 
-from instattack.lib.utils import (
-    limit_as_completed, start_and_stop, cancel_remaining_tasks)
+from instattack.lib.utils import limit_as_completed, spin, cancel_remaining_tasks
 
-from instattack.app.exceptions import TokenNotFound, PoolNoProxyError
-from instattack.app.proxies import SmartProxyManager, ManagedProxyPool
+from instattack.core.exceptions import TokenNotFound, PoolNoProxyError
+from instattack.core.proxies import SmartProxyManager, ManagedProxyPool
 
 from .base import AbstractRequestHandler
 from .client import instagram_client
@@ -127,7 +126,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
         await super(AbstractLoginHandler, self).finish()
 
         if config['login']['attempts']['save_method'] == 'end':
-            with start_and_stop(f"Saving {len(self.attempts_to_save)} Attempts"):
+            with spin(f"Saving {len(self.attempts_to_save)} Attempts"):
                 tasks = [
                     self.user.create_or_update_attempt(att[0], success=att[1])
                     for att in self.attempts_to_save

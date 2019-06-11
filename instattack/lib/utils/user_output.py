@@ -7,45 +7,57 @@ from .yaspin import CustomYaspin
 
 
 def yaspin(*args, **kwargs):
-    # if not _spin:
-    #     return MockYaspin(*args, **kwargs)
     return CustomYaspin(*args, **kwargs)
 
 
-class DisableLogger():
-
-    def __enter__(self):
-        from instattack.lib import logger
-        logger.disable()
-
-    def __exit__(self, a, b, c):
-        from instattack.lib import logger
-        logger.enable()
-
-
 @contextlib.contextmanager
-def start_and_stop(text, numbered=False):
+def spin(text, numbered=False):
     """
     Only for synchronous functions.  Getting to work for async coroutines requires
     a decent amount of overhead (see yaspin.py).
     """
-    from instattack.lib import logger
+    from instattack.lib.logger import DisableLogger
 
-    spinner = yaspin(
-        text=text,
-        color="red",
-        numbered=numbered
-    )
-
-    try:
-        logger.disable()
+    spinner = yaspin(text=text, color="red", numbered=numbered)
+    with DisableLogger():
         spinner.start()
-        yield spinner
+        try:
+            yield spinner
+        except Exception as e:
+            spinner.error(str(e))
+            spinner.done()
+        finally:
+            spinner.done()
 
-    finally:
-        spinner.ok()
-        spinner.stop()
-        logger.enable()
+
+def decorative_spin(text, numbered=False):
+    """
+    Only for synchronous functions.  Getting to work for async coroutines requires
+    a decent amount of overhead (see yaspin.py).
+    """
+    from instattack.lib.logger import DisableLogger
+
+    def _spin_start_and_stop(fn):
+        if asyncio.iscoroutinefunction(fn):
+            raise NotImplementedError('Decorator only for synchronous methods.')
+
+        spinner = yaspin(text=text, color="red", numbered=numbered)
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            with DisableLogger():
+                spinner.start()
+                try:
+                    results = fn(*args, **kwargs)
+                except Exception as e:
+                    spinner.error(str(e))
+                    spinner.done()
+                else:
+                    spinner.done()
+                    return results
+        return wrapper
+
+    return _spin_start_and_stop
 
 
 def break_before(fn):
@@ -85,38 +97,3 @@ def break_after(fn):
             sys.stdout.write("\n")
             return results
         return wrapper
-
-
-def spin_start_and_stop(text, numbered=False):
-    """
-    Only for synchronous functions.  Getting to work for async coroutines requires
-    a decent amount of overhead (see yaspin.py).
-    """
-    def _spin_start_and_stop(fn):
-
-        if asyncio.iscoroutinefunction(fn):
-            raise NotImplementedError('Decorator only for synchronous methods.')
-
-        spinner = yaspin(
-            text=text,
-            color="red",
-            numbered=numbered
-        )
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            from instattack.lib import logger
-
-            logger.disable()
-            spinner.start()
-
-            results = fn(*args, **kwargs)
-
-            spinner.ok()
-            spinner.stop()
-            logger.enable()
-
-            return results
-        return wrapper
-
-    return _spin_start_and_stop

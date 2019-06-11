@@ -6,7 +6,7 @@ from instattack.config import constants
 
 
 def get_record_message(record):
-    from instattack.app.exceptions.http import HttpException, get_http_exception_message
+    from instattack.core.exceptions.http import HttpException, get_http_exception_message
     if isinstance(record.msg, Exception):
         if isinstance(record.msg, HttpException):
             message = str(record.msg)
@@ -17,7 +17,7 @@ def get_record_message(record):
 
 
 def get_record_status_code(record):
-    from instattack.app.exceptions.http import HttpException, get_http_exception_status_code
+    from instattack.core.exceptions.http import HttpException, get_http_exception_status_code
     if isinstance(record.msg, Exception):
         if isinstance(record.msg, HttpException):
             return record.msg.status_code

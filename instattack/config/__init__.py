@@ -4,7 +4,7 @@ import importlib
 import os
 import signal
 
-from instattack.app.exceptions import ConfigurationError
+from instattack.core.exceptions import ConfigurationError
 
 from .constants import APP_NAME, ROOT_DIR
 from .schema import Schema

@@ -1,4 +1,4 @@
-from instattack.app.exceptions import ProxyPoolError
+from instattack.core.exceptions import ProxyPoolError
 
 
 class ProxyQueueInterface(object):

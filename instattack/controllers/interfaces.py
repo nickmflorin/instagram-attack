@@ -1,8 +1,8 @@
 from cement import Interface
 import tortoise
 
-from instattack.app.exceptions import UserDoesNotExist, UserExists
-from instattack.app.models import User
+from instattack.core.exceptions import UserDoesNotExist, UserExists
+from instattack.core.models import User
 
 
 class UserInterface(Interface):

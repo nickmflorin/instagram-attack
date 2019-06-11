@@ -6,7 +6,7 @@ from instattack.config import config
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, progress
 
-from instattack.app.proxies import SimpleProxyPool, SimpleProxyManager
+from instattack.core.proxies import SimpleProxyPool, SimpleProxyManager
 
 from .base import AbstractRequestHandler
 from .client import train_client

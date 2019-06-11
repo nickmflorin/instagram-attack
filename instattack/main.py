@@ -10,7 +10,7 @@ from cement.core.exc import CaughtSignal
 from instattack.config import config, constants
 
 from instattack.lib import logger
-from instattack.lib.utils import spin_start_and_stop, start_and_stop
+from instattack.lib.utils import decorative_spin, spin
 
 from .app.exceptions import InstattackError
 from .controllers.base import Base, UserController, ProxyController
@@ -110,7 +110,7 @@ class Instattack(App, AppMixin):
         is valid, it will be set to the global config object in its dictionary
         form.
         """
-        with start_and_stop('Validating Config') as spinner:
+        with spin('Validating Config') as spinner:
             super(Instattack, self).validate_config()
             data = self.config.get_dict()
 
@@ -122,8 +122,7 @@ class Instattack(App, AppMixin):
             # manually.
             logger.configure(config)
 
-    @spin_start_and_stop('Attaching Exit Signals to Loop')
-    def attach_signals(self):
+    def setup_loop(self):
         """
         [x] TODO:
         -------
@@ -134,8 +133,17 @@ class Instattack(App, AppMixin):
         def _shutdown(loop, s):
             self.loop.run_until_complete(shutdown(loop))
 
-        for s in config.__SIGNALS__:
-            self.loop.add_signal_handler(s, _shutdown)
+        with spin('Configuring Event Loop') as spinner:
+            with spinner.block():
+                spinner.write('Attaching Exit Signals')
+                spinner.warning('Exit Signals Currently Not Working')
+                for s in config.__SIGNALS__:
+                    self.loop.add_signal_handler(s, _shutdown)
+
+            with spinner.block():
+                spinner.write('Attachinng Exception Handler')
+                self.loop.set_exception_handler(loop_exception_hook)
+                spinner.warning('Exception Handler Currently Not Working')
 
     def run_diagnostics(self):
         self.loop.create_task(run_diagnostics())
@@ -146,8 +154,7 @@ class Instattack(App, AppMixin):
         to the app instance.
         """
         self.loop = asyncio.get_event_loop()
-        self.attach_signals()
-        self.loop.set_exception_handler(loop_exception_hook)
+        self.setup_loop()
         self.setup()
         return self
 

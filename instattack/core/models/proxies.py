@@ -13,7 +13,7 @@ from tortoise.models import Model
 from instattack.config import constants, config
 from instattack.lib import logger
 
-from instattack.app.exceptions import ConfigError, ProxyMaxTimeoutError
+from instattack.core.exceptions import ConfigError, ProxyMaxTimeoutError
 
 from .evaluation import evaluate
 from .mixins import ProxyMetrics, allow_exception_input

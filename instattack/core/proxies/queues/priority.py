@@ -4,8 +4,8 @@ import itertools
 from instattack.lib import logger
 from instattack.config import config
 
-from instattack.app.exceptions import PoolNoProxyError
-from instattack.app.proxies.interfaces import ProxyQueueInterface
+from instattack.core.exceptions import PoolNoProxyError
+from instattack.core.proxies.interfaces import ProxyQueueInterface
 
 
 __all__ = (
