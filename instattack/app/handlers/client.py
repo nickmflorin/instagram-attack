@@ -14,7 +14,7 @@ log = logger.get(__name__)
 
 class client:
 
-    def __init__(self, loop, on_error=None, on_success=None):
+    def __init__(self, loop, on_error, on_success):
         self.loop = loop
         self.on_error = on_error
         self.on_success = on_success
@@ -37,16 +37,10 @@ class client:
 
         # This will catch 400 errors - needed outside of the post block.
         except HTTP_RESPONSE_ERRORS as e:
-            if config['instattack']['log.logging']['log_request_errors']:
-                log.error(e, extra={'proxy': proxy})
-            if self.on_error:
-                await self.on_error(proxy, e)
+            await self.on_error(proxy, e)
 
         except HTTP_REQUEST_ERRORS as e:
-            if config['instattack']['log.logging']['log_request_errors']:
-                log.error(e, extra={'proxy': proxy})
-            if self.on_error:
-                await self.on_error(proxy, e)
+            await self.on_error(proxy, e)
 
 
 class train_client(client):
@@ -77,15 +71,11 @@ class train_client(client):
                 response.raise_for_status()
 
             except HTTP_RESPONSE_ERRORS as e:
-                if config['instattack']['log.logging']['log_request_errors']:
-                    log.error(e, extra={'proxy': proxy})
-                if self.on_error:
-                    await self.on_error(proxy, e)
+                await self.on_error(proxy, e)
 
             else:
                 json = await response.json()
-                if self.on_success:
-                    await self.on_success(proxy)
+                await self.on_success(proxy)
 
                 return json['form']
 
@@ -176,14 +166,10 @@ class instagram_client(client):
                 result = await raise_for_result(response)
 
             except HTTP_RESPONSE_ERRORS as e:
-                if config['instattack']['log.logging']['log_request_errors']:
-                    log.error(e, extra={'proxy': proxy})
-                if self.on_error:
-                    await self.on_error(proxy, e)
+                await self.on_error(proxy, e)
 
             else:
-                if self.on_success:
-                    await self.on_success(proxy)
+                await self.on_success(proxy)
                 return result
 
     async def login(self, session, token, password, proxy):

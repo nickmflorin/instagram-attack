@@ -41,7 +41,7 @@ class Icons:
     CROSS = "✘"
     CHECK = "✔"
     DONE = "\u25A3"
-    TACK = "[i]"
+    TACK = "%s" % (colors.bold | "i")
     GEAR = "⚙️ "
     CROSSING = "🚸"
     NOTSET = ""

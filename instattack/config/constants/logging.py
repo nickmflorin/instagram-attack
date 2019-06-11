@@ -15,24 +15,6 @@ class LoggingIcons:
     DEBUG = Icons.GEAR
 
 
-class RecordAttributes(FormatEnum):
-
-    DATETIME = Formats.Text.FADED.with_wrapper("[%s]")
-    MESSAGE = Formats.Text.NORMAL
-    OTHER_MESSAGE = Formats.Text.MEDIUM
-    NAME = Formats.Text.PRIMARY
-    SUBNAME = Formats.Text.PRIMARY.with_bold()
-
-    # Exception Messages
-    STATUS_CODE = Format(Colors.BLUE).with_bold()
-    LABEL = Formats.Text.MEDIUM
-
-    # Traceback
-    PATHNAME = Formats.Text.EXTRA_LIGHT
-    LINENO = Formats.Text.LIGHT
-    FUNCNAME = Formats.Text.EXTRA_LIGHT
-
-
 class LoggingLevels(FormatEnum):
 
     CRITICAL = (Formats.State.FAIL.with_bold().with_icon(LoggingIcons.CRITICAL), 50)

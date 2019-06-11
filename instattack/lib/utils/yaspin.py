@@ -124,7 +124,7 @@ class CustomYaspin(Yaspin):
         )
 
         message = "".join(parts)
-        date_message = constants.RecordAttributes.DATETIME(
+        date_message = constants.Formats.Text.FADED.with_wrapper("[%s]")(
             datetime.now().strftime(constants.DATE_FORMAT)
         )
 

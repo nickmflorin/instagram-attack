@@ -78,8 +78,8 @@ class HttpException(InstattackError):
     def __str__(self):
         message = f"{self.__class__.__name__}({self.exception.__class__.__name__})"
         content = getattr(self.exception, 'message', None) or str(self.exception)
-        if content:
-            message += content
+        if content and len(content) > 5:
+            message += " %s" % content
         if self.errno is not None:
             message += f"(Err No: {self.errno})"
         return message
@@ -176,4 +176,7 @@ class InstagramResultError(HttpResponseError):
     status_code = 200
 
     def __init__(self, message):
-        self.message = message
+        self.message = str(message)
+
+    def __str__(self):
+        return self.message

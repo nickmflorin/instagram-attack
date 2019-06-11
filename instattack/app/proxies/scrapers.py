@@ -3,7 +3,6 @@ import requests
 import json
 
 from instattack.lib import logger
-from instattack.lib.utils import start_and_stop
 
 
 log = logger.get(__name__)

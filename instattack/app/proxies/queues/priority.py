@@ -91,15 +91,11 @@ class AbstractProxyPool(ProxyPriorityQueue):
 
     __queueid__ = 'pool'
 
-    def validate_for_queue(self, proxy):
-        evaluation = proxy.evaluate_for_pool()
-        if not evaluation.passed:
-            if config['instattack']['log.logging']['log_proxy_queue']:
-                self.log.debug(f'Cannot Add Proxy to {self.__NAME__}', extra={
-                    'other': str(evaluation)
-                })
-            return False
-        return True
+    # def validate_for_queue(self, proxy):
+    #     evaluation = proxy.evaluate_for_pool()
+    #     if not evaluation.passed:
+    #         return False
+    #     return True
 
 
 class SimpleProxyPool(AbstractProxyPool):
@@ -113,7 +109,7 @@ class ManagedProxyPool(SimpleProxyPool):
     __NAME__ = "Managed Proxy Pool"
     log = logger.get(__name__, __NAME__)
 
-    async def put(self, proxy, evaluate=True):
+    async def put(self, proxy, evaluate=True, prepopulation=False):
         """
         [x] NOTE:
         ---------
@@ -121,10 +117,19 @@ class ManagedProxyPool(SimpleProxyPool):
         because that is the definition for confirmed proxies, which should not
         be put in the general pool.
         """
-        if evaluate and not self.validate_for_queue(proxy):
-            if proxy.confirmed():
-                self.log.warning('Removing Proxy That Was Confirmed from Pool', extra={
-                    'proxy': proxy,
-                })
-            return
-        await super(ManagedProxyPool, self).put(proxy)
+        if evaluate:
+            evaluation = proxy.evaluate_for_pool()
+            if evaluation.passed:
+                await super(ManagedProxyPool, self).put(proxy)
+            else:
+                # Do not log during prepopulation.
+                if not prepopulation:
+                    if config['instattack']['log.logging']['log_proxy_queue']:
+                        self.log.debug(f'Cannot Add Proxy to {self.__NAME__}', extra={
+                            'other': str(evaluation)
+                        })
+
+                    if proxy.confirmed():
+                        self.log.warning('Removing Proxy That Was Confirmed from Pool', extra={
+                            'proxy': proxy,
+                        })

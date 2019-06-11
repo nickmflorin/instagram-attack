@@ -70,7 +70,9 @@ class SimpleProxyManager(ProxyManagerInterface):
         on the proxy model, and we do not need to put the proxy back in the
         pool, or a designated pool.
         """
-        assert not type(exc) is str
+        if config['instattack']['log.logging']['log_request_errors']:
+            self.log.error(exc, extra={'proxy': proxy})
+
         req = ProxyRequest(
             error=exc.__subtype__,
             status_code=exc.status_code,
@@ -211,18 +213,18 @@ class SmartProxyManager(BrokeredProxyManager):
         await self.put(proxy)
 
     async def get(self):
+        """
+        [x] NOTE:
+        --------
+        Logging for pulling proxies out of queues is done in the individual
+        queues themselves.
+        """
         proxy = await self.confirmed.get()
         if proxy:
-            if config['instattack']['log.logging']['log_proxy_queue']:
-                self.log.debug(
-                    f'Returning Proxy from {self.confirmed.__NAME__}', extra={'proxy': proxy})
             return proxy
 
         proxy = await self.hold.get()
         if proxy:
-            if config['instattack']['log.logging']['log_proxy_queue']:
-                self.log.debug(
-                    f'Returning Proxy from {self.hold.__NAME__}', extra={'proxy': proxy})
             return proxy
 
         return await super(SmartProxyManager, self).get()
@@ -258,10 +260,10 @@ class SmartProxyManager(BrokeredProxyManager):
 
             if proxy.confirmed():
                 await self.confirmed.raise_if_present(proxy)
-                await self.confirmed.put(proxy)
+                await self.confirmed.put(proxy, prepopulation=True)
             else:
                 # Maybe Limit Evaluation if Proxy was Ever Confirmed?
-                await super(SmartProxyManager, self).put(proxy)
+                await super(SmartProxyManager, self).put(proxy, prepopulation=True)
 
         else:
             assert proxy.queue_id is not None
@@ -330,11 +332,12 @@ class SmartProxyManager(BrokeredProxyManager):
                 errs = proxy.errors_in_horizon()
                 if len(errs) != 0:
                     if config['instattack']['log.logging']['log_proxy_queue']:
-                        self.log.debug(
-                            'Maintaining Proxy in Confirmed Queue with %s Errors' % len(errs),
-                            extra={
-                                'proxy': proxy
-                            })
+                        self.log.debug(f'Maintaining Proxy in {self.__NAME__}', extra={
+                            'proxy': proxy,
+                            'data': {
+                                'Num Errors': len(errs),
+                            }
+                        })
 
         else:
             # Proxy No Longer Confirmed -> Discard by Removing

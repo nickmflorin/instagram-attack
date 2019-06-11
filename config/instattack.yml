@@ -6,7 +6,7 @@ instattack:
     log.logging:
         level: 'debug'
         log_request_errors: true
-        log_proxy_queue: false
+        log_proxy_queue: true
 
 connection:
     limit_per_host: 0

@@ -37,13 +37,8 @@ class CustomHandlerMixin(ArtsyHandlerMixin):
     def prepare_record(self, record):
         super(CustomHandlerMixin, self).prepare_record(record)
 
-        self.default(record, 'is_exception', default=False)
-
         if not getattr(record, 'level', None):
             setattr(record, 'level', constants.LoggingLevels[record.levelname])
-
-        if isinstance(record.msg, Exception):
-            record.is_exception = True
 
         record.pathname = relative_to_root(record.pathname)
 
