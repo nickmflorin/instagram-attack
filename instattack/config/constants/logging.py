@@ -3,7 +3,7 @@ from .style import Formats, Icons, Colors
 
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-LOGGER_MODE = 'artsy'
+LOGGER_MODE = 'diagnostics'
 
 
 class LoggingIcons:

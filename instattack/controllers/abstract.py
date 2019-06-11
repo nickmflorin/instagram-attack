@@ -1,5 +1,6 @@
 import asyncio
 from cement import Controller, shell
+import curses
 import sys
 
 from instattack.lib import logger
@@ -29,8 +30,9 @@ class InstattackController(Controller, PrintableMixin):
         fmt = constants.Formats.Text.NORMAL.with_bold()
         message = fmt(f"{message}") + ", (Press Enter to Continue)"
 
-        p = shell.Prompt(message, default="ENTER")
+        p = shell.Prompt("%s" % message, default="ENTER")
         res = p.prompt()
+
         self.breakline()
 
         if res == 'ENTER':

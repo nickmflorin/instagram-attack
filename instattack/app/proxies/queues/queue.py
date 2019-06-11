@@ -208,20 +208,20 @@ class ConfirmedQueue(ProxyQueue):
                 if config['instattack']['log.logging']['log_proxy_queue']:
                     self.log.debug(f'Returning & Removing Proxy from {self.__NAME__}', extra={
                         'data': {
-                            'Times Used': f"{self.times_used[proxy.id]} (Last Allowed)",
-                            'Queue Size': self.qsize(),
+                            'Times Used': f"{self.times_used[proxy.id] or 0} (Last Allowed)",
+                            f'{self.__NAME__} Size': self.qsize(),
                         },
                         'proxy': proxy,
                     })
-
-            if config['instattack']['log.logging']['log_proxy_queue']:
-                self.log.debug(f'Returning Proxy from {self.__NAME__}', extra={
-                    'data': {
-                        'Times Used': self.times_used[proxy.id],
-                        'Queue Size': self.qsize(),
-                    },
-                    'proxy': proxy,
-                })
+            else:
+                if config['instattack']['log.logging']['log_proxy_queue']:
+                    self.log.debug(f'Returning Proxy from {self.__NAME__}', extra={
+                        'data': {
+                            'Times Used': self.times_used[proxy.id] or 0,
+                            f'{self.__NAME__} Size': self.qsize(),
+                        },
+                        'proxy': proxy,
+                    })
 
             self.times_used[proxy.id] += 1
             return proxy

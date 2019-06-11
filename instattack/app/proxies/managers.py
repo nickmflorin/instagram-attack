@@ -328,16 +328,18 @@ class SmartProxyManager(BrokeredProxyManager):
 
         # Proxy Still Confirmed Over Horizon - Dont Move Out Yet
         elif proxy.confirmed():
+            # Temporary
             if not last_request.confirmed:
-                errs = proxy.errors_in_horizon()
-                if len(errs) != 0:
-                    if config['instattack']['log.logging']['log_proxy_queue']:
-                        self.log.debug(f'Maintaining Proxy in {self.__NAME__}', extra={
-                            'proxy': proxy,
-                            'data': {
-                                'Num Errors': len(errs),
-                            }
-                        })
+                pass
+                # errs = proxy.errors_in_horizon()
+                # if len(errs) != 0:
+                #     if config['instattack']['log.logging']['log_proxy_queue']:
+                #         self.log.debug(f'Maintaining Proxy in {self.__NAME__}', extra={
+                #             'proxy': proxy,
+                #             'data': {
+                #                 'Num Errors': len(errs),
+                #             }
+                #         })
 
         else:
             # Proxy No Longer Confirmed -> Discard by Removing

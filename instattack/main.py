@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
+import curses
 import warnings
 import sys
 
 from cement import App
 from cement.core.exc import CaughtSignal
 
-from instattack.config import config
+from instattack.config import config, constants
 
 from instattack.lib import logger
 from instattack.lib.utils import spin_start_and_stop, start_and_stop
@@ -16,6 +17,7 @@ from .controllers.base import Base, UserController, ProxyController
 
 from .mixins import AppMixin
 from .hooks import system_exception_hook, loop_exception_hook, setup, shutdown
+from .diagnostics import run_diagnostics
 
 
 log = logger.get(__name__)
@@ -134,6 +136,9 @@ class Instattack(App, AppMixin):
 
         for s in config.__SIGNALS__:
             self.loop.add_signal_handler(s, _shutdown)
+
+    def run_diagnostics(self):
+        self.loop.create_task(run_diagnostics())
 
     def __enter__(self):
         """
