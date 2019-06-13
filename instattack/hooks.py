@@ -31,6 +31,11 @@ def system_exception_hook(exc_type, exc_value, exc_traceback):
         pass
 
 
+def remove_pycache():
+    [p.unlink() for p in pathlib.Path(constants.APP_DIR).rglob('*.py[co]')]
+    [p.rmdir() for p in pathlib.Path(constants.APP_DIR).rglob('__pycache__')]
+
+
 def loop_exception_hook(self, loop, context):
     """
     We are having trouble using log.exception() with exc_info=True and seeing
@@ -68,8 +73,7 @@ async def setup(loop):
         with spinner.block():
 
             spinner.write('Removing __pycache__ Files')
-            [p.unlink() for p in pathlib.Path(constants.APP_DIR).rglob('*.py[co]')]
-            [p.rmdir() for p in pathlib.Path(constants.APP_DIR).rglob('__pycache__')]
+            remove_pycache()
 
             if not constants.USER_PATH.exists():
                 spinner.write('User Directory Does Not Exist', failure=True)

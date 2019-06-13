@@ -24,5 +24,6 @@ setup(
         [console_scripts]
         instattack = instattack.main:main
         playground = instattack.main:playground
+        clean = instattack.main:clean
     """,
 )

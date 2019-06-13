@@ -50,3 +50,8 @@ def playground():
 
     from .playground.main import run_playground
     run_playground()
+
+
+def clean():
+    from .hooks import remove_pycache
+    remove_pycache()
