@@ -41,9 +41,9 @@ class Icons:
     CROSS = "✘"
     CHECK = "✔"
     DONE = "\u25A3"
-    TACK = "%s" % (colors.bold | "i")
+    TACK = "📌"
     GEAR = "⚙️ "
-    CROSSING = "🚸"
+    CROSSING = "🚧"
     NOTSET = ""
 
 
@@ -80,7 +80,7 @@ class Formats:
 
             FAIL = Icons.CROSS
             SUCCESS = Icons.CHECK
-            WARNING = "[!]"
+            WARNING = Icons.CROSS
             NOTSET = Icons.NOTSET
 
         class Color:

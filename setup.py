@@ -18,10 +18,11 @@ setup(
     url='https://github.com/nickmflorin/instagram-attack',
     license='unlicensed',
     packages=find_packages(exclude=['ez_setup', 'tests*']),
-    package_data={'instatttack': ['templates/*']},
+    package_data={'instattack': ['templates/*']},
     include_package_data=True,
     entry_points="""
         [console_scripts]
         instattack = instattack.main:main
+        playground = instattack.main:playground
     """,
 )

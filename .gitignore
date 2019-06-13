@@ -8,3 +8,6 @@ env
 *.txt
 *.db
 artsylogger
+instattack.egg-info
+instattack.egg-info/*
+.pytest_cache

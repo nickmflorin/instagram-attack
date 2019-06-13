@@ -14,30 +14,36 @@ def measure_ansi_string(value):
 
 class cursor:
 
-    @staticmethod
-    def _move_up():
-        sys.stdout.write("\033[F")
-
-    @staticmethod
-    def _move_down():
+    @classmethod
+    def newline():
         sys.stdout.write("\n")
 
-    @staticmethod
-    def move_up(nlines=1):
-        for i in range(nlines):
-            cursor._move_up()
+    @classmethod
+    def move_right(n=1):
+        chars = "\u001b[%sC" % n
+        sys.stdout.write(chars)
 
-    @staticmethod
-    def move_down(nlines=1):
-        for i in range(nlines):
-            cursor._move_down()
+    @classmethod
+    def move_left(n=1):
+        chars = "\u001b[%sD" % n
+        sys.stdout.write(chars)
 
-    @staticmethod
+    @classmethod
+    def move_up(n=1):
+        chars = "\u001b[%sA" % n
+        sys.stdout.write(chars)
+
+    @classmethod
+    def move_down(n=1):
+        chars = "\u001b[%sB" % n
+        sys.stdout.write(chars)
+
+    @classmethod
     def show_cursor():
         sys.stdout.write("\033[?25h")
         sys.stdout.flush()
 
-    @staticmethod
+    @classmethod
     def hide_cursor():
         sys.stdout.write("\033[?25l")
         sys.stdout.flush()

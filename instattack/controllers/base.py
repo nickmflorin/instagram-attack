@@ -3,7 +3,7 @@ from cement.utils.version import get_version_banner
 from instattack.config import constants, config
 from instattack.lib import logger
 
-from instattack.core.version import get_version
+from instattack.version import get_version
 from instattack.core.handlers import AttackHandler
 
 from .abstract import InstattackController
