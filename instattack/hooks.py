@@ -4,13 +4,17 @@ import tortoise
 import traceback
 import sys
 
+from termx import Spinner, Cursor
+
 from instattack.config import constants
 
 from instattack.lib import logger
-from instattack.lib.utils import task_is_third_party, cancel_remaining_tasks, spin
+from instattack.lib.utils import task_is_third_party, cancel_remaining_tasks
 
 
 log = logger.get(__name__)
+spinner = Spinner(color="red")
+
 
 _shutdown = False
 
@@ -68,33 +72,27 @@ def loop_exception_hook(self, loop, context):
 async def setup(loop):
 
     async def setup_directories(spinner):
-        spinner.write('Setting Up Directories')
+        with spinner.group('Setting Up Directories') as gp:
 
-        with spinner.block():
-
-            spinner.write('Removing __pycache__ Files')
+            gp.write('Removing __pycache__ Files')
             remove_pycache()
 
             if not constants.USER_PATH.exists():
-                spinner.write('User Directory Does Not Exist', failure=True)
-                spinner.write('Creating User Directory')
+                gp.warning('User Directory Does Not Exist')
+                gp.write('Creating User Directory')
                 constants.USER_PATH.mkdir()
             else:
-                spinner.write('User Directory Already Exists', success=True)
-
-        pass
+                gp.write('User Directory Already Exists')
 
     async def setup_database(spinner):
-        spinner.write('Setting Up DB')
-
-        with spinner.block():
-            spinner.write('Closing Previous DB Connections')
+        with spinner.group('Setting Up DB') as gp:
+            gp.write('Closing Previous DB Connections')
             await tortoise.Tortoise.close_connections()
 
-            spinner.write('Configuring Database')
+            gp.write('Configuring Database')
             await tortoise.Tortoise.init(config=constants.DB_CONFIG)
 
-            spinner.write('Generating Schemas')
+            gp.write('Generating Schemas')
             await tortoise.Tortoise.generate_schemas()
 
     async def setup_logger(spinner):
@@ -107,10 +105,10 @@ async def setup(loop):
             'tortoise'
         )
 
-    with spin('Setting Up') as spinner:
-        await setup_logger(spinner)
-        await setup_directories(spinner)
-        await setup_database(spinner)
+    with spinner.group('Setting Up') as sp:
+        await setup_logger(sp)
+        await setup_directories(sp)
+        await setup_database(sp)
 
 
 async def shutdown(loop):
@@ -137,16 +135,11 @@ async def shutdown(loop):
         await tortoise.Tortoise.close_connections()
 
     async def shutdown_outstanding_tasks(loop, spinner):
-        spinner.write('Shutting Down Outstanding Tasks')
 
-        futures = await cancel_remaining_tasks()
-        if len(futures) != 0:
-
-            with spinner.block():
-                spinner.write(f'Cancelled {len(futures)} Leftover Tasks')
-                spinner.number()
-
-                with spinner.block():
+        with spinner.group('Shutting Down Outstanding Tasks'):
+            futures = await cancel_remaining_tasks()
+            if len(futures) != 0:
+                with spinner.group(f'Cancelled {len(futures)} Leftover Tasks'):
                     log_tasks = futures[:20]
                     for i, task in enumerate(log_tasks):
                         if task_is_third_party(task):
@@ -156,9 +149,11 @@ async def shutdown(loop):
 
                     if len(futures) > 20:
                         spinner.write("...")
-        else:
-            spinner.write(f'No Leftover Tasks to Cancel')
+            else:
+                spinner.write(f'No Leftover Tasks to Cancel')
 
-    with spin('Shutting Down') as spinner:
-        await shutdown_outstanding_tasks(loop, spinner)
-        await shutdown_database(loop, spinner)
+    with spinner.group('Shutting Down') as sp:
+        await shutdown_outstanding_tasks(loop, sp)
+        await shutdown_database(loop, sp)
+
+    Cursor.newline()

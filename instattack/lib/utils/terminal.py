@@ -1,49 +1,94 @@
-import re
+import asyncio
+import contextlib
+from functools import wraps
 import sys
 
-
-def escape_ansi_string(value):
-    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-    return ansi_escape.sub('', value)
+from termx import Spinner
 
 
-def measure_ansi_string(value):
-    bare = escape_ansi_string(value)
-    return len(bare)
+spinner = Spinner(color="red")
 
 
-class cursor:
+@contextlib.contextmanager
+def spin(text, numbered=False):
+    """
+    Only for synchronous functions.  Getting to work for async coroutines requires
+    a decent amount of overhead (see yaspin.py).
+    """
+    from instattack.lib.logger import DisableLogger
 
-    @classmethod
-    def newline():
-        sys.stdout.write("\n")
+    with DisableLogger():
+        with spinner.group(text):
+            try:
+                yield spinner
+            except Exception as e:
+                spinner.error(str(e))
+            finally:
+                return
 
-    @classmethod
-    def move_right(n=1):
-        chars = "\u001b[%sC" % n
-        sys.stdout.write(chars)
 
-    @classmethod
-    def move_left(n=1):
-        chars = "\u001b[%sD" % n
-        sys.stdout.write(chars)
+def decorative_spin(text, numbered=False):
+    """
+    Only for synchronous functions.  Getting to work for async coroutines requires
+    a decent amount of overhead (see yaspin.py).
+    """
+    from instattack.lib.logger import DisableLogger
 
-    @classmethod
-    def move_up(n=1):
-        chars = "\u001b[%sA" % n
-        sys.stdout.write(chars)
+    def _spin_start_and_stop(fn):
+        if asyncio.iscoroutinefunction(fn):
+            raise NotImplementedError('Decorator only for synchronous methods.')
 
-    @classmethod
-    def move_down(n=1):
-        chars = "\u001b[%sB" % n
-        sys.stdout.write(chars)
+        spinner = Spinner(text, color="red")
 
-    @classmethod
-    def show_cursor():
-        sys.stdout.write("\033[?25h")
-        sys.stdout.flush()
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            with DisableLogger():
+                with spinner.group(text):
+                    try:
+                        results = fn(*args, **kwargs)
+                    except Exception as e:
+                        spinner.error(str(e))
+                    else:
+                        return results
+        return wrapper
 
-    @classmethod
-    def hide_cursor():
-        sys.stdout.write("\033[?25l")
-        sys.stdout.flush()
+    return _spin_start_and_stop
+
+
+def break_before(fn):
+
+    if asyncio.iscoroutinefunction(fn):
+
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            sys.stdout.write("\n")
+            return await fn(*args, **kwargs)
+        return wrapper
+
+    else:
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            sys.stdout.write("\n")
+            return fn(*args, **kwargs)
+        return wrapper
+
+
+def break_after(fn):
+    if asyncio.iscoroutinefunction(fn):
+
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            results = await fn(*args, **kwargs)
+            sys.stdout.write("\n")
+            return results
+        return wrapper
+
+    else:
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            results = fn(*args, **kwargs)
+            sys.stdout.write("\n")
+            return results
+        return wrapper

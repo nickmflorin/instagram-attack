@@ -90,6 +90,7 @@ class SimpleLogger(LoggerMixin, logging.Logger):
         exceptions with their traceback.  For now, this is a workaround that
         works similiarly.
         """
+        sys.stderr.write("\n")
         self.error(exc_info[1])
 
         sys.stderr.write("\n")

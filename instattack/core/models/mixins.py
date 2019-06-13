@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 import functools
 
+from termx import humanize_list
+
 from instattack.config import config
-from instattack.lib.utils import humanize_list
 from instattack.core.exceptions import ConfigError
 
 

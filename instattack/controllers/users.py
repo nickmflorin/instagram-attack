@@ -1,9 +1,9 @@
 import asyncio
 from cement import ex
+import sys
 
 from instattack.lib.utils import spin
-
-from instattack.config import constants, config
+from instattack.config import constants
 
 from instattack.core.models import User
 from instattack.core.handlers import LoginHandler
@@ -222,13 +222,13 @@ class UserController(InstattackController, UserInterface):
         for user_dir in directory.iterdir():
             if user_dir.is_file():
                 print_action(user_dir.name, 'Deleting File')
-                sys.stdout.write('Deleting File', label=user_dir.name, directory=constants.USER_PATH)
+                print_action('Deleting File', label=user_dir.name, directory=constants.USER_PATH)
                 if not self.app.pargs.safe:
                     user_dir.delete()
             else:
                 # Remove Directory if User Does Not Exist
                 if user_dir.name not in [user.username for user in users]:
-                    sys.stdout.write('Deleting Leftover Directory', label=user_dir.name)
+                    print_action('Deleting Leftover Directory', label=user_dir.name)
                     if not self.app.pargs.safe:
                         user_dir.delete()
                 else:
@@ -238,7 +238,7 @@ class UserController(InstattackController, UserInterface):
                     for file in User.FILES:
                         pt = user.file_path(file)
                         if not pt.exists() or not pt.is_file():
-                            sys.stdout.write(f'File {pt.name} Missing for User {user.username}')
+                            print_action(f'File {pt.name} Missing for User {user.username}')
                             if not self.app.pargs.safe:
                                 pt.touch()
 

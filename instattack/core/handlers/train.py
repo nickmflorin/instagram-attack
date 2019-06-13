@@ -1,10 +1,11 @@
 import aiohttp
 import asyncio
 
-from instattack.config import config
+from termx import progress
 
+from instattack.config import config
 from instattack.lib import logger
-from instattack.lib.utils import limit_as_completed, progress
+from instattack.lib.utils import limit_as_completed
 
 from instattack.core.proxies import SimpleProxyPool, SimpleProxyManager
 

@@ -16,7 +16,7 @@ warnings.simplefilter('ignore')
 sys.excepthook = system_exception_hook
 
 
-def main():
+def instattack():
     """
     [x] TODO:
     --------
@@ -36,14 +36,15 @@ def main():
                 app.failure('Assertion Error')
 
         except InstattackError as e:
-            app.failure(str(e))
-            if app.debug:
-                log.traceback(e.__class__, e, e.__traceback__)
+            app.failure(e, traceback=app.debug)
 
         except (CaughtSignal, KeyboardInterrupt) as e:
             app.failure('Caught Signal %s' % e, exit_code=0, tb=False)
             print('\n%s' % e)
             app.exit_code = 0
+
+        except Exception as e:
+            app.failure(e, traceback=True)
 
 
 def playground():

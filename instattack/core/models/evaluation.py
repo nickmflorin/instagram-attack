@@ -1,9 +1,9 @@
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from typing import List, Any
 
+from termx import humanize_list
+
 from instattack.config import config
-from instattack.lib.utils import humanize_list
 
 
 @dataclass

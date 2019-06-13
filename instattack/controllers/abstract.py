@@ -1,6 +1,5 @@
 import asyncio
 from cement import Controller, shell
-import curses
 import sys
 
 from instattack.lib import logger

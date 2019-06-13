@@ -73,7 +73,7 @@ async def limit_as_completed(
                 try:
                     newc = await coros.__anext__()
                     pending.append(asyncio.create_task(newc))
-                except StopAsyncIteration as e:
+                except StopAsyncIteration:
                     pass
 
                 yield f, pending, num_tries

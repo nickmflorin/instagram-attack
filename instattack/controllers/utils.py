@@ -2,30 +2,23 @@ import asyncio
 from cement import ex
 import functools
 
-LEVEL_ARGUMENT = (
-    ['-lv', '--level'],
-    {
-        'action': 'store',
-        'help': 'Override the Logging Level'
-    }
-)
+from termx import Cursor
 
 
 def proxy_command(help=None, limit=None, arguments=None):
 
     arguments = arguments or []
-    arguments.append(LEVEL_ARGUMENT)
-
     if limit:
-        arguments.append((
-            ['-l', '--limit'], {'help': 'Limit the Number of Proxies', 'type': int},
-        ))
+        arguments = [(['-l', '--limit'],
+            {'help': 'Limit the Number of Proxies', 'type': int})] + arguments
 
     def proxy_command_wrapper(func):
 
         @functools.wraps(func)
         def wrapped(instance, *args, **kwargs):
             instance.loop = asyncio.get_event_loop()
+
+            Cursor.newline()
             return func(instance, *args, **kwargs)
 
         return ex(help=help, arguments=arguments)(wrapped)
@@ -43,6 +36,8 @@ def user_command(help=None, arguments=None):
         def wrapped(instance, *args, **kwargs):
             instance.loop = asyncio.get_event_loop()
             new_args = (instance.app.pargs.username, ) + args
+
+            Cursor.newline()
             return func(instance, *new_args, **kwargs)
 
         return ex(help=help, arguments=arguments)(wrapped)
@@ -64,6 +59,8 @@ def existing_user_command(help=None, arguments=None):
             setattr(instance.loop, 'user', user)
 
             new_args = (user, ) + args
+
+            Cursor.newline()
             return func(instance, *new_args, **kwargs)
 
         return ex(help=help, arguments=arguments)(wrapped)

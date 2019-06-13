@@ -7,7 +7,7 @@ from instattack.lib import logger
 class LogDisplay(object):
 
     def __init__(self, screen):
-        self.window = screen.subwin(0,0)
+        self.window = screen.subwin(0, 0)
         # self.window.border()
         self.window.keypad(1)
 
@@ -27,7 +27,6 @@ class LogDisplay(object):
         # self.panel.border()
 
         self.window.clear()
-        log = logger.get('test')
 
         while True:
             self.window.refresh()
@@ -67,8 +66,9 @@ class Menu(object):
     A good example of creating a curses menu.  Potentially useful in the
     future.
     """
+
     def __init__(self, items, stdscreen):
-        self.window = stdscreen.subwin(0,0)
+        self.window = stdscreen.subwin(0, 0)
         self.window.keypad(1)
         self.panel = panel.new_panel(self.window)
         self.panel.hide()
@@ -76,14 +76,14 @@ class Menu(object):
 
         self.position = 0
         self.items = items
-        self.items.append(('exit','exit'))
+        self.items.append(('exit', 'exit'))
 
     def navigate(self, n):
         self.position += n
         if self.position < 0:
             self.position = 0
         elif self.position >= len(self.items):
-            self.position = len(self.items)-1
+            self.position = len(self.items) - 1
 
     def display(self):
         self.panel.top()
@@ -100,12 +100,12 @@ class Menu(object):
                     mode = curses.A_NORMAL
 
                 msg = '%d. %s' % (index, item[0])
-                self.window.addstr(1+index, 1, msg, mode)
+                self.window.addstr(1 + index, 1, msg, mode)
 
             key = self.window.getch()
 
             if key in [curses.KEY_ENTER, ord('\n')]:
-                if self.position == len(self.items)-1:
+                if self.position == len(self.items) - 1:
                     break
                 else:
                     self.items[self.position][1]()
@@ -122,11 +122,12 @@ class Menu(object):
         curses.doupdate()
 
 
-class Menu(object):
+class MenuApp(object):
     """
     A good example of creating a curses menu.  Potentially useful in the
     future.
     """
+
     def __init__(self, stdscreen):
 
         submenu_items = [
@@ -151,6 +152,7 @@ class RedirectOutput:
         self.window = window
         self.current_line = 1
 
+        import builtins
         builtins.input = self.prompt
 
     def flush(self):

@@ -22,7 +22,7 @@ setup(
     include_package_data=True,
     entry_points="""
         [console_scripts]
-        instattack = instattack.main:main
+        instattack = instattack.main:instattack
         playground = instattack.main:playground
         clean = instattack.main:clean
     """,

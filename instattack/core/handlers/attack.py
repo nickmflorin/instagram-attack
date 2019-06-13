@@ -1,9 +1,11 @@
 import asyncio
 import aiohttp
 
+from termx import percentage
+
 from instattack.config import config
 from instattack.lib import logger
-from instattack.lib.utils import percentage, limit_as_completed, cancel_remaining_tasks
+from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
 from instattack.core.exceptions import NoPasswordsError
 from instattack.core.models import InstagramResults

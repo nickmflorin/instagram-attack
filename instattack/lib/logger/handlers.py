@@ -1,5 +1,4 @@
 import logging
-import curses
 import sys
 
 from artsylogger import ArtsyHandlerMixin
@@ -81,6 +80,7 @@ class DiagnosticsHandler(SimpleHandler):
     We cannot use ArtsyLogger right now because those UNICODE formats do not
     display nicely with curses.
     """
+
     def __init__(self, window, filter=None, formatter=None):
         SimpleHandler.__init__(self, filter=filter, formatter=formatter)
         self.window = window
@@ -107,23 +107,16 @@ class DiagnosticsHandler(SimpleHandler):
         try:
             msg = self.format(record)
             fs = "\n%s"
-            if not _unicode: #if no unicode support...
+            if not _unicode:  # if no unicode support...
                 self.add_lines(fs, msg, code=None)
             else:
                 try:
-                    if (isinstance(msg, unicode) ):
-                        ufs = u'\n%s'
-                        try:
-                            self.add_lines(ufs, msg, code=None)
-                        except UnicodeEncodeError:
-                            self.add_lines(ufs, msg, code=code)
-                    else:
-                        self.add_lines(fs, msg, code=None)
+                    self.add_lines(fs, msg, code=None)
                 except UnicodeError:
                     self.add_lines(fs, msg, code='UTF-8')
         except (KeyboardInterrupt, SystemExit):
             raise
-        except:
+        except Exception:
             self.handleError(record)
 
 
