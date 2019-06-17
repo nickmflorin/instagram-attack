@@ -3,16 +3,13 @@ from cement.core.exc import CaughtSignal
 import sys
 import warnings
 
-from instattack.lib import logger
 from instattack.core.exceptions import InstattackError
 
 from .app import Instattack
 from .hooks import system_exception_hook
 
-log = logger.get(__name__)
+
 warnings.simplefilter('ignore')
-
-
 sys.excepthook = system_exception_hook
 
 
@@ -51,8 +48,3 @@ def playground():
 
     from .playground.main import run_playground
     run_playground()
-
-
-def clean():
-    from .hooks import remove_pycache
-    remove_pycache()

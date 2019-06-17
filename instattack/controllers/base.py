@@ -1,9 +1,9 @@
 from cement.utils.version import get_version_banner
 
-from instattack.config import constants, config
+from instattack import __NAME__, __FORMAL_NAME__
+from instattack.config import config
 from instattack.lib import logger
 
-from instattack.version import get_version
 from instattack.core.handlers import AttackHandler
 
 from .abstract import InstattackController
@@ -13,7 +13,7 @@ from .proxies import ProxyController
 from .utils import existing_user_command
 
 
-VERSION_BANNER = f"{constants.APP_FORMAL_NAME} {get_version()} {get_version_banner()}"
+VERSION_BANNER = f"{__FORMAL_NAME__} {config.version()} {get_version_banner()}"
 
 
 class Base(InstattackController, UserInterface):
@@ -22,10 +22,10 @@ class Base(InstattackController, UserInterface):
         label = 'base'
 
         # Text displayed at the top of --help output
-        description = constants.APP_FORMAL_NAME
+        description = __FORMAL_NAME__
 
         # Text displayed at the bottom of --help output
-        epilog = f'Usage: {constants.APP_NAME} get_user username'
+        epilog = f'Usage: {__NAME__} get_user username'
 
         interfaces = [
             UserInterface

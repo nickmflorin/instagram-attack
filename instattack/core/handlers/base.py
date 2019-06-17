@@ -5,10 +5,7 @@ import aiohttp
 import aiojobs
 
 from instattack.config import config
-
 from instattack.lib import logger
-from instattack.lib.utils import spin
-
 from instattack.core.exceptions import translate_error
 
 
@@ -32,8 +29,8 @@ class Handler(object):
         await self.scheduler.spawn(coro)
 
     async def close_scheduler(self):
-        with spin('Closing Scheduler'):
-            await self.scheduler.close()
+        log.debug('Closing Scheduler')
+        await self.scheduler.close()
 
 
 class AbstractRequestHandler(Handler):
@@ -97,17 +94,16 @@ class AbstractRequestHandler(Handler):
             if len(self.saved_proxies) != 0:
                 # Still Use Context Manager Just for Style Purposes - Need Another
                 # Solution to Keep Things Consistent
-                with spin(f"Saved {len(self.saved_proxies)} Proxies"):
-                    pass
+                log.info(f"Saved {len(self.saved_proxies)} Proxies")
         else:
             if len(self.proxies_to_save) != 0:
-                with spin(f"Saving {len(self.proxies_to_save)} Proxies") as spinner:
-                    tasks = [proxy.save() for proxy in self.proxies_to_save]
-                    results = await asyncio.gather(*tasks)
+                log.info(f"Saving {len(self.proxies_to_save)} Proxies")
+                tasks = [proxy.save() for proxy in self.proxies_to_save]
+                results = await asyncio.gather(*tasks)
 
-                    for val in results:
-                        if isinstance(val, Exception):
-                            spinner.error(str(val))
+                for val in results:
+                    if isinstance(val, Exception):
+                        log.error(str(val))
 
         await self.close_scheduler()
 

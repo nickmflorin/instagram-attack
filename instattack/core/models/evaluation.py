@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Any
 
-from termx import humanize_list
+from termx.ext.utils import humanize_list
 
 from instattack.config import config
 

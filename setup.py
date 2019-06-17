@@ -1,16 +1,18 @@
 from setuptools import setup, find_packages
-from instattack.version import get_version
+from instattack import __NAME__, __FORMAL_NAME__
+from instattack.config import config
 
-VERSION = get_version()
+
+VERSION = config.version()
 
 f = open('README.md', 'r')
 LONG_DESCRIPTION = f.read()
 f.close()
 
 setup(
-    name='instattack',
+    name=__NAME__,
     version=VERSION,
-    description='Instattack',
+    description=__FORMAL_NAME__,
     long_description=LONG_DESCRIPTION,
     long_description_content_type='text/markdown',
     author='Nick Florin',
@@ -24,6 +26,7 @@ setup(
         [console_scripts]
         instattack = instattack.main:instattack
         playground = instattack.main:playground
-        clean = instattack.main:clean
+        clean = instattack.ext.scripts:clean
+        cleanroot = instattack.ext.scripts:clean_root
     """,
 )

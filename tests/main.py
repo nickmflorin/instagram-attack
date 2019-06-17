@@ -36,8 +36,6 @@ class InstattackTest(TestApp, App):
         exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
         extensions = config.__EXTENSIONS__
 
-        # handlers = [Base]
-
     async def setup(self):
         """
         Override Cement's implementation to perform shutdown of asynchronous

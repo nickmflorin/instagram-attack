@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-import aiohttp
 from dataclasses import dataclass
 from dacite import from_dict
-from plumbum import colors
-from typing import List, Any, Optional
+import typing
+
+from termx import Formats
 
 from instattack.config import constants
+from instattack.core.exceptions import InstattackError
 
 from .proxies import Proxy
 
@@ -13,14 +14,14 @@ from .proxies import Proxy
 @dataclass
 class InstagramResultErrors:
 
-    error: List[str]
+    error: typing.List[str]
 
     @property
     def message(self):
         try:
             return self.error[0]
         except IndexError:
-            raise exceptions.AppException("There are no errors.")
+            raise InstattackError("There are no errors.")
 
 
 @dataclass
@@ -30,24 +31,24 @@ class InstagramResult:
     password: str
 
     status: str = None
-    user: Optional[bool] = None
-    authenticated: Optional[bool] = None
-    message: Optional[str] = None
-    checkpoint_url: Optional[str] = None
-    lock: Optional[bool] = False
+    user: typing.Optional[bool] = None
+    authenticated: typing.Optional[bool] = None
+    message: typing.Optional[str] = None
+    checkpoint_url: typing.Optional[str] = None
+    lock: typing.Optional[bool] = False
     errors: InstagramResultErrors = InstagramResultErrors(error=[])
-    error_type: Optional[str] = None
-    showAccountRecoveryModal: Optional[bool] = False
+    error_type: typing.Optional[str] = None
+    showAccountRecoveryModal: typing.Optional[bool] = False
 
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return constants.LoggingLevels.SUCCESS.format(wrapper=None)(string_rep)
+            return Formats.SUCCESS(string_rep)
         elif self.not_authorized:
-            return constants.LoggingLevels.ERROR.format(wrapper=None)(string_rep)
+            return Formats.ERROR(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
-            return constants.LoggingLevels.DEBUG.format(string_rep)
+            return Formats.NOTSET(string_rep)
 
     @classmethod
     def from_dict(cls, data, proxy=None, password=None):
@@ -113,7 +114,7 @@ class InstagramResult:
 @dataclass
 class InstagramResults:
 
-    results: List[InstagramResult]
+    results: typing.List[InstagramResult]
 
     @property
     def num_results(self):

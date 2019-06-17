@@ -1,9 +1,9 @@
-from .base import APP_NAME, DIR_STR, GET_ROOT
+from instattack import __NAME__
+from instattack.ext import get_root_file_path
 
 
-DB_NAME = APP_NAME
-DB_PATH = DIR_STR(GET_ROOT() / f"{APP_NAME}.db")
-
+DB_NAME = __NAME__
+DB_PATH = get_root_file_path(__NAME__, ext='db')
 DB_URL = f'sqlite:///{DB_PATH}'
 
 DB_CONFIG = {
@@ -12,7 +12,7 @@ DB_CONFIG = {
             'engine': 'tortoise.backends.sqlite',
             'credentials': {
                 'file_path': DB_PATH,
-                'database': APP_NAME,
+                'database': __NAME__,
             }
         },
     },

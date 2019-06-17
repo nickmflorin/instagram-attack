@@ -1,4 +1,6 @@
 import asyncio
+import os
+from plumbum.path import LocalPath
 
 from tortoise import fields
 from tortoise.models import Model
@@ -45,7 +47,7 @@ class User(Model):
     date_created = fields.DatetimeField(auto_now_add=True)
     birthday = fields.DatetimeField(null=True)
 
-    FILES = constants.FILES
+    FILES = constants.USER_FILES
 
     class Meta:
         unique_together = ('username', )
@@ -96,7 +98,8 @@ class User(Model):
 
     @property
     def directory(self):
-        return constants.USER_PATH / self.username
+        path = os.path.join(constants.USER_DIR, self.username)
+        return LocalPath(path)
 
     def file_path(self, filename):
         if '.txt' not in filename:

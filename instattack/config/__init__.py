@@ -4,27 +4,25 @@ import importlib
 import os
 import signal
 
-from instattack.core.exceptions import ConfigurationError
+from instattack import __NAME__, __VERSION__
+from instattack.ext import get_version, get_root
 
-from .constants import APP_NAME, ROOT_DIR
+from .exceptions import ConfigSchemaError
 from .schema import Schema
-
-
-_configuration = {}
 
 
 class _Config(dict):
 
     constants = importlib.import_module('.constants', package=__name__)
 
-    __CONFIG_SECTION__ = APP_NAME
+    __CONFIG_SECTION__ = __NAME__
 
-    __CONFIG__ = init_defaults(APP_NAME)
-    __CONFIG__[APP_NAME]['debug'] = False
-    __CONFIG__[APP_NAME]['log.logging'] = {'level': 'info'}
+    __CONFIG__ = init_defaults(__NAME__)
+    __CONFIG__[__NAME__]['debug'] = False
+    __CONFIG__[__NAME__]['log.logging'] = {'level': 'info'}
 
-    __CONFIG_DIRS__ = [os.path.join(ROOT_DIR, 'config')]
-    __CONFIG_FILES__ = [f'{APP_NAME}.yml']
+    __CONFIG_DIRS__ = [os.path.join(get_root(), 'config')]
+    __CONFIG_FILES__ = [f'{__NAME__}.yml']
 
     __EXTENSIONS__ = ['yaml', 'colorlog', 'jinja2']
     __CONFIG_HANDLER__ = 'yaml'
@@ -72,10 +70,13 @@ class _Config(dict):
         validated = v.validate(conf)
 
         if not validated:
-            raise ConfigurationError(v.errors)
+            raise ConfigSchemaError(v.errors)
 
         if set:
             self.update(**conf)
+
+    def version(self):
+        return get_version(__VERSION__)
 
 
 config = _Config({})

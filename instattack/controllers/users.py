@@ -2,7 +2,6 @@ import asyncio
 from cement import ex
 import sys
 
-from instattack.lib.utils import spin
 from instattack.config import constants
 
 from instattack.core.models import User
@@ -41,9 +40,9 @@ class UserController(InstattackController, UserInterface):
         prompt = BirthdayPrompt()
         birthday = prompt.prompt()
 
-        with spin('Creating New User') as spinner:
+        with self.app.spinner.child('Creating New User') as child:
             self.create_user(username, birthday=birthday)
-            spinner.write('Successfully Created User %s' % username)
+            child.ok('Successfully Created User %s' % username)
 
     @user_command(help="Create a New User")
     def add(self, username):
@@ -51,16 +50,15 @@ class UserController(InstattackController, UserInterface):
         Same thing as the .create() method, just for convenience and the fact that
         I am always using both of them interchangeably.
         """
-        with spin('Creating New User') as spinner:
+        with self.app.spinner.child('Creating New User') as child:
             self.create_user(username)
-            spinner.write('Successfully Created User %s' % username)
+            child.ok('Successfully Created User %s' % username)
 
     @existing_user_command(help="Delete a User")
     def delete(self, user):
-        with spin('Deleting User') as spinner:
+        with self.app.spinner.child('Deleting User') as child:
             self.delete_user(user=user)
-            spinner.write(f"User {user.username} Successfully Deleted")
-            spinner.finished_break()
+            child.ok(f"User {user.username} Successfully Deleted")
 
     @existing_user_command(help="Edit an Existing User")
     def edit(self, user):
@@ -71,9 +69,9 @@ class UserController(InstattackController, UserInterface):
         prompt = BirthdayPrompt()
         birthday = prompt.prompt()
 
-        with spin('Editing User') as spinner:
+        with self.app.spinner.child('Editing User') as child:
             self.edit_user(user, birthday=birthday)
-            spinner.write('Successfully Edited User %s' % user.username)
+            child.ok('Successfully Edited User %s' % user.username)
 
     @existing_user_command(help="Display Information for User")
     def get(self, user):
@@ -149,7 +147,7 @@ class UserController(InstattackController, UserInterface):
             else:
                 proceed = self.proceed(f"About to Clear {len(attempts)} Attempts")
                 if proceed:
-                    with spin(
+                    with self.app.spinner(
                         f"Clearing {len(attempts)} Attempts "
                         f" for User {user.username} Attempts"
                     ):
@@ -183,6 +181,8 @@ class UserController(InstattackController, UserInterface):
                 return
 
         self.app.run_diagnostics()
+        return
+
         login = LoginHandler(self.loop)
         result = self.loop.run_until_complete(login.login(self.app.pargs.password))
 

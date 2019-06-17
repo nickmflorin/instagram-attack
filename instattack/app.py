@@ -3,21 +3,19 @@ import asyncio
 import sys
 
 from cement import App
-from cement.core.arg import ArgumentHandler
 
-from termx import Spinner
+from termx import Formats, Spinner
+from termx.ext.utils import break_before
 
-from instattack.config import config, constants
+from instattack.config import config
 
 from instattack.lib import logger
-from instattack.lib.utils import break_before
 from instattack.lib.diagnostics import run_diagnostics
 
 from .controllers.base import Base, UserController, ProxyController
 from .hooks import loop_exception_hook, setup, shutdown
 
 
-spinner = Spinner(color="red")
 log = logger.get(__name__)
 
 
@@ -25,11 +23,11 @@ class AppMixin(object):
 
     @break_before
     def success(self, text):
-        sys.stdout.write("%s\n" % constants.LoggingLevels.SUCCESS(text))
+        sys.stdout.write("%s\n" % Formats.SUCCESS(text))
 
     @break_before
     def failure(self, e, exit_code=1, traceback=True):
-        sys.stdout.write("%s\n" % constants.LoggingLevels.ERROR(str(e)))
+        sys.stdout.write("%s\n" % Formats.ERROR(str(e)))
 
         self.exit_code = exit_code
 
@@ -37,58 +35,6 @@ class AppMixin(object):
         # that are more expected we don't need to provide the traceback.
         if self.debug is True or traceback:
             log.traceback(e.__class__, e, e.__traceback__)
-
-
-from argparse import ArgumentParser
-from cement import Controller
-
-
-class AsyncArgumentHandler(ArgumentParser, ArgumentHandler):
-
-    class Meta:
-        label = 'async_argument_handler'
-        ignore_unknown_arguments = False
-        interface = 'argument'
-
-    def parse(self, arg_list):
-        """
-        Parse a list of arguments, and return them as an object.  Meaning an
-        argument name of 'foo' will be stored as parsed_args.foo.
-        Args:
-            arg_list (list): A list of arguments (generally sys.argv) to be
-                parsed.
-        Returns:
-            object: Instance object whose members are the arguments parsed.
-        """
-
-        if self._meta.ignore_unknown_arguments is True:
-            args, unknown = self.parse_known_args(arg_list)
-            self.parsed_args = args
-            self.unknown_args = unknown
-        else:
-            args = self.parse_args(arg_list)
-            self.parsed_args = args
-        return self.parsed_args
-
-    def add_argument(self, *args, **kw):
-        """
-        Add an argument to the parser.  Arguments and keyword arguments are
-        passed directly to ``ArgumentParser.add_argument()``.
-        See the :py:class:`argparse.ArgumentParser` documentation for help.
-        """
-        super(AsyncArgumentHandler, self).add_argument(*args, **kw)
-
-
-
-class ArgparseController(Controller):
-
-    class Meta:
-        label = 'argparse'
-
-    def _dispatch(self):
-        raise Exception()
-        super(AsyncArgumentHandler, self)._dispatch()
-
 
 
 class Instattack(App, AppMixin):
@@ -115,39 +61,17 @@ class Instattack(App, AppMixin):
         exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
         extensions = config.__EXTENSIONS__
         output_handler = config.__OUTPUT_HANDLER__
-        argument_handler = 'async_argument_handler'
 
         handlers = [
             Base,
             UserController,
             ProxyController,
-            AsyncArgumentHandler,
-            ArgparseController,
         ]
 
         # We do not specify this since we have to do it manually anyways.
         # arguments_override_config = True
 
-    def _setup_controllers(self):
-
-        if self.handler.registered('controller', 'base'):
-            self.controller = self._resolve_handler('controller', 'base')
-
-        else:
-            class DefaultBaseController(ArgparseController):
-                class Meta:
-                    label = 'base'
-
-                def _default(self):
-                    # don't enforce anything cause developer might not be
-                    # using controllers... if they are, they should define
-                    # a base controller.
-                    pass
-
-            self.handler.register(DefaultBaseController)
-            self.controller = self._resolve_handler('controller', 'base')
-
-    def setup(self):
+    def setup(self, group):
         """
         Override Cement's implementation to perform setup of asynchronous
         components.
@@ -166,9 +90,9 @@ class Instattack(App, AppMixin):
         the event loop.
         """
         super(Instattack, self).setup()
-        self.loop.run_until_complete(setup(self.loop))
+        self.loop.run_until_complete(setup(self.loop, group))
 
-    def close(self, code=None):
+    def close(self, group, code=None):
         """
         Override Cement's implementation to perform shutdown of asynchronous
         components.
@@ -186,7 +110,7 @@ class Instattack(App, AppMixin):
         coroutines, and override close() and setup() to call these methods with
         the event loop.
         """
-        self.loop.run_until_complete(shutdown(self.loop))
+        self.loop.run_until_complete(shutdown(self.loop, group))
         self.loop.close()
         super(Instattack, self).close(code=code)
 
@@ -196,11 +120,14 @@ class Instattack(App, AppMixin):
         is valid, it will be set to the global config object in its dictionary
         form.
         """
-        with spinner.group('Validating Config') as sp:
+        with self.spinner.reenter('Validating Config') as grandchild:
             super(Instattack, self).validate_config()
             data = self.config.get_dict()
 
-            sp.warning('Not Currently Validating Schema')
+            grandchild.warning('Not Currently Validating Schema', fatal=False, options={
+                'label': True,
+            })
+
             # config.validate(data, set=False)
             config.set(data)
 
@@ -208,7 +135,7 @@ class Instattack(App, AppMixin):
             # manually.
             logger.configure(config)
 
-    def setup_loop(self):
+    def setup_loop(self, child):
         """
         [x] TODO:
         -------
@@ -217,20 +144,25 @@ class Instattack(App, AppMixin):
         """
         # Requires Sync Version of Shutdown - Signals Not Working Now Anyways
         def _shutdown(loop, s):
-            self.loop.run_until_complete(shutdown(loop))
+            self.loop.run_until_complete(shutdown(loop, self.spinner))
 
-        with spinner.group('Configuring Event Loop') as sp:
-            sp.write('Attaching Exit Signals')
-            sp.warning('Exit Signals Currently Not Working')
+        with child.child('Configuring Event Loop') as grandchild:
+            grandchild.write('Attaching Exit Signals')
+            grandchild.warning('Exit Signals Not Attached to Loop', fatal=False, options={
+                'label': True,
+            })
             for s in config.__SIGNALS__:
                 self.loop.add_signal_handler(s, _shutdown)
 
-            sp.write('Attaching Exception Handler')
+            grandchild.write('Attaching Exception Handler')
             self.loop.set_exception_handler(loop_exception_hook)
-            sp.warning('Exception Handler Currently Not Working')
+            grandchild.warning('Exception Handler Not Attached to Loop', fatal=False, options={
+                'label': True,
+            })
 
     def run_diagnostics(self):
-        self.loop.create_task(run_diagnostics())
+        self.loop.run_until_complete(run_diagnostics())
+        # self.loop.run_forever()
 
     def __enter__(self):
         """
@@ -238,11 +170,15 @@ class Instattack(App, AppMixin):
         to the app instance.
         """
         self.loop = asyncio.get_event_loop()
-        self.setup_loop()
-        self.setup()
-        return self
+        self.spinner = Spinner(color="CornflowerBlue")
+
+        with self.spinner.child('Setting Up Application...') as child:
+            self.setup_loop(child)
+            self.setup(child)
+            return self
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         # Only Close App if No Unhandled Exceptions
-        if exc_type is None:
-            self.close()
+        with self.spinner.child('Shutting Down') as child:
+            if exc_type is None:
+                self.close(child)

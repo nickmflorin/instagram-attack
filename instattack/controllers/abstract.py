@@ -1,21 +1,22 @@
 import asyncio
 from cement import Controller, shell
-import sys
+
+from termx import Formats
+from termx.terminal import Cursor
 
 from instattack.lib import logger
-from instattack.config import constants
 
 
 class PrintableMixin(object):
 
     def success(self, text):
-        sys.stdout.write("%s\n" % constants.Formats.State.SUCCESS(text))
+        Cursor.write(Formats.State.SUCCESS(text))
 
     def failure(self, text):
-        sys.stdout.write("%s\n" % constants.Formats.State.FAIL(text))
+        Cursor.write(Formats.State.FAIL(text))
 
     def breakline(self):
-        sys.stdout.write("\n")
+        Cursor.newline()
 
 
 class InstattackController(Controller, PrintableMixin):
@@ -26,7 +27,7 @@ class InstattackController(Controller, PrintableMixin):
 
     def proceed(self, message):
 
-        fmt = constants.Formats.Text.NORMAL.with_bold()
+        fmt = Formats.TEXT.NORMAL.with_style('bold')
         message = fmt(f"{message}") + ", (Press Enter to Continue)"
 
         p = shell.Prompt("%s" % message, default="ENTER")

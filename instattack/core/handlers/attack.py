@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 
-from termx import percentage
+from termx.ext.utils import percentage
 
 from instattack.config import config
 from instattack.lib import logger

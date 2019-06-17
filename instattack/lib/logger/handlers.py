@@ -1,20 +1,9 @@
 import logging
 import sys
 
-from artsylogger import ArtsyHandlerMixin
+from termx.logging import TermxHandler
 
-from instattack.config import constants
-from instattack.lib.utils import relative_to_root
-
-from .formats import LOG_FORMAT_STRING, SIMPLE_FORMAT_STRING
-
-# I don't think this is necessary for Python3 but we will leave now anyways,
-# for purposes of consistency with the example.
-try:
-    unicode
-    _unicode = True
-except NameError:
-    _unicode = False
+from .formats import TERMX_FORMAT_STRING, SIMPLE_FORMAT_STRING
 
 
 class TypeFilter(logging.Filter):
@@ -40,17 +29,6 @@ class TypeFilter(logging.Filter):
         return True
 
 
-class CustomHandlerMixin(ArtsyHandlerMixin):
-
-    def prepare_record(self, record):
-        super(CustomHandlerMixin, self).prepare_record(record)
-
-        if not getattr(record, 'level', None):
-            setattr(record, 'level', constants.LoggingLevels[record.levelname])
-
-        record.pathname = relative_to_root(record.pathname)
-
-
 class SimpleHandler(logging.StreamHandler):
 
     def __init__(self, filter=None, formatter=None):
@@ -62,17 +40,6 @@ class SimpleHandler(logging.StreamHandler):
             self.addFilter(filter)
 
 
-class ArtsyHandler(SimpleHandler, CustomHandlerMixin):
-
-    def __init__(self, filter=None, format_string=None):
-        super(ArtsyHandler, self).__init__(filter=filter)
-        self.useArtsyFormatter(format_string=format_string)
-
-    def emit(self, record):
-        self.prepare_record(record)
-        super(ArtsyHandler, self).emit(record)
-
-
 class DiagnosticsHandler(SimpleHandler):
     """
     >>> https://stackoverflow.com/questions/27774093/how-to-manage-logging-in-curses
@@ -82,7 +49,7 @@ class DiagnosticsHandler(SimpleHandler):
     """
 
     def __init__(self, window, filter=None, formatter=None):
-        SimpleHandler.__init__(self, filter=filter, formatter=formatter)
+        super(DiagnosticsHandler, self).__init__(filter=filter, formatter=formatter)
         self.window = window
         self.x = 1
 
@@ -107,13 +74,10 @@ class DiagnosticsHandler(SimpleHandler):
         try:
             msg = self.format(record)
             fs = "\n%s"
-            if not _unicode:  # if no unicode support...
+            try:
                 self.add_lines(fs, msg, code=None)
-            else:
-                try:
-                    self.add_lines(fs, msg, code=None)
-                except UnicodeError:
-                    self.add_lines(fs, msg, code='UTF-8')
+            except UnicodeError:
+                self.add_lines(fs, msg, code='UTF-8')
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception:
@@ -125,6 +89,9 @@ SIMPLE_HANDLERS = [
 ]
 
 
-ARTSY_HANDLERS = [
-    ArtsyHandler(format_string=LOG_FORMAT_STRING),
+TERMX_HANDLERS = [
+    TermxHandler(
+        handler_cls=logging.StreamHandler,
+        format_string=TERMX_FORMAT_STRING
+    ),
 ]

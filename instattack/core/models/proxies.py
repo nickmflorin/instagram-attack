@@ -3,9 +3,6 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from dacite import from_dict
 
-import functools
-import math
-
 import tortoise
 from tortoise import fields
 from tortoise.models import Model
@@ -13,7 +10,7 @@ from tortoise.models import Model
 from instattack.config import constants, config
 from instattack.lib import logger
 
-from instattack.core.exceptions import ConfigError, ProxyMaxTimeoutError
+from instattack.core.exceptions import ProxyMaxTimeoutError
 
 from .evaluation import evaluate
 from .mixins import ProxyMetrics, allow_exception_input

@@ -3,7 +3,6 @@ from .dbtools import *  # noqa
 from .io import *  # noqa
 from .itertools import *  # noqa
 from .paths import *  # noqa
-from .terminal import *  # noqa
 
 
 def filtered_array(*items):

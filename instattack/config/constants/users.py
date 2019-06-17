@@ -1,3 +1,9 @@
+import os
+
+from instattack.ext import get_root
+
+USER_DIR = os.path.join(get_root(), 'users')
+
 INSTAGRAM_USERNAME_FIELD = 'username'
 INSTAGRAM_PASSWORD_FIELD = 'password'
 
@@ -10,7 +16,7 @@ PASSWORDS = "passwords"
 ALTERATIONS = "alterations"
 NUMERICS = "numerics"
 
-FILES = [
+USER_FILES = [
     PASSWORDS,
     ALTERATIONS,
     NUMERICS

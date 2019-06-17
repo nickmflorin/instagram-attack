@@ -4,7 +4,7 @@ import aiohttp
 from instattack.config import config
 from instattack.lib import logger
 
-from instattack.lib.utils import limit_as_completed, spin, cancel_remaining_tasks
+from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
 from instattack.core.exceptions import TokenNotFound, PoolNoProxyError
 from instattack.core.proxies import SmartProxyManager, ManagedProxyPool
@@ -126,12 +126,12 @@ class AbstractLoginHandler(AbstractRequestHandler):
         await super(AbstractLoginHandler, self).finish()
 
         if config['login']['attempts']['save_method'] == 'end':
-            with spin(f"Saving {len(self.attempts_to_save)} Attempts"):
-                tasks = [
-                    self.user.create_or_update_attempt(att[0], success=att[1])
-                    for att in self.attempts_to_save
-                ]
-                await asyncio.gather(*tasks)
+            log.info(f"Saving {len(self.attempts_to_save)} Attempts")
+            tasks = [
+                self.user.create_or_update_attempt(att[0], success=att[1])
+                for att in self.attempts_to_save
+            ]
+            await asyncio.gather(*tasks)
 
 
 class LoginHandler(AbstractLoginHandler):

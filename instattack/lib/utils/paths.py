@@ -2,18 +2,25 @@ from plumbum.path import LocalPath
 import os
 import site
 
+from instattack import __NAME__
 from instattack.config import constants
+from instattack.ext import get_app_root
 
 
 def relative_to_root(path):
-
+    """
+    [x] TODO:
+    --------
+    Deprecate use of plumbum.path.LocalPath and start incorporating pathlib
+    more consistently.
+    """
     if not isinstance(path, LocalPath):
         path = LocalPath(path)
 
     # This only happens for the test.py file...  We should remove this conditional
     # when we do not need that functionality anymore.
-    if constants.APP_NAME in path.parts:
-        ind = path.parts.index(constants.APP_NAME)
+    if __NAME__ in path.parts:
+        ind = path.parts.index(__NAME__)
         parts = path.parts[ind:]
         path = LocalPath(*parts)
 
@@ -26,7 +33,8 @@ def task_is_third_party(task):
     sure that we are not raising exceptions for external tasks.
     """
     directory = get_task_path(task)
-    return not directory.startswith(constants.APP_DIR)
+    app_dir = get_app_root()
+    return not directory.startswith(app_dir)
 
 
 def get_coro_path(coro):
@@ -38,6 +46,12 @@ def get_task_path(task):
 
 
 def path_up_until(path, piece, as_string=True):
+    """
+    [x] TODO:
+    --------
+    Deprecate use of plumbum.path.LocalPath and start incorporating pathlib
+    more consistently.
+    """
     if not isinstance(path, LocalPath):
         path = LocalPath(path)
 
@@ -53,6 +67,12 @@ def path_up_until(path, piece, as_string=True):
 
 
 def is_log_file(path):
+    """
+    [x] TODO:
+    --------
+    Deprecate use of plumbum.path.LocalPath and start incorporating pathlib
+    more consistently.
+    """
     pt = LocalPath(path)
     if 'logger' in pt.parts:
         log_file_path = path_up_until(path, 'logger')
@@ -70,6 +90,7 @@ def is_site_package_file(path):
 
 
 def is_app_file(path):
-    if path.startswith(constants.APP_PATH):
+    app_dir = get_app_root()
+    if path.startswith(app_dir):
         return True
     return False

@@ -1,7 +1,7 @@
 import aiohttp
 import asyncio
 
-from termx import progress
+from termx.ext.utils import progress
 
 from instattack.config import config
 from instattack.lib import logger

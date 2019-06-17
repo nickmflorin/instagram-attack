@@ -1,12 +1,13 @@
 import logging
+import inspect
+import os
 import sys
 import traceback
 
 from instattack.config import constants
 
-from .mixins import LoggerMixin
-from .handlers import SIMPLE_HANDLERS, ARTSY_HANDLERS, DiagnosticsHandler
-from .formats import LOG_FORMAT_STRING, SIMPLE_FORMAT_STRING
+from .handlers import SIMPLE_HANDLERS, TERMX_HANDLERS, DiagnosticsHandler
+from .formats import TERMX_FORMAT_STRING, SIMPLE_FORMAT_STRING
 
 
 _enabled = True
@@ -29,11 +30,6 @@ class DisableLogger():
 
     def __exit__(self, a, b, c):
         enable()
-
-
-for level in constants.LoggingLevels:
-    if level.name not in logging._levelToName.keys():
-        logging.addLevelName(level.num, level.name)
 
 
 def get(name, subname=None):
@@ -68,7 +64,7 @@ def disable_external_loggers(*args):
         external_logger.setLevel(logging.CRITICAL)
 
 
-class SimpleLogger(LoggerMixin, logging.Logger):
+class SimpleLogger(logging.Logger):
 
     __handlers__ = SIMPLE_HANDLERS
 
@@ -96,10 +92,50 @@ class SimpleLogger(LoggerMixin, logging.Logger):
         sys.stderr.write("\n")
         traceback.print_exception(*exc_info, limit=None, file=sys.stderr)
 
+    def findCaller(self, *args):
+        """
+        Find the stack frame of the caller so that we can note the source
+        file name, line number and function name.
 
-class ArtsyLogger(SimpleLogger):
+        Overridden to exclude our logging module files.
+        """
+        from instattack.lib.utils import (
+            is_log_file, is_site_package_file, is_app_file)
 
-    __handlers__ = ARTSY_HANDLERS
+        f = inspect.currentframe()
+        rv = "(unknown file)", 0, "(unknown function)"
+        while hasattr(f, "f_code"):
+            co = f.f_code
+            filename = os.path.normcase(co.co_filename)
+
+            if filename == logging._srcfile:
+                f = f.f_back
+                continue
+
+            # TODO: Keep looking until file is inside app_root.
+            elif is_log_file(filename):
+                f = f.f_back
+                continue
+
+            elif is_site_package_file(filename):
+                f = f.f_back
+                continue
+
+            elif not is_app_file(filename):
+                f = f.f_back
+                continue
+
+            # We automatically set sininfo to None since we do not know where
+            # that is coming from and the original method expects a 4-tuple to
+            # return.
+            rv = (co.co_filename, f.f_lineno, co.co_name, None)
+            break
+        return rv
+
+
+class TermxLogger(SimpleLogger):
+
+    __handlers__ = TERMX_HANDLERS
 
 
 class DiagnosticsLogger(SimpleLogger):
@@ -124,7 +160,7 @@ class DiagnosticsLogger(SimpleLogger):
 
 loggers = {
     'diagnostics': DiagnosticsLogger,
-    'artsy': ArtsyLogger,
+    'termx': TermxLogger,
     'simple': SimpleLogger
 }
 
