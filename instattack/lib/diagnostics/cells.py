@@ -35,6 +35,90 @@ def round_value(value):
         return int(value)
 
 
+def find_optimal_size(screen, grid):
+    """
+    Since we use relative integer values to specify the relative width of
+    columns to their siblings and relative height of rows to their siblings,
+    the larger interval sizes of the terminal (rows, columns) are not small
+    like pixels, and rounding float results of calculating widths and heights
+    based on the relative ratio can sometimes lead to results that draw outside
+    the screen bounds by very minimal amounts, but still enough to cause an error.
+
+    In order to alleviate that, we want to find the largest optimal size that
+    is not greater than the screen size that accomodates the relative size
+    ratios with the least amount of rounding.
+
+    Given Screen with Size (height=H, width=W)
+
+    Consider (3) rows with values rh as follows:
+        >>> [1, 2, 3]
+
+    Then, the row heights will be:
+        >>> [ (1/6) H, (2/6) H, (3/6) H ]
+
+    To avoid any rounding, we would want to find the largest value H` such that
+    H` <= H and H` % 6 == 0.
+
+    This becomes more complicated for nesting...
+
+    Consider a Tree Like the Following:
+
+        R1: rh = 1
+        R2: rh = 2
+            C1: rw = 2
+            C2: rw = 2
+        R3: rh = 4
+            C1: rw = 1
+            C2: rw = 3
+                R1: rh = 5
+                R2: rh = 1
+
+
+    To ensure we have integer results for the relative row heights, we would
+    need to find the largest H` such that H` is can be divided into integer
+    value heights for all rows and their sub-rows.
+
+    First, we have the top level:
+        >>> [(1/7), (2/7), (4/7)]
+
+    However, the last Row, R3 (4/7) is split into [(1/6), (5/6)], which we also want
+    to divide evenly. The easiest way find this value is to find the value H`
+    such that H` < H and H` is divisible by both 7 and 6*7 = 42, or just 42.
+
+    [x] NOTE:
+    --------
+    For the above, there maybe numbers H that are divisble by 7 where (4/7) * H
+    is also divisible by 6, but H is not divisible by 42.  This might lead to
+    better results, but would be complicated to find, so we will stick to the simpler
+    solution.
+
+    [!] IMPORTANT:
+    -------------
+    Also, ideally we want numbers to be even, so that padding values of 1 and 2
+    which would be common would work.
+
+    Again, this is not a perfect solution, but will be OK for the time being.
+    It is still important to avoid using relative sizes that are complicated
+    or narrow/small.
+    """
+
+    # For now, we will limit how many levels deep we go to avoid complication,
+    # but eventually might want to make this recursive.
+    def get_for_obj(obj):
+        rh_values = []
+        for row in obj.rows:
+            rh_values.append(row._rh)
+
+            if row.columns:
+                for col in row.columns:
+                    nested_rh_values = get_for_obj(col)
+                    rh_values.append(nested_rh_values)
+        return rh_values
+
+
+    return get_for_obj(grid)
+
+
 @dataclass
 class IntegeredMixin:
 
@@ -239,20 +323,6 @@ class Column(Cell):
 
         Ratios: [0.125, 0.25, 0.375]
         """
-        """
-        [x] NOTE:
-        -------
-        There are a lot of problems with roundign to integers and the wide spaces
-        used as intervals (columns/rows).  A rounded value can very easily cause
-        the border to extend past the screen a tiny bit which makes curses complain.
-
-        What we should do is find an optimal width and height based on the screen
-        height and width that is less than the total area of the screen.  A height
-        and width that is divisble by some interval, maybe evenly divisible by
-        the total _rh and _rw value.  Then, we will get better results, with
-        extra spacing in the window that we don't need to worry about.
-        """
-        raise Exception('Above Note')
         width_ratio = self._rw / (self._rw + sum([sib._rw for sib in self.siblings]))
         return width_ratio
         # We are going to do more rounding earlier rather than later to minimize
