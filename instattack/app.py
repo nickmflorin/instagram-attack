@@ -2,7 +2,9 @@
 import asyncio
 import sys
 
+from blinker import signal
 from cement import App
+import threading
 
 from termx import Formats, Spinner
 from termx.ext.utils import break_before
@@ -17,6 +19,7 @@ from .hooks import loop_exception_hook, setup, shutdown
 
 
 log = logger.get(__name__)
+diagnostics = signal('diagnostics')
 
 
 class AppMixin(object):
@@ -161,8 +164,13 @@ class Instattack(App, AppMixin):
             })
 
     def run_diagnostics(self):
-        self.loop.run_until_complete(run_diagnostics())
-        # self.loop.run_forever()
+        thread = threading.Thread(target=run_diagnostics)
+        thread.start()
+
+        import time
+        time.sleep(2)
+        diagnostics.send({'dialog': 'logging', 'data': 'Message Bitch'})
+        thread.join()
 
     def __enter__(self):
         """

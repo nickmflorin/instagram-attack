@@ -1,34 +1,43 @@
 import curses
 from curses import panel
+import threading
 
 from instattack.lib import logger
-from .colors import colors
+
 from .pairs import Pairs
 
 
 class Dialog(object):
 
-    def __init__(self, blueprint):
+    window = None
+    parent = None
 
+    def __init__(self, blueprint, on_exit, stop_event, border=None):
+        """
+        [x] NOTE:
+        ---------
+        We can also access the screen from self.blueprint.parent, but this is
+        likely going to get more complex so we will still pass in.
+        """
         self.pairs = Pairs()
 
-        # [x] NOTE: We can also access the screen from self.blueprint.parent,
-        # but this is likely going to get more complex so we will still pass in.
         self.blueprint = blueprint
+        self.border = border
+        self.exit = on_exit
 
-        self.window = None
-        self.parent = None
+        self.stop_event = stop_event
 
-    def draw(self, border=False):
+    def draw(self):
         self.window = self.blueprint.draw()
+        self.outline()
+        self.label()
         self.window.refresh()
-        if border:
-            self.box()
 
-    def box(self):
-        self.window.attron(self.pairs[colors.black, colors.transparent])
-        self.window.box()
-        self.window.attroff(self.pairs[colors.black, colors.transparent])
+    def outline(self):
+        if self.border:
+            self.window.attron(self.border)
+            self.window.box()
+            self.window.attroff(self.border)
 
     def __getattr__(self, name):
         if hasattr(self.window, name):
@@ -59,27 +68,32 @@ class Dialog(object):
         available_height = int(h - 2.0 * self.y)
         return int(self.yratio * available_height)
 
+    def label(self):
+        self.window.addstr(2, 2, self.__LABEL__)
+
 
 class LogDialog(Dialog):
 
-    def draw(self, border=False):
-        super(MenuDialog, self).draw(border=border)
+    __LABEL__ = "Logging"
 
-        # Enable Keypad Use - We might not want to do this for the LogDialog
-        self.window.keypad(1)
+    def draw(self):
+        super(LogDialog, self).draw()
 
+        # Note: Not Enabling Keypad Yet
         self.window.scrollok(True)
         self.window.idlok(True)
         self.window.leaveok(True)
 
         logger.configure_diagnostics(self.window)
 
-        # Do We Need This Anymore?
-        self.panel = panel.new_panel(self.window)
-        self.panel.hide()
-        panel.update_panels()
+    def dispatch(self, event):
+        data = event.get('data')
+        self.window.addstr(5, 5, data)
 
-    def display(self):
+        self.stop_event.set()
+        self.exit()
+
+    def start(self):
         """
         [x] NOTE:
         --------
@@ -87,34 +101,84 @@ class LogDialog(Dialog):
         into the LogDialog use.  We probably don't need to do this the same way
         anymore, and most likely don't need panels anymore.
         """
-        self.panel.top()
-        self.panel.show()
-
-        # Will Clear Border
-        self.window.clear()
-
-        while True:
-            self.window.refresh()
-            curses.doupdate()
-            curses.napms(400)
-
-        self.window.clear()
-        self.panel.hide()
-        panel.update_panels()
-        curses.doupdate()
+        # self.panel.top()
+        # self.panel.show()
+        count = 0
+        while not self.stop_event.is_set():
+            if self.stop_event.is_set():
+                self.window.addstr('Stopping')
+            elif count == 100:
+                break
+            else:
+                self.window.addstr(count + 5, 5, "TEST")
+                curses.napms(400)
+                self.window.refresh()
+                count += 1
 
 
-class MenuDialog(Dialog):
+class DebugLogDialog(LogDialog):
 
-    def __init__(self, blueprint, items):
-        super(MenuDialog, self).__init__(blueprint)
+    __LABEL__ = "Debug Logging"
+
+    def draw(self):
+        super(DebugLogDialog, self).draw()
+
+        # Note: Not Enabling Keypad Yet
+        self.window.scrollok(True)
+        self.window.idlok(True)
+        self.window.leaveok(True)
+
+        logger.configure_diagnostics(self.window)
+
+    def dispatch(self, event):
+        data = event.get('data')
+        self.window.addstr(5, 5, data)
+
+        self.stop_event.set()
+        self.exit()
+
+    def start(self):
+        """
+        [x] NOTE:
+        --------
+        This was taken when we were using the original MenuDialog to transform
+        into the LogDialog use.  We probably don't need to do this the same way
+        anymore, and most likely don't need panels anymore.
+        """
+        # self.panel.top()
+        # self.panel.show()
+        count = 0
+        while not self.stop_event.is_set():
+            if self.stop_event.is_set():
+                self.window.addstr('Stopping')
+            elif count == 100:
+                break
+            else:
+                self.window.addstr(count + 5, 5, "TEST")
+                curses.napms(400)
+                self.window.refresh()
+                count += 1
+
+
+class AnalyticsDialog(Dialog):
+
+    __LABEL__ = "Analytics"
+
+    main_menu_items = [
+        ('beep', curses.beep),
+        ('flash', curses.flash),
+        # ('submenu', submenu.display)
+    ]
+
+    def __init__(self, blueprint, on_exit, stop_event, border=None):
+        super(AnalyticsDialog, self).__init__(blueprint, on_exit, stop_event, border=border)
 
         self.position = 0
-        self.items = items
+        self.items = self.main_menu_items[:]
         self.items.append(('exit', 'exit'))
 
-    def draw(self, border=False):
-        super(MenuDialog, self).draw(border=border)
+    def draw(self):
+        super(AnalyticsDialog, self).draw()
 
         # Enable Keypad Use
         self.window.keypad(1)
@@ -124,6 +188,13 @@ class MenuDialog(Dialog):
         self.panel.hide()
         panel.update_panels()
 
+    def dispatch(self, event):
+        data = event.get('data')
+        self.window.addstr(5, 5, data)
+
+    def notify(self, event):
+        self.window.addstr(5, 5, event)
+
     def navigate(self, n):
         self.position += n
         if self.position < 0:
@@ -131,12 +202,12 @@ class MenuDialog(Dialog):
         elif self.position >= len(self.items):
             self.position = len(self.items) - 1
 
-    def display(self):
+    def start(self):
         self.panel.top()
         self.panel.show()
         # self.window.clear()
 
-        while True:
+        while not self.stop_event.is_set():
             self.window.refresh()
             curses.doupdate()
             for index, item in enumerate(self.items):
@@ -163,6 +234,7 @@ class MenuDialog(Dialog):
                 self.navigate(1)
 
         # self.window.clear()
-        # self.panel.hide()
+        self.panel.hide()
         panel.update_panels()
         curses.doupdate()
+        self.exit()

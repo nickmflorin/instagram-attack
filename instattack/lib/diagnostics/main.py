@@ -1,9 +1,14 @@
 import curses
+import threading
+from blinker import signal
 
 from .colors import colors
 from .pairs import Pairs
 from .blueprint import BluePrint
-from .dialogs import MenuDialog, LogDialog
+from .dialogs import AnalyticsDialog, LogDialog, DebugLogDialog
+
+
+diagnostics = signal('diagnostics')
 
 
 """
@@ -25,67 +30,110 @@ from .dialogs import MenuDialog, LogDialog
     https://docs.python.org/3.3/library/curses.html#curses.endwin
 """
 
+global screen
+
 
 class Diagnostics(object):
-    """
-    A good example of creating a curses menu.  Potentially useful in the
-    future.
-    """
 
-    def __init__(self, stdscreen):
-        self.general_setup()
-        self.screen = stdscreen
+    def __init__(self, stdscreen, on_exit, stop_event):
 
         self.pairs = Pairs()
+        self.blueprints = {}
 
-        self.screen.attron(self.pairs[colors.black, colors.transparent])
-        self.screen.box()
-        self.screen.attroff(self.pairs[colors.black, colors.transparent])
+        self.exit = on_exit
+        self.stop_event = stop_event
 
-        blueprint1 = BluePrint(w=0.5, h=0.5, parent=self.screen, x=1, y=1)
         # Here, w is a ratio of the leftover space, but we want to eventually
         # allow to specify leftover space OR total horizontal space.
-        blueprint2 = blueprint1.duplicate_right(padding=1, w=1.0)
-        self.blueprints = [blueprint1, blueprint2]
+        self.blueprints['analytics'] = BluePrint(w=0.5, h=0.5, parent=screen, x=1, y=1)
+        self.blueprints['logging'] = BluePrint(w=0.5, h=0.5, parent=screen, x=self.blueprints['analytics'].x2 + 1, y=1)
+        self.blueprints['debug'] = BluePrint(w=1.0, h=0.5, parent=screen, x=1, y=self.blueprints['logging'].y2 + 1)
 
-        self.start_log()
-        self.start_menu()
-        self.screen.refresh()
+        self.dialogs = {
+            'analytics': AnalyticsDialog(
+                blueprint=self.blueprints['analytics'],
+                on_exit=self.exit,
+                stop_event=self.stop_event,
+                border=self.pairs[colors.black, colors.transparent]
+            ),
+            'logging': LogDialog(
+                blueprint=self.blueprints['logging'],
+                on_exit=self.exit,
+                stop_event=self.stop_event,
+                border=self.pairs[colors.black, colors.transparent]
+            ),
+            'debug': DebugLogDialog(
+                blueprint=self.blueprints['debug'],
+                on_exit=self.exit,
+                stop_event=self.stop_event,
+                border=self.pairs[colors.black, colors.transparent]
+            )
+        }
 
-    def start_log(self):
+    def draw(self):
+        self.dialogs['analytics'].draw()
+        self.dialogs['logging'].draw()
+        self.dialogs['debug'].draw()
 
-        window = LogDialog(self.blueprints[1], self.screen)
-        window.draw(border=True)
-        window.refresh()
+        global screen
+        screen.refresh()
 
-    def start_menu(self):
-        # submenu_items = [
-        #     ('beep', curses.beep),
-        #     ('flash', curses.flash)
-        # ]
-        main_menu_items = [
-            ('beep', curses.beep),
-            ('flash', curses.flash),
-            # ('submenu', submenu.display)
-        ]
+    def dispatch(self, event):
+        dialog = event.get('dialog')
+        if not dialog:
+            self.exit()
+            raise RuntimeError('Dialog Must be Provided')
+        self.dialogs[dialog].dispatch(event)
 
-        main_menu = MenuDialog(self.blueprints[0], self.screen, main_menu_items)
-        main_menu.draw(border=True)
-        main_menu.display()
+    def start(self):
+        thread = threading.Thread(target=self.dialogs['logging'].start)
+        thread.start()
+        thread.join()
 
-    @staticmethod
-    def general_setup():
-        # Disable Keypress Echo to Prevent Double Input
-        curses.noecho()
 
-        # Disable Line Buffers to Run Keypress Immediately
-        curses.cbreak()
-        curses.start_color()
-        curses.use_default_colors()
+def prepare_curses():
+
+    # Initialize Global Screen Object
+    global screen
+    screen = curses.initscr()
+
+    # Disable Keypress Echo to Prevent Double Input
+    curses.noecho()
+
+    # Disable Line Buffers to Run Keypress Immediately
+    curses.cbreak()
+    screen.keypad(True)
+
+    curses.start_color()
+    curses.use_default_colors()
+
+
+def end_curses(stop_event):
+
+    def _end_curses():
+        global screen
+
+        if screen is None:
+            raise RuntimeError('Screen not initialized.')
+
+        # End Curses Style Terminal
+        curses.nocbreak()
+        screen.keypad(False)
+        curses.echo()
 
         # Restores Terminal to Normal Operating Mode
-        # curses.endwin()
+        curses.endwin()
+    return _end_curses
 
 
 def run_diagnostics():
-    curses.wrapper(Diagnostics)
+
+    prepare_curses()
+
+    stop_event = threading.Event()
+
+    d = Diagnostics(screen, stop_event=stop_event, on_exit=end_curses(stop_event))
+    diagnostics.connect(d.dispatch)
+
+    d.draw()
+    d.start()

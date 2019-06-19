@@ -1,7 +1,5 @@
 # -*- encoding: utf-8 -*-
-
-from .palette import closest_color
-from .utils import is_native_windows
+from .utils import is_native_windows, closest_color
 
 
 UNIX_COLORS = {
