@@ -107,15 +107,61 @@ def find_optimal_size(screen, grid):
     def get_for_obj(obj):
         rh_values = []
         for row in obj.rows:
-            rh_values.append(row._rh)
-
-            if row.columns:
+            if not row.columns:
+                rh_values.append((row._rh, ))
+            else:
+                div_by = []
                 for col in row.columns:
-                    nested_rh_values = get_for_obj(col)
-                    rh_values.append(nested_rh_values)
+                    if col.rows:
+                        div_by.extend(get_for_obj(col))
+
+                # All Columns Have No Rows
+                if len(div_by) == 0:
+                    rh_values.append((row._rh, ))
+                else:
+                    rh_values.append((row._rh, div_by))
         return rh_values
 
+    # This will output something like:
+    # [(2,), (4, [(2,), (3,), (5, [(1,), (1,), (1,)]), (1,)]), (4,)]
+    # because of nested recursion.  For readability, we want to flatten this to:
+    # [2, (4, [2, 3, (5, [1, 1, 1]), 1], 4]
+    # Then eventually:
+    # [2, (4, [2, 3, (5, [1]), 1]), 4]
+    # [2, (4, [1, 2, 3, (5, [1])])]
+    # Removing 1s
+    # [2, (4, [2, 3, 5])]
+    # Divisible by 2, 2 * 4 * 2, 2 * 4 * 3, 2 * 4 * 5
+    # >>> [2, 16, 24, 40]
+    # >>> [8, 12, 20]
+    # >>>
+    # >>> [2, 3, 5]
 
+    # IMPORTANT:
+    # We can probably get to the answer more easily by multiplying at the
+    # lower levels and then working our way up:
+
+    """
+    [2, 4, 4]
+        |
+        [2, 3, 5, 1]
+               |
+              [1, 1, 1]
+
+    to
+
+    [2, 4, 4]
+        |
+        [2, 3, 5, 1]
+
+    to
+
+    [2, 8, 12, 20, 4, 4]
+    = [2, 4, 8, 12, 20]
+    = [1, 2, 4, 6, 10]
+    = [1, 2, 3, 5]
+    = [2, 3, 5] => Largest H` such that H < H` and H divisible by these
+    """
     return get_for_obj(grid)
 
 
