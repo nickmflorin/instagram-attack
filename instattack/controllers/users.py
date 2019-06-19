@@ -180,8 +180,8 @@ class UserController(InstattackController, UserInterface):
             if not self.proceed(message):
                 return
 
-        self.app.run_diagnostics()
-        return
+        if self.app.pargs.diagnostics:
+            self.app.run_diagnostics()
 
         login = LoginHandler(self.loop)
         result = self.loop.run_until_complete(login.login(self.app.pargs.password))

@@ -5,4 +5,4 @@ from .users import *  # noqa
 from .passwords import *  # noqa
 
 DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
-LOGGER_MODE = 'diagnostics'
+DEFAULT_LOGGER_MODE = 'termx'

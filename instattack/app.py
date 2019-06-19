@@ -22,25 +22,7 @@ log = logger.get(__name__)
 diagnostics = signal('diagnostics')
 
 
-class AppMixin(object):
-
-    @break_before
-    def success(self, text):
-        sys.stdout.write("%s\n" % Formats.SUCCESS(text))
-
-    @break_before
-    def failure(self, e, exit_code=1, traceback=True):
-        sys.stdout.write("%s\n" % Formats.ERROR(str(e)))
-
-        self.exit_code = exit_code
-
-        # We might not want to do this for all errors - argument errors or things
-        # that are more expected we don't need to provide the traceback.
-        if self.debug is True or traceback:
-            log.traceback(e.__class__, e, e.__traceback__)
-
-
-class Instattack(App, AppMixin):
+class Instattack(App):
 
     class Meta:
         label = 'instattack'
@@ -73,6 +55,21 @@ class Instattack(App, AppMixin):
 
         # We do not specify this since we have to do it manually anyways.
         # arguments_override_config = True
+
+    @break_before
+    def success(self, text):
+        sys.stdout.write("%s\n" % Formats.SUCCESS(text))
+
+    @break_before
+    def failure(self, e, exit_code=1, traceback=True):
+        sys.stdout.write("%s\n" % Formats.ERROR(str(e)))
+
+        self.exit_code = exit_code
+
+        # We might not want to do this for all errors - argument errors or things
+        # that are more expected we don't need to provide the traceback.
+        if self.debug is True or traceback:
+            log.traceback(e.__class__, e, e.__traceback__)
 
     def setup(self, group):
         """
@@ -122,6 +119,17 @@ class Instattack(App, AppMixin):
         Validates the configuration against a Cerberus schema.  If the configuration
         is valid, it will be set to the global config object in its dictionary
         form.
+
+        [x] TODO:
+        --------
+        Start validating the config schema again.
+        >>> config.validate(data, set=False)
+
+        [x] NOTE
+        -------
+        Since we are not using the Cement logger, we have to set the level
+        manually.  The base controller also has an argument for logging level,
+        which will override the level from config if specified.
         """
         with self.spinner.reenter('Validating Config') as grandchild:
             super(Instattack, self).validate_config()
@@ -131,12 +139,10 @@ class Instattack(App, AppMixin):
                 'label': True,
             })
 
-            # config.validate(data, set=False)
             config.set(data)
 
-            # Since we are not using the Cement logger, we have to set this
-            # manually.
-            logger.configure(config)
+            level = config['instattack']['log.logging']['level']
+            logger.configure(level=level)
 
     def setup_loop(self, child):
         """

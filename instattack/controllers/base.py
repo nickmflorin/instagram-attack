@@ -42,14 +42,26 @@ class Base(InstattackController, UserInterface):
              dict(version=VERSION_BANNER, action='version')),
             (['-l', '--level'],
              dict(help='Override the Logging Level', action='store')),
-            (['-re', '--request_errors'],
+            (['--simple'],
+             dict(help='Set the logging mode to simple.', action='store_true')),
+            (['--diagnostics'],
+             dict(help='Run diagnostics mode.', action='store_true')),
+            (['--request_errors'],
              dict(help='Log Request Errors', action='store_true')),
         ]
 
     def _post_argument_parsing(self):
-        if self.app.pargs.level is not None:
-            logger.setLevel(self.app.pargs.level)
-        config.override_with_args(self.app.pargs._get_kwargs())
+        """
+        Override the logging level if provided and set the logging class if
+        the logging mode is one other than the default.
+        """
+        mode = None
+        if self.app.pargs.diagnostics:
+            mode = 'diagnostics'
+        elif self.app.pargs.simple:
+            mode = 'simple'
+
+        logger.configure(mode=mode, level=self.app.pargs.level)
 
     def _default(self):
         """
