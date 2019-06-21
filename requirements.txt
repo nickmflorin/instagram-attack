@@ -15,6 +15,8 @@ atomicwrites==1.3.0
 attrs==19.1.0
 backcall==0.1.0
 beautifulsoup4==4.7.1
+blessed==1.15.0
+blinker==1.4
 bs4==0.0.1
 cement==3.0.4
 Cerberus==1.3.1
@@ -27,8 +29,10 @@ colorlog==4.0.2
 dacite==0.0.26
 databases==0.2.2
 decorator==4.4.0
+emoji==0.5.2
 idna==2.8
 importlib-metadata==0.17
+-e git+git@github.com:nickmflorin/instagram-attack.git@c5b3face414d75dce587e5d8ad92e236efd9a995#egg=instattack
 ipdb==0.12
 ipython==7.5.0
 ipython-genutils==0.2.0
@@ -64,11 +68,13 @@ pytest-asyncio==0.10.0
 python-dotenv==0.10.1
 python-utils==2.3.0
 PyYAML==5.1
+readchar==2.0.1
 requests==2.21.0
 six==1.12.0
 soupsieve==1.9.1
 SQLAlchemy==1.3.3
 stopit==1.1.2
+termx==0.0.2.dev20190619012750
 tortoise-orm==0.11.10
 traitlets==4.3.2
 urllib3==1.24.3

@@ -2,8 +2,10 @@ from datetime import datetime
 import logging
 
 from termx import Formats, Colors
-from termx.logging import DynamicLines, Segment, Line, Lines, Header, Label, LogFormat
+from termx.library import relative_to_app_root
+from termx.logging import DynamicLines, Segment, Line, Lines, Label, LogFormat
 
+from instattack import __NAME__
 from instattack.config import constants
 
 
@@ -30,20 +32,29 @@ def get_record_time(record):
     return datetime.now().strftime(constants.DATE_FORMAT)
 
 
+def get_path_name(record):
+    return relative_to_app_root(record.pathname, __NAME__)
+
+
 def get_level_formatter():
     def _level_formatter(record):
         level_name = record.levelname.upper()
-        return getattr(Formats, level_name)
+        fmt = getattr(Formats, level_name)
+        return fmt.without_icon()
     return _level_formatter
 
 
 def get_level_color(record):
-    return record.level.colors[0]
+    level_name = record.levelname.upper()
+    fmt = getattr(Formats, level_name)
+    return fmt.apply_color
 
 
 def get_message_formatter(record):
-    if record.level.name not in ['DEBUG', 'WARNING']:
-        return record.level.without_text_decoration().without_wrapper()
+    level_name = record.levelname.upper()
+    if level_name not in ['DEBUG', 'INFO']:
+        fmt = getattr(Formats, level_name)
+        return fmt
     return Formats.TEXT.NORMAL
 
 
@@ -88,6 +99,10 @@ PRIMARY_LINE = Lines(
         Segment(
             fmt=Formats.TEXT.FADED.new_with(wrapper="[%s]"),
             value=get_record_time,
+        ),
+        Segment(
+            fmt=get_level_formatter(),
+            attrs='levelname',
         ),
         Segment(
             attrs="name",
@@ -197,15 +212,15 @@ CONTEXT_LINES = Lines(
 TRACEBACK_LINE = Lines(
     Line(
         Segment(
-            attrs=["frame.filename", "pathname"],
+            value=get_path_name,
             fmt=Formats.TEXT.EXTRA_LIGHT,
         ),
         Segment(
-            attrs=["frame.function", "funcName"],
+            attrs=["funcName"],
             fmt=Formats.TEXT.EXTRA_LIGHT,
         ),
         Segment(
-            attrs=["frame.lineno", "lineno"],
+            attrs=["lineno"],
             fmt=Formats.TEXT.LIGHT,
         ),
         decoration={
@@ -231,16 +246,6 @@ TERMX_FORMAT_STRING = LogFormat(
     }),
     CONTEXT_LINES,
     TRACEBACK_LINE,
-    header=Header(
-        char="-",
-        length=25,
-        color=get_level_color,
-        label=Label(
-            attrs='level.name',
-            fmt=get_level_formatter(),
-            delimiter=None,
-        ),
-    ),
     width=140,
     lines_above=0,
     lines_below=1,

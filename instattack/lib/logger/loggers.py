@@ -19,8 +19,8 @@ class SimpleLogger(logging.Logger):
             self.addHandler(handler)
 
     def _log(self, *args, **kwargs):
-        from . import _enabled
-        if _enabled:
+        from instattack.lib import logger
+        if logger.enabled:
             return super(SimpleLogger, self)._log(*args, **kwargs)
 
     def traceback(self, *exc_info):

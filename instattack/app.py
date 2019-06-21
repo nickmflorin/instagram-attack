@@ -18,8 +18,8 @@ from .controllers.base import Base, UserController, ProxyController
 from .hooks import loop_exception_hook, setup, shutdown
 
 
-log = logger.get(__name__)
 diagnostics = signal('diagnostics')
+log = logger.get(__name__)
 
 
 class Instattack(App):
@@ -131,18 +131,17 @@ class Instattack(App):
         manually.  The base controller also has an argument for logging level,
         which will override the level from config if specified.
         """
-        with self.spinner.reenter('Validating Config') as grandchild:
-            super(Instattack, self).validate_config()
-            data = self.config.get_dict()
+        # with self.spinner.reenter('Validating Config') as grandchild:
+        super(Instattack, self).validate_config()
+        data = self.config.get_dict()
 
-            grandchild.warning('Not Currently Validating Schema', fatal=False, options={
-                'label': True,
-            })
+        # grandchild.warning('Not Currently Validating Schema', fatal=False, options={
+        #     'label': True,
+        # })
+        config.set(data)
 
-            config.set(data)
-
-            level = config['instattack']['log.logging']['level']
-            logger.configure(level=level)
+        level = config['instattack']['log.logging']['level']
+        logger.configure(level=level)
 
     def setup_loop(self, child):
         """
