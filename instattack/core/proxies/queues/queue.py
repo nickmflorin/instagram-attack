@@ -1,8 +1,9 @@
 import asyncio
 import collections
 
+from instattack import settings
+
 from instattack.lib import logger
-from instattack.config import config
 
 from instattack.core.exceptions import ProxyPoolError, QueueEmpty
 from instattack.core.proxies.interfaces import ProxyQueueInterface
@@ -24,7 +25,7 @@ class ProxyQueue(asyncio.Queue, ProxyQueueInterface):
         proxy.queue_id = self.__queueid__
 
         if not self.validate_for_queue(proxy):
-            if config['instattack']['log.logging']['log_proxy_queue']:
+            if settings.logging.log_proxy_queue:
                 self.log.debug(f'Cannot Put Proxy in {self.__NAME__}', extra={
                     'proxy': proxy
                 })
@@ -33,7 +34,7 @@ class ProxyQueue(asyncio.Queue, ProxyQueueInterface):
         self.raise_for_queue(proxy)
 
         if not prepopulation:
-            if config['instattack']['log.logging']['log_proxy_queue']:
+            if settings.logging.log_proxy_queue:
                 self.log.debug(f'Putting Proxy in {self.__NAME__}', extra={
                     'proxy': proxy
                 })
@@ -205,7 +206,7 @@ class ConfirmedQueue(ProxyQueue):
             if count == MAX_CONFIRMED_PROXIES - 1:
                 await self.remove(proxy)
 
-                if config['instattack']['log.logging']['log_proxy_queue']:
+                if settings.logging.log_proxy_queue:
                     self.log.debug(f'Returning & Removing Proxy from {self.__NAME__}', extra={
                         'data': {
                             'Times Used': f"{self.times_used[proxy.id] or 0} (Last Allowed)",
@@ -214,7 +215,7 @@ class ConfirmedQueue(ProxyQueue):
                         'proxy': proxy,
                     })
             else:
-                if config['instattack']['log.logging']['log_proxy_queue']:
+                if settings.logging.log_proxy_queue:
                     self.log.debug(f'Returning Proxy from {self.__NAME__}', extra={
                         'data': {
                             'Times Used': self.times_used[proxy.id] or 0,
@@ -233,7 +234,7 @@ class ConfirmedQueue(ProxyQueue):
         await self.remove(proxy)
         await self.hold.put(proxy)
 
-        if config['instattack']['log.logging']['log_proxy_queue']:
+        if settings.logging.log_proxy_queue:
             self.log.debug(
                 f'Moving Proxy from {self.__NAME__} to {self.hold.__NAME__}',
                 extra={
@@ -341,7 +342,7 @@ class HoldQueue(ProxyQueue):
         await self.remove(proxy)
         await self.confirmed.put(proxy)
 
-        if config['instattack']['log.logging']['log_proxy_queue']:
+        if settings.logging.log_proxy_queue:
             self.log.debug(
                 f'Moving Proxy from {self.__NAME__} to {self.confirmed.__NAME__}',
                 extra={
@@ -357,7 +358,7 @@ class HoldQueue(ProxyQueue):
         await self.remove(proxy)
         await self.pool.put(proxy)
 
-        if config['instattack']['log.logging']['log_proxy_queue']:
+        if settings.logging.log_proxy_queue:
             self.log.debug(
                 f'Moving Proxy from {self.__NAME__} to {self.pool.__NAME__}',
                 extra={

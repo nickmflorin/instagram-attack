@@ -6,10 +6,11 @@ from blinker import signal
 from cement import App
 import threading
 
-from termx import Formats, Spinner
-from termx.ext.utils import break_before
+from instattack import settings
 
-from instattack.config import config
+from termx.config import config
+from termx.spinner import Spinner
+from termx.ext.utils import break_before
 
 from instattack.lib import logger
 from instattack.lib.diagnostics import run_diagnostics
@@ -28,11 +29,11 @@ class Instattack(App):
         label = 'instattack'
 
         # Default configuration dictionary.
-        config_section = config.__CONFIG_SECTION__
-        config_dirs = config.__CONFIG_DIRS__
-        config_files = config.__CONFIG_FILES__
-        config_handler = config.__CONFIG_HANDLER__
-        config_file_suffix = config.__CONFIG_FILE_SUFFIX__
+        config_section = settings.CONFIG_SECTION
+        config_dirs = settings.CONFIG_DIRS
+        config_files = settings.CONFIG_FILES
+        config_handler = settings.CONFIG_HANDLER
+        config_file_suffix = settings.CONFIG_FILE_SUFFIX
 
         config_defaults = {
             'connection': {},
@@ -43,9 +44,9 @@ class Instattack(App):
             'proxies': {}
         }
 
-        exit_on_close = config.__EXIT_ON_CLOSE__  # Call sys.exit() on Close
-        extensions = config.__EXTENSIONS__
-        output_handler = config.__OUTPUT_HANDLER__
+        exit_on_close = settings.EXIT_ON_CLOSE  # Call sys.exit() on Close
+        extensions = settings.EXTENSIONS
+        output_handler = settings.OUTPUT_HANDLER
 
         handlers = [
             Base,
@@ -134,14 +135,11 @@ class Instattack(App):
         # with self.spinner.reenter('Validating Config') as grandchild:
         super(Instattack, self).validate_config()
         data = self.config.get_dict()
+        config(data)
 
         # grandchild.warning('Not Currently Validating Schema', fatal=False, options={
         #     'label': True,
         # })
-        config.set(data)
-
-        level = config['instattack']['log.logging']['level']
-        logger.configure(level=level)
 
     def setup_loop(self, child):
         """
@@ -159,7 +157,7 @@ class Instattack(App):
             grandchild.warning('Exit Signals Not Attached to Loop', fatal=False, options={
                 'label': True,
             })
-            for s in config.__SIGNALS__:
+            for s in settings.SIGNALS:
                 self.loop.add_signal_handler(s, _shutdown)
 
             grandchild.write('Attaching Exception Handler')

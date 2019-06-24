@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from dacite import from_dict
 import typing
 
-from termx import Formats
+from instattack import settings
+from termx.config import config
 
-from instattack.config import constants
 from instattack.core.exceptions import InstattackError
 
 from .proxies import Proxy
@@ -43,12 +43,12 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return Formats.SUCCESS(string_rep)
+            return config.Formats.SUCCESS(string_rep)
         elif self.not_authorized:
-            return Formats.ERROR(string_rep)
+            return config.Formats.ERROR(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
-            return Formats.NOTSET(string_rep)
+            return config.Formats.NOTSET(string_rep)
 
     @classmethod
     def from_dict(cls, data, proxy=None, password=None):
@@ -67,7 +67,7 @@ class InstagramResult:
         # it is safer to associate the entire set of variable values that
         # should be returned by the request with a state of the result.
         # Checkpoint URL is the only thing that would vary
-        return self.message == constants.CHECKPOINT_REQUIRED
+        return self.message == settings.CHECKPOINT_REQUIRED
 
     @property
     def authorized(self):
@@ -105,8 +105,8 @@ class InstagramResult:
 
     @property
     def has_generic_request_error(self):
-        if self.errors == InstagramResultErrors(error=[constants.GENERIC_REQUEST_MESSAGE]):
-            if self.error_type == constants.GENERIC_REQUEST_ERROR:
+        if self.errors == InstagramResultErrors(error=[settings.GENERIC_REQUEST_MESSAGE]):
+            if self.error_type == settings.GENERIC_REQUEST_ERROR:
                 return True
         return False
 

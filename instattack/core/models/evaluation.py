@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 from typing import List, Any
 
+from instattack import settings
 from termx.ext.utils import humanize_list
-
-from instattack.config import config
 
 
 @dataclass
@@ -44,7 +43,7 @@ class ProxyEvaluation:
 
 def evaluate_errors(proxy):
 
-    errors = config['proxies']['pool']['limits'].get('errors', {})
+    errors = settings.proxies.pool.limits.get('errors', {})
     evaluations = ProxyEvaluation(reasons=[])
 
     max_params = [
@@ -88,7 +87,7 @@ def evaluate_errors(proxy):
 def evaluate_requests(proxy):
 
     evaluations = ProxyEvaluation(reasons=[])
-    requests = config['proxies']['pool']['limits'].get('requests', {})
+    requests = settings.proxies.pool.limits.get('requests', {})
 
     max_params = [
         ('all', (None, ), ),
@@ -150,7 +149,7 @@ def evaluate_requests(proxy):
 def evaluate_error_rate(proxy):
 
     evaluations = ProxyEvaluation(reasons=[])
-    limits = config['proxies']['pool']['limits']
+    limits = settings.proxies.pool.limits
 
     if limits.get('error_rate'):
         config_error_rate = limits['error_rate']
@@ -195,7 +194,7 @@ def evaluate(proxy):
     """
 
     evaluations = ProxyEvaluation(reasons=[])
-    limits = config['proxies']['pool']['limits']
+    limits = settings.proxies.pool.limits
 
     request_eval = evaluate_requests(proxy)
     errors_eval = evaluate_errors(proxy)

@@ -4,7 +4,8 @@ import asyncio
 import aiohttp
 import aiojobs
 
-from instattack.config import config
+from instattack import settings
+
 from instattack.lib import logger
 from instattack.core.exceptions import translate_error
 
@@ -68,15 +69,15 @@ class AbstractRequestHandler(Handler):
             loop=self.loop,
             ssl=False,
             force_close=True,
-            limit=config['connection']['connection_limit'],
-            limit_per_host=config['connection']['limit_per_host'],
+            limit=settings.connection.connection_limit,
+            limit_per_host=settings.connection.limit_per_host,
             enable_cleanup_closed=True,
         )
 
     @property
     def timeout(self):
         return aiohttp.ClientTimeout(
-            total=config['connection']['connection_timeout']
+            total=settings.connection.connection_timeout
         )
 
     async def save_proxy(self, proxy):
@@ -90,7 +91,7 @@ class AbstractRequestHandler(Handler):
         Figure out a way to guarantee that this always gets run even if we hit
         some type of error.
         """
-        if config['proxies']['save_method'] == 'live':
+        if settings.proxies.save_method == 'live':
             if len(self.saved_proxies) != 0:
                 # Still Use Context Manager Just for Style Purposes - Need Another
                 # Solution to Keep Things Consistent
@@ -114,7 +115,7 @@ class AbstractRequestHandler(Handler):
 
         await self.proxy_manager.on_proxy_error(proxy, err)
 
-        if config['proxies']['save_method'] == 'live':
+        if settings.proxies.save_method == 'live':
             await self.schedule_task(proxy.save())
         else:
             # Do we need to find and replace here?
@@ -125,7 +126,7 @@ class AbstractRequestHandler(Handler):
 
         await self.proxy_manager.on_proxy_success(proxy)
 
-        if config['proxies']['save_method'] == 'live':
+        if settings.proxies.save_method == 'live':
             await self.schedule_task(self.save_proxy(proxy))
         else:
             # Do we need to find and replace here?

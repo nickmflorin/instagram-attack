@@ -1,6 +1,7 @@
 from collections import Counter
 
-from instattack.config import config
+from instattack import settings
+
 from instattack.lib import logger
 from instattack.lib.utils import join
 
@@ -68,7 +69,7 @@ class password_gen(abstract_password_gen):
 
     def __init__(self, *args, **kwargs):
         super(password_gen, self).__init__(*args, **kwargs)
-        if config['login']['passwords']['generator']['numerics']['birthday']['provided']:
+        if settings.login.passwords.generator.numerics.birthday.provided:
             if self.user.birthday:
                 autogenerate_birthdays(self.user, self.numerics)
 

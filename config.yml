@@ -1,4 +1,5 @@
 ### Instattack Configuration Settings
+### TODO: Turn Into Python File
 
 instattack:
     debug: true

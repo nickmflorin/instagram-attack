@@ -3,7 +3,6 @@ import aiohttp
 
 from termx.ext.utils import percentage
 
-from instattack.config import config
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 

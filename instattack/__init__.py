@@ -1,4 +1,13 @@
-__VERSION__ = (0, 0, 1, 'alpha', 0)
+"""
+[!] VERY IMPORTANT
+-----------------
+Defining the simple_settings lazily will ensure that we are not mixing them with
+other packages that we use in tandem.
 
-__NAME__ = 'instattack'
-__FORMAL_NAME__ = __NAME__.title()
+>>> from instattack import settings
+
+instead of
+
+>>> from simple_settings import settings
+"""
+from .config import settings  # noqa

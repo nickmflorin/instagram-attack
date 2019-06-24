@@ -3,7 +3,8 @@ import asyncio
 
 from termx.ext.utils import progress
 
-from instattack.config import config
+from instattack import settings
+
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed
 
@@ -86,7 +87,7 @@ class TrainHandler(AbstractRequestHandler):
         ) as session:
 
             gen = self.generate_attempts_for_proxies(session)
-            async for fut in limit_as_completed(gen, batch_size=config['proxies']['train']['batch_size']):  # noqa
+            async for fut in limit_as_completed(gen, batch_size=settings.proxies.train.batch_size):  # noqa
                 if fut.exception():
                     raise fut.exception()
 

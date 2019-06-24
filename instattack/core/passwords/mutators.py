@@ -1,6 +1,5 @@
 from itertools import product
-
-from instattack.config import constants, config
+from instattack import settings
 
 from .utils import (
     find_indices_with_char, mutate_char_at_index, flatten_replacements,
@@ -11,7 +10,7 @@ class mutator(object):
 
     def __init__(self, base):
         self.base = base
-        self.Config = config['login']['passwords']['generator']
+        self.Config = settings.login.passwords.generator
         self.generated = []
 
     def __call__(self, *args):
@@ -87,7 +86,7 @@ class char_mutator(mutator):
     """
 
     def base_generator(self):
-        for char, new_chars in constants.COMMON_CHAR_REPLACEMENTS.items():
+        for char, new_chars in settings.COMMON_CHAR_REPLACEMENTS.items():
             altered = self.replace_character(char, new_chars)
             for alteration in altered:
                 yield alteration

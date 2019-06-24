@@ -7,7 +7,7 @@ import tortoise
 from tortoise import fields
 from tortoise.models import Model
 
-from instattack.config import constants, config
+from instattack import settings
 from instattack.lib import logger
 
 from instattack.core.exceptions import ProxyMaxTimeoutError
@@ -41,7 +41,7 @@ class ProxyRequest:
     @property
     def was_timeout_error(self):
         if self.error is not None:
-            if self.error in constants.TIMEOUT_ERRORS:
+            if self.error in settings.TIMEOUT_ERRORS:
                 return True
         return False
 
@@ -93,19 +93,19 @@ class Proxy(Model, ProxyMetrics):
         self.active_history = []
         self.queue_id = None
 
-        timeout_config = config['proxies']['pool']['timeouts']
+        timeout_config = settings.proxies.pool.timeout
         self._timeouts = {
             'too_many_requests': {
-                'start': timeout_config['too_many_requests']['start'],
+                'start': timeout_config.too_many_requests.start,
                 'count': 0,
-                'increment': timeout_config['too_many_requests']['increment'],
-                'max': timeout_config['too_many_requests']['max'],
+                'increment': timeout_config.too_many_requests.increment,
+                'max': timeout_config.too_many_requests.max,
             },
             'too_many_open_connections': {
-                'start': timeout_config['too_many_open_connections']['start'],
+                'start': timeout_config.too_many_open_connections.start,
                 'count': 0,
-                'increment': timeout_config['too_many_requests']['increment'],
-                'max': timeout_config['too_many_open_connections']['max'],
+                'increment': timeout_config.too_many_requests.increment,
+                'max': timeout_config.too_many_open_connections.max,
             },
         }
 
@@ -138,7 +138,7 @@ class Proxy(Model, ProxyMetrics):
         self._timeouts[err]['count'] = 0
 
     def reset_timeouts(self):
-        for err in constants.TIMEOUT_ERRORS:
+        for err in settings.TIMEOUT_ERRORS:
             self.reset_timeout(err)
 
     @allow_exception_input
@@ -189,7 +189,7 @@ class Proxy(Model, ProxyMetrics):
         Should we allow whether or not we are looking at active or historical
         horizons to be specified in config?
         """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        confirmed_config = settings.proxies.pool.get('confirmation', {})
 
         # Should We Set Defaults for These?
         threshold = confirmed_config.get('threshold')
@@ -267,10 +267,10 @@ class Proxy(Model, ProxyMetrics):
     def translate_proxybroker_history(cls, broker_proxy):
         errors = []
         for err, count in broker_proxy.stat['errors'].__dict__.items():
-            if err in constants.PROXY_BROKER_ERROR_TRANSLATION:
+            if err in settings.PROXY_BROKER_ERROR_TRANSLATION:
                 for i in range(count):
                     errors.append(ProxyResult(
-                        error=constants.PROXY_BROKER_ERROR_TRANSLATION[err]))
+                        error=settings.PROXY_BROKER_ERROR_TRANSLATION[err]))
             else:
                 log.warning(f'Unexpected Proxy Broker Error: {err}.')
         return errors

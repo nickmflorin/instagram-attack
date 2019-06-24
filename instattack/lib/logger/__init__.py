@@ -1,7 +1,7 @@
 import contextlib
 import logging
 
-from instattack.config import constants
+from instattack import settings
 
 from .loggers import SimpleLogger, TermxLogger, DiagnosticsLogger
 from .handlers import DiagnosticsHandler
@@ -19,7 +19,7 @@ class _Logger(dict):
     def __init__(self, data):
         super(_Logger, self).__init__(data)
         self.enabled = True
-        self.configure(mode=constants.DEFAULT_LOGGER_MODE)
+        self.configure(mode=settings.logging.default_mode)
 
     def get(self, name, subname=None):
         logger = logging.getLogger(name=name)

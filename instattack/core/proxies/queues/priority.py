@@ -1,8 +1,9 @@
 import asyncio
 import itertools
 
+from instattack import settings
+
 from instattack.lib import logger
-from instattack.config import config
 
 from instattack.core.exceptions import PoolNoProxyError
 from instattack.core.proxies.interfaces import ProxyQueueInterface
@@ -26,7 +27,7 @@ class ProxyPriorityQueue(asyncio.PriorityQueue, ProxyQueueInterface):
         # tie-breaker so that two tasks with the same priority are returned in
         # the order they were added.
         self.proxy_counter = itertools.count()
-        self.timeout = config['proxies']['pool']['pool_timeout']
+        self.timeout = settings.proxies.pool.pool_timeout
 
     async def contains(self, proxy):
         return proxy in [item[1] for item in self._queue]
@@ -124,7 +125,7 @@ class ManagedProxyPool(SimpleProxyPool):
             else:
                 # Do not log during prepopulation.
                 if not prepopulation:
-                    if config['instattack']['log.logging']['log_proxy_queue']:
+                    if settings.logging.log_proxy_queue:
                         self.log.debug(f'Cannot Add Proxy to {self.__NAME__}', extra={
                             'other': str(evaluation)
                         })

@@ -2,7 +2,8 @@ import asyncio
 import contextlib
 from proxybroker import Broker
 
-from instattack.config import constants, config
+from instattack import settings
+
 from instattack.lib import logger
 from instattack.core.models import Proxy
 
@@ -30,14 +31,14 @@ class ProxyBroker(Broker):
         self._stopped = False
         self._started = False
 
-        self.limit = int(limit or config['proxies']['broker'].get('limit', 10000))
+        self.limit = int(limit or settings.proxies.broker.get('limit', 10000))
         self._proxies = asyncio.Queue()
 
         super(ProxyBroker, self).__init__(
             self._proxies,
-            max_tries=config['proxies']['broker']['broker_max_tries'],
-            max_conn=config['proxies']['broker']['broker_max_conn'],
-            timeout=config['proxies']['broker']['broker_timeout'],
+            max_tries=settings.proxies.broker.broker_max_tries,
+            max_conn=settings.proxies.broker.broker_max_conn,
+            timeout=settings.proxies.broker.broker_timeout,
             verify_ssl=False,
         )
 
@@ -64,8 +65,8 @@ class ProxyBroker(Broker):
         await self.find(
             limit=self.limit,
             post=True,
-            countries=constants.PROXY_COUNTRIES,
-            types=constants.PROXY_TYPES,  # HTTP Only
+            countries=settings.PROXY_COUNTRIES,
+            types=settings.PROXY_TYPES,  # HTTP Only
         )
 
     async def collect(self, save=False):

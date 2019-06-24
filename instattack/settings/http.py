@@ -21,6 +21,13 @@ HEADER = {
     "User-Agent": USERAGENT,
 }
 
+# Only Configurable One Here
+CONNECTION = {
+    'LIMIT_PER_HOST': 0,
+    'CONNECTION_TIMEOUT': 14,
+    'CONNECTION_LIMIT': 0
+}
+
 
 def HEADERS(token=None):
     headers = HEADER.copy()

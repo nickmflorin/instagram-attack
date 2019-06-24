@@ -1,7 +1,8 @@
 import asyncio
 import re
 
-from instattack.config import constants, config
+from instattack import settings
+
 from instattack.lib import logger
 
 from instattack.core.models import InstagramResult
@@ -49,12 +50,12 @@ class train_client(client):
         'test_field_1': 'test_value_1',
         'test_field_2': 'test_value_2'
     }
-    HEADERS = constants.HEADERS()
+    HEADERS = settings.HEADERS()
 
     def post(self, session, proxy):
         return super(train_client, self).post(
             session=session,
-            url=constants.TEST_POST_URL,
+            url=settings.TEST_POST_URL,
             proxy=proxy,
             headers=self.HEADERS,
             data=self.DATA
@@ -95,14 +96,14 @@ class instagram_client(client):
     def post(self, session, password, proxy, token):
 
         data = {
-            constants.INSTAGRAM_USERNAME_FIELD: self.user.username,
-            constants.INSTAGRAM_PASSWORD_FIELD: password
+            settings.INSTAGRAM_USERNAME_FIELD: self.user.username,
+            settings.INSTAGRAM_PASSWORD_FIELD: password
         }
-        headers = constants.HEADERS(token)
+        headers = settings.HEADERS(token)
 
         return super(instagram_client, self).post(
             session=session,
-            url=constants.INSTAGRAM_LOGIN_URL,
+            url=settings.INSTAGRAM_LOGIN_URL,
             proxy=proxy,
             headers=headers,
             data=data,
@@ -113,7 +114,7 @@ class instagram_client(client):
         Sends a basic request to the INSTAGRAM home URL in order to parse the
         response and get the cookies and token.
         """
-        async with session.get(constants.INSTAGRAM_URL) as response:
+        async with session.get(settings.INSTAGRAM_URL) as response:
             text = await response.text()
             token = re.search(r'(?<="csrf_token":")\w+', text).group(0)
         return token, response.cookies

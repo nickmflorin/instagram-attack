@@ -1,5 +1,4 @@
-from instattack.config import config
-
+from instattack import settings
 from .utils import capitalize_at_indices, all_combinations
 
 
@@ -7,7 +6,7 @@ class mutator_v2(object):
 
     def __init__(self, spec):
         self.spec = spec
-        self.Config = config['login']['passwords']['generator']
+        self.Config = settings.login.passwords.generator
         self.generated = []
 
     def safe_yield(self, iterable):

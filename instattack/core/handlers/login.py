@@ -1,7 +1,8 @@
 import asyncio
 import aiohttp
 
-from instattack.config import config
+from instattack import settings
+
 from instattack.lib import logger
 
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
@@ -82,7 +83,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
 
         # Stop Event: Notifies limit_as_completed to stop creating additional tasks
         # so that we can cancel the leftover ones.
-        batch_size = config['login']['attempts']['attempts_batch_size']
+        batch_size = settings.login.attempts.attempts_batch_size
 
         def stop_callback(fut, pending, num_tries):
             if fut.exception():
@@ -106,7 +107,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
                 return result, num_tries
 
     async def handle_attempt(self, result):
-        if config['login']['attempts']['save_method'] == 'live':
+        if settings.login.attempts.save_method == 'live':
             task = self.user.create_or_update_attempt(
                 result.password,
                 success=result.authorized
@@ -125,7 +126,7 @@ class AbstractLoginHandler(AbstractRequestHandler):
         """
         await super(AbstractLoginHandler, self).finish()
 
-        if config['login']['attempts']['save_method'] == 'end':
+        if settings.login.attempts.save_method == 'end':
             log.info(f"Saving {len(self.attempts_to_save)} Attempts")
             tasks = [
                 self.user.create_or_update_attempt(att[0], success=att[1])

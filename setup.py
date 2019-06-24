@@ -1,18 +1,31 @@
 from setuptools import setup, find_packages
-from instattack import __NAME__, __FORMAL_NAME__
-from instattack.config import config
+import os
 
+"""
+[x] NOTE:
+--------
+Once any import from instattack is performed, simple_settings are lazily initialized
+with the `INSTATTACK_SIMPLE_SETTINGS` ENV variable.  If `INSTATTACK_SIMPLE_SETTINGS`
+is not set, it uses `dev` by default.
 
-VERSION = config.version()
+This means that if we want to use another settings file, we have to specify the
+ENV variable before any import from instattack is performed.
+"""
+
+os.environ['INSTATTACK_SIMPLE_SETTINGS'] = 'prod'
+
+from instattack import settings  # noqa
+# from termx.library import get_version  # noqa
+
 
 f = open('README.md', 'r')
 LONG_DESCRIPTION = f.read()
 f.close()
 
 setup(
-    name=__NAME__,
-    version=VERSION,
-    description=__FORMAL_NAME__,
+    name=settings.NAME,
+    version="0.0.2.dev20190622074230",
+    description=settings.FORMAL_NAME,
     long_description=LONG_DESCRIPTION,
     long_description_content_type='text/markdown',
     author='Nick Florin',
@@ -25,8 +38,8 @@ setup(
     entry_points="""
         [console_scripts]
         instattack = instattack.main:instattack
-        playground = instattack.main:playground
-        clean = instattack.ext.scripts:clean
-        cleanroot = instattack.ext.scripts:clean_root
+        playground = instattack.main:run_playground
+        clean = instattack.main:clean
+        cleanroot = instattack.main:cleanroot
     """,
 )

@@ -2,8 +2,8 @@
 import functools
 
 from termx.ext.utils import humanize_list
+from instattack import settings
 
-from instattack.config import config
 from instattack.core.exceptions import ConfigError
 
 
@@ -140,7 +140,7 @@ class ErrorMetrics(object):
         The sufficicent number of requests that are required for thte error-rate
         to be a non-zero value.
         """
-        err_rate = config['proxies']['pool']['limits'].get('error_rate', {})
+        err_rate = settings.proxies.pool.limits.get('error_rate', {})
         return err_rate.get('horizon')
 
     def last_error(self, active=False):
@@ -150,7 +150,7 @@ class ErrorMetrics(object):
         """
         Returns the number of errored requests in the last `horizon` requests.
         """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        confirmed_config = settings.proxies.pool.get('confirmation', {})
         horizon = horizon or confirmed_config.get('horizon')
         if not horizon:
             raise ConfigError("Horizon Not Specified in Config")
@@ -165,7 +165,7 @@ class ConfirmedMetrics(object):
         """
         Returns the number of confirmed requests in the last `horizon` requests.
         """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        confirmed_config = settings.proxies.pool.get('confirmation', {})
         horizon = horizon or confirmed_config.get('horizon')
         if not horizon:
             raise ConfigError("Horizon Not Specified in Config")
@@ -178,7 +178,7 @@ class ConfirmedMetrics(object):
         Returns True if the proxy has a certain number of confirmations in the
         `horizon` most recent requests.
         """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        confirmed_config = settings.proxies.pool.get('confirmation', {})
         horizon = horizon or confirmed_config.get('horizon')
         if not horizon:
             raise ConfigError("Horizon Not Specified in Config")
@@ -191,7 +191,7 @@ class ConfirmedMetrics(object):
         Returns True if the proxy has a certain number of confirmations in it's
         history.
         """
-        confirmed_config = config['proxies']['pool'].get('confirmation', {})
+        confirmed_config = settings.proxies.pool.get('confirmation', {})
         threshold = threshold or confirmed_config.get('threshold')
         if not threshold:
             raise ConfigError("Threshold Not Specified in Config")
@@ -346,7 +346,7 @@ class ProxyMetrics(
         the same and priority will be given to proxies placed first.
         """
         PROXY_PRIORITY_VALUES = []
-        raw_priority_values = config['proxies']['pool']['priority']
+        raw_priority_values = settings.proxies.pool.priority
 
         for priority in raw_priority_values:
             multiplier = int(priority[0])

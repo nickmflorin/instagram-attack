@@ -2,7 +2,7 @@ import asyncio
 from cement import ex
 import sys
 
-from instattack.config import constants
+from instattack import settings
 
 from instattack.core.models import User
 from instattack.core.handlers import LoginHandler
@@ -218,11 +218,11 @@ class UserController(InstattackController, UserInterface):
             if not user.directory.exists():
                 user.initialize_directory()
 
-        directory = constants.USER_PATH
+        directory = settings.USER_PATH
         for user_dir in directory.iterdir():
             if user_dir.is_file():
                 print_action(user_dir.name, 'Deleting File')
-                print_action('Deleting File', label=user_dir.name, directory=constants.USER_PATH)
+                print_action('Deleting File', label=user_dir.name, directory=settings.USER_PATH)
                 if not self.app.pargs.safe:
                     user_dir.delete()
             else:
@@ -255,7 +255,7 @@ class UserController(InstattackController, UserInterface):
                                     other.delete()
                             else:
                                 other_name = other.name.split('.txt')[0]
-                                if other_name not in constants.FILES:
+                                if other_name not in settings.FILES:
                                     print_action(
                                         f"Deleting Invalid File",
                                         label=other.name,

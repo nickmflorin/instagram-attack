@@ -1,7 +1,8 @@
 import asyncio
 
+from instattack import settings
+
 from instattack.lib import logger
-from instattack.config import config
 
 from instattack.core.exceptions import ProxyPoolError, ProxyMaxTimeoutError
 from instattack.core.models.proxies import ProxyRequest, Proxy
@@ -70,7 +71,7 @@ class SimpleProxyManager(ProxyManagerInterface):
         on the proxy model, and we do not need to put the proxy back in the
         pool, or a designated pool.
         """
-        if config['instattack']['log.logging']['log_request_errors']:
+        if settings.logging.log_request_errors:
             self.log.error(exc, extra={'proxy': proxy})
 
         req = ProxyRequest(
@@ -160,7 +161,7 @@ class BrokeredProxyManager(SimpleProxyManager):
         """
         await super(BrokeredProxyManager, self).start(limit=limit, confirmed=confirmed)
 
-        if config['proxies']['pool']['collect']:
+        if settings.proxies.pool.collect:
             # Pool will set start event when it starts collecting proxies.
             await self.pool.collect()
         else:

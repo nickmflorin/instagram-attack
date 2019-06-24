@@ -6,7 +6,8 @@ from tortoise import fields
 from tortoise.models import Model
 from tortoise.exceptions import OperationalError, DoesNotExist
 
-from instattack.config import constants
+from instattack import settings
+
 from instattack.lib import logger
 from instattack.lib.utils import stream_raw_data, read_raw_data
 
@@ -47,7 +48,7 @@ class User(Model):
     date_created = fields.DatetimeField(auto_now_add=True)
     birthday = fields.DatetimeField(null=True)
 
-    FILES = constants.USER_FILES
+    FILES = settings.USER_FILES
 
     class Meta:
         unique_together = ('username', )
@@ -98,7 +99,7 @@ class User(Model):
 
     @property
     def directory(self):
-        path = os.path.join(constants.USER_DIR, self.username)
+        path = os.path.join(settings.USER_DIR, self.username)
         return LocalPath(path)
 
     def file_path(self, filename):
@@ -149,24 +150,24 @@ class User(Model):
         return read_raw_data(filepath, limit=limit)
 
     def get_passwords(self, limit=None):
-        return self.read_data(constants.PASSWORDS, limit=limit)
+        return self.read_data(settings.PASSWORDS, limit=limit)
 
     def get_alterations(self, limit=None):
-        return self.read_data(constants.ALTERATIONS, limit=limit)
+        return self.read_data(settings.ALTERATIONS, limit=limit)
 
     def get_numerics(self, limit=None):
-        return self.read_data(constants.NUMERICS, limit=limit)
+        return self.read_data(settings.NUMERICS, limit=limit)
 
     async def stream_passwords(self, limit=None):
-        async for item in self.stream_data(constants.PASSWORDS, limit=limit):
+        async for item in self.stream_data(settings.PASSWORDS, limit=limit):
             yield item
 
     async def stream_alterations(self, limit=None):
-        async for item in self.stream_data(constants.ALTERATIONS, limit=limit):
+        async for item in self.stream_data(settings.ALTERATIONS, limit=limit):
             yield item
 
     async def stream_numerics(self, limit=None):
-        async for item in self.stream_data(constants.NUMERICS, limit=limit):
+        async for item in self.stream_data(settings.NUMERICS, limit=limit):
             yield item
 
     async def was_authenticated(self):
@@ -224,11 +225,11 @@ class User(Model):
                 await attempt.save()
 
         except OperationalError:
-            if try_attempt <= constants.USER_MAX_SAVE_ATTEMPT_TRIES:
+            if try_attempt <= settings.USER_MAX_SAVE_ATTEMPT_TRIES:
                 log.warning('Unable to Access Database...', extra={
-                    'other': f'Sleeping for {constants.USER_SLEEP_ON_SAVE_FAIL} Seconds.'
+                    'other': f'Sleeping for {settings.USER_SLEEP_ON_SAVE_FAIL} Seconds.'
                 })
-                await asyncio.sleep(constants.USER_SLEEP_ON_SAVE_FAIL)
+                await asyncio.sleep(settings.USER_SLEEP_ON_SAVE_FAIL)
                 await self.create_or_update_attempt(
                     attempt,
                     success=success,

@@ -1,12 +1,11 @@
 from datetime import datetime
 import logging
 
-from termx import Formats, Colors
+from instattack import settings
+
+from termx import settings as config
 from termx.library import relative_to_app_root
 from termx.logging import DynamicLines, Segment, Line, Lines, Label, LogFormat
-
-from instattack import __NAME__
-from instattack.config import constants
 
 
 def get_record_message(record):
@@ -29,33 +28,33 @@ def get_record_status_code(record):
 
 
 def get_record_time(record):
-    return datetime.now().strftime(constants.DATE_FORMAT)
+    return datetime.now().strftime(settings.DATE_FORMAT)
 
 
 def get_path_name(record):
-    return relative_to_app_root(record.pathname, __NAME__)
+    return relative_to_app_root(record.pathname, settings.NAME)
 
 
 def get_level_formatter():
     def _level_formatter(record):
         level_name = record.levelname.upper()
-        fmt = getattr(Formats, level_name)
+        fmt = getattr(config.Formats, level_name)
         return fmt.without_icon()
     return _level_formatter
 
 
 def get_level_color(record):
     level_name = record.levelname.upper()
-    fmt = getattr(Formats, level_name)
+    fmt = getattr(config.Formats, level_name)
     return fmt.apply_color
 
 
 def get_message_formatter(record):
     level_name = record.levelname.upper()
     if level_name not in ['DEBUG', 'INFO']:
-        fmt = getattr(Formats, level_name)
+        fmt = getattr(config.Formats, level_name)
         return fmt
-    return Formats.TEXT.NORMAL
+    return config.Text.NORMAL
 
 
 SIMPLE_FORMAT_STRING = logging.Formatter(
@@ -71,7 +70,7 @@ MESSAGE_LINES = Lines(
         ),
         decoration={
             'prefix': {
-                'fmt': Formats.TEXT.LIGHT,
+                'fmt': config.Text.LIGHT,
                 'char': ">",
             }
         }
@@ -79,11 +78,11 @@ MESSAGE_LINES = Lines(
     Line(
         Segment(
             attrs="other",
-            fmt=Formats.TEXT.MEDIUM,
+            fmt=config.Text.MEDIUM,
         ),
         decoration={
             'prefix': {
-                'fmt': Formats.TEXT.LIGHT,
+                'fmt': config.Text.LIGHT,
                 'char': ">",
             }
         }
@@ -97,7 +96,7 @@ MESSAGE_LINES = Lines(
 PRIMARY_LINE = Lines(
     Line(
         Segment(
-            fmt=Formats.TEXT.FADED.new_with(wrapper="[%s]"),
+            fmt=config.Text.FADED.copy(wrapper="[%s]"),
             value=get_record_time,
         ),
         Segment(
@@ -106,11 +105,11 @@ PRIMARY_LINE = Lines(
         ),
         Segment(
             attrs="name",
-            fmt=Formats.TEXT.EMPHASIS,
+            fmt=config.Text.EMPHASIS,
         ),
         Segment(
             attrs="subname",
-            fmt=Formats.TEXT.PRIMARY.new_with(styles=['bold']),
+            fmt=config.Text.PRIMARY.copy(styles=['bold']),
         ),
     ),
 )
@@ -128,16 +127,16 @@ class DynamicContext(DynamicLines):
         return Line(
             Segment(
                 value=val,
-                color=Colors.LIGHT_RED,
+                color=config.Colors.LIGHT_RED,
                 label=Label(
                     value=key,
-                    fmt=Formats.TEXT.LIGHT,
+                    fmt=config.Text.LIGHT,
                     delimiter=':',
                 ),
             ),
             decoration={
                 'prefix': {
-                    'fmt': Formats.TEXT.LIGHT,
+                    'fmt': config.Text.LIGHT,
                     'char': ">",
                 }
             }
@@ -153,16 +152,16 @@ CONTEXT_LINES = Lines(
     Line(
         Segment(
             value=get_record_status_code,
-            color=Colors.LIGHT_RED,
+            color=config.Colors.LIGHT_RED,
             label=Label(
                 value="Status Code",
-                fmt=Formats.TEXT.LIGHT,
+                fmt=config.Text.LIGHT,
                 delimiter=':',
             ),
         ),
         decoration={
             'prefix': {
-                'fmt': Formats.TEXT.LIGHT,
+                'fmt': config.Text.LIGHT,
                 'char': ">",
             }
         }
@@ -170,16 +169,16 @@ CONTEXT_LINES = Lines(
     Line(
         Segment(
             attrs='password',
-            color=Colors.LIGHT_RED,
+            color=config.Colors.LIGHT_RED,
             label=Label(
                 value="Password",
                 delimiter=":",
-                fmt=Formats.TEXT.LIGHT,
+                fmt=config.Text.LIGHT,
             )
         ),
         decoration={
             'prefix': {
-                'fmt': Formats.TEXT.LIGHT,
+                'fmt': config.Text.LIGHT,
                 'char': ">",
             }
         }
@@ -187,16 +186,16 @@ CONTEXT_LINES = Lines(
     Line(
         Segment(
             attrs='proxy.url',
-            color=Colors.LIGHT_GREEN,
+            color=config.Colors.LIGHT_GREEN,
             label=Label(
                 value="Proxy",
-                fmt=Formats.TEXT.LIGHT,
+                fmt=config.Text.LIGHT,
                 delimiter=':',
             ),
         ),
         decoration={
             'prefix': {
-                'fmt': Formats.TEXT.LIGHT,
+                'fmt': config.Text.LIGHT,
                 'char': ">",
             }
         }
@@ -213,15 +212,15 @@ TRACEBACK_LINE = Lines(
     Line(
         Segment(
             value=get_path_name,
-            fmt=Formats.TEXT.EXTRA_LIGHT,
+            fmt=config.Text.EXTRA_LIGHT,
         ),
         Segment(
             attrs=["funcName"],
-            fmt=Formats.TEXT.EXTRA_LIGHT,
+            fmt=config.Text.EXTRA_LIGHT,
         ),
         Segment(
             attrs=["lineno"],
-            fmt=Formats.TEXT.LIGHT,
+            fmt=config.Text.LIGHT,
         ),
         decoration={
             'prefix': {
