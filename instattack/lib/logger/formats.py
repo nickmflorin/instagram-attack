@@ -5,7 +5,7 @@ from instattack import settings
 
 from termx import settings as config
 from termx.library import relative_to_app_root
-from termx.logging import DynamicLines, Segment, Line, Lines, Label, LogFormat
+from termx.logging import components
 
 
 def get_record_message(record):
@@ -62,9 +62,9 @@ SIMPLE_FORMAT_STRING = logging.Formatter(
 )
 
 
-MESSAGE_LINES = Lines(
-    Line(
-        Segment(
+MESSAGE_LINES = components.Lines(
+    components.Line(
+        components.Segment(
             value=get_record_message,
             fmt=get_message_formatter,
         ),
@@ -75,8 +75,8 @@ MESSAGE_LINES = Lines(
             }
         }
     ),
-    Line(
-        Segment(
+    components.Line(
+        components.Segment(
             attrs="other",
             fmt=config.Text.MEDIUM,
         ),
@@ -93,21 +93,21 @@ MESSAGE_LINES = Lines(
 )
 
 
-PRIMARY_LINE = Lines(
-    Line(
-        Segment(
+PRIMARY_LINE = components.Lines(
+    components.Line(
+        components.Segment(
             fmt=config.Text.FADED.copy(wrapper="[%s]"),
             value=get_record_time,
         ),
-        Segment(
+        components.Segment(
             fmt=get_level_formatter(),
             attrs='levelname',
         ),
-        Segment(
+        components.Segment(
             attrs="name",
             fmt=config.Text.EMPHASIS,
         ),
-        Segment(
+        components.Segment(
             attrs="subname",
             fmt=config.Text.PRIMARY.copy(styles=['bold']),
         ),
@@ -115,7 +115,7 @@ PRIMARY_LINE = Lines(
 )
 
 
-class DynamicContext(DynamicLines):
+class DynamicContext(components.DynamicLines):
     """
     [x] TODO:
     ---------
@@ -124,11 +124,11 @@ class DynamicContext(DynamicLines):
     """
 
     def dynamic_child(self, key, val):
-        return Line(
-            Segment(
+        return components.Line(
+            components.Segment(
                 value=val,
                 color=config.Colors.LIGHT_RED,
-                label=Label(
+                label=components.Label(
                     value=key,
                     fmt=config.Text.LIGHT,
                     delimiter=':',
@@ -148,12 +148,12 @@ class DynamicContext(DynamicLines):
                 yield self.dynamic_child(key, val)
 
 
-CONTEXT_LINES = Lines(
-    Line(
-        Segment(
+CONTEXT_LINES = components.Lines(
+    components.Line(
+        components.Segment(
             value=get_record_status_code,
             color=config.Colors.LIGHT_RED,
-            label=Label(
+            label=components.Label(
                 value="Status Code",
                 fmt=config.Text.LIGHT,
                 delimiter=':',
@@ -166,11 +166,11 @@ CONTEXT_LINES = Lines(
             }
         }
     ),
-    Line(
-        Segment(
+    components.Line(
+        components.Segment(
             attrs='password',
             color=config.Colors.LIGHT_RED,
-            label=Label(
+            label=components.Label(
                 value="Password",
                 delimiter=":",
                 fmt=config.Text.LIGHT,
@@ -183,11 +183,11 @@ CONTEXT_LINES = Lines(
             }
         }
     ),
-    Line(
-        Segment(
+    components.Line(
+        components.Segment(
             attrs='proxy.url',
             color=config.Colors.LIGHT_GREEN,
-            label=Label(
+            label=components.Label(
                 value="Proxy",
                 fmt=config.Text.LIGHT,
                 delimiter=':',
@@ -208,17 +208,17 @@ CONTEXT_LINES = Lines(
 )
 
 
-TRACEBACK_LINE = Lines(
-    Line(
-        Segment(
+TRACEBACK_LINE = components.Lines(
+    components.Line(
+        components.Segment(
             value=get_path_name,
             fmt=config.Text.EXTRA_LIGHT,
         ),
-        Segment(
+        components.Segment(
             attrs=["funcName"],
             fmt=config.Text.EXTRA_LIGHT,
         ),
-        Segment(
+        components.Segment(
             attrs=["lineno"],
             fmt=config.Text.LIGHT,
         ),
@@ -237,7 +237,7 @@ TRACEBACK_LINE = Lines(
 )
 
 
-TERMX_FORMAT_STRING = LogFormat(
+TERMX_FORMAT_STRING = components.LogFormat(
     PRIMARY_LINE,
     MESSAGE_LINES,
     DynamicContext(decoration={

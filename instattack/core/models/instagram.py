@@ -4,7 +4,7 @@ from dacite import from_dict
 import typing
 
 from instattack import settings
-from termx.config import config
+from termx import settings as termx
 
 from instattack.core.exceptions import InstattackError
 
@@ -43,12 +43,12 @@ class InstagramResult:
     def __str__(self):
         string_rep = f"Authenticated: {self.authorized}"
         if self.authorized:
-            return config.Formats.SUCCESS(string_rep)
+            return termx.Formats.SUCCESS(string_rep)
         elif self.not_authorized:
-            return config.Formats.ERROR(string_rep)
+            return termx.Formats.ERROR(string_rep)
         else:
             string_rep = f"Authenticated: Inconclusive"
-            return config.Formats.NOTSET(string_rep)
+            return termx.Formats.NOTSET(string_rep)
 
     @classmethod
     def from_dict(cls, data, proxy=None, password=None):

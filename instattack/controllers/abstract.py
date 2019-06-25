@@ -1,8 +1,7 @@
 import asyncio
 from cement import Controller, shell
 
-from termx.config import config
-from termx.terminal import Cursor
+from termx import settings as termx, Cursor
 
 from instattack.lib import logger
 
@@ -10,10 +9,10 @@ from instattack.lib import logger
 class PrintableMixin(object):
 
     def success(self, text):
-        Cursor.write(config.Formats.SUCCESS(text))
+        Cursor.write(termx.Formats.SUCCESS(text))
 
     def failure(self, text):
-        Cursor.write(config.Formats.FAIL(text))
+        Cursor.write(termx.Formats.FAIL(text))
 
     def breakline(self):
         Cursor.newline()
@@ -27,7 +26,7 @@ class InstattackController(Controller, PrintableMixin):
 
     def proceed(self, message):
 
-        fmt = config.Formats.TEXT.NORMAL.with_style('bold')
+        fmt = termx.Formats.TEXT.NORMAL.with_style('bold')
         message = fmt(f"{message}") + ", (Press Enter to Continue)"
 
         p = shell.Prompt("%s" % message, default="ENTER")

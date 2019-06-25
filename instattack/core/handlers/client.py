@@ -50,7 +50,8 @@ class train_client(client):
         'test_field_1': 'test_value_1',
         'test_field_2': 'test_value_2'
     }
-    HEADERS = settings.HEADERS()
+
+    HEADERS = settings.header
 
     def post(self, session, proxy):
         return super(train_client, self).post(

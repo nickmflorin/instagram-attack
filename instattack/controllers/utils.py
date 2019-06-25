@@ -2,7 +2,7 @@ import asyncio
 from cement import ex
 import functools
 
-from termx.terminal import Cursor
+from termx import Cursor
 
 
 def proxy_command(help=None, limit=None, arguments=None):

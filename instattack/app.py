@@ -9,7 +9,7 @@ import threading
 from instattack import settings
 
 from termx import settings as termx
-from termx.spinner import Spinner
+from termx.spin import Spinner
 from termx.ext.utils import break_before
 
 from instattack.lib import logger

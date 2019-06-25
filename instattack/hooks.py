@@ -5,12 +5,12 @@ import pathlib
 import sys
 
 from termx import Cursor
+from termx.library import remove_pybyte_data
 
-from instattack.config import constants
-from instattack.ext.scripts import clean
+from instattack import settings
+from instattack.ext import get_app_root
 from instattack.lib import logger
 from instattack.lib.utils import task_is_third_party, cancel_remaining_tasks
-
 
 log = logger.get(__name__)
 
@@ -69,11 +69,12 @@ async def setup(loop, spinner):
         with spinner.child('Setting Up Directories') as grandchild:
 
             grandchild.write('Removing __pycache__ Files')
-            clean()
+            root = get_app_root()
+            remove_pybyte_data(root)
 
             # TODO: Validate whether files are present for all users in the
             # database.
-            user_path = pathlib.Path(constants.USER_DIR)
+            user_path = pathlib.Path(settings.USER_DIR)
             if not user_path.is_dir():
                 grandchild.warning('User Directory Does Not Exist', fatal=False, options={
                     'label': True,
@@ -91,7 +92,7 @@ async def setup(loop, spinner):
             await tortoise.Tortoise.close_connections()
 
             grandchild.write('Configuring Database')
-            await tortoise.Tortoise.init(config=constants.DB_CONFIG)
+            await tortoise.Tortoise.init(config=settings.DB_CONFIG)
 
             grandchild.write('Generating Schemas')
             await tortoise.Tortoise.generate_schemas()
