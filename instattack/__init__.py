@@ -11,5 +11,3 @@ instead of
 >>> from simple_settings import settings
 """
 from .config import settings  # noqa
-from termx import settings as termx
-termx.configure()
