@@ -152,6 +152,44 @@ class SetField(dict, Field):
     def __keytransform__(self, key):
         return key.upper()
 
+    def __addfields__(self, **fields):
+        """
+        Method that is not supposed to be used outside of the configuration of
+        system settings.
+
+        Adds fields to the SetField after it is first initialized.  The reasoning
+        is that after the SetField is initialized, the only way to make changes
+        is to configure it, which is not what we want to do.
+
+        This is useful when we have to add fields that have values that depend
+        on fields already initialized:
+
+            INSTAGRAM = fields.SetField(
+                URLS=fields.SetField(
+                    HOME='https://www.instagram.com/',
+                    LOGIN='https://www.instagram.com/accounts/login/ajax/',
+                    TEST="https://postman-echo.com/post",
+                    configurable=False,
+                ),
+            )
+
+            HEADERS = fields.PersistentDictField({
+                'Referer': INSTAGRAM.urls.home,
+                "User-Agent": USERAGENT,
+            })
+
+            INSTAGRAM.__adfields__(HEADERS=HEADERES)
+        """
+        for k, v in fields.items():
+            if self.__keytransform__(k) in self:
+                raise ConfigFieldError.FieldAlreadySet(k)
+
+            # There is No Reason to Add Constants After the Fact
+            if not isinstance(v, Field):
+                raise ConfigFieldError.ExpectedFieldInstance(k)
+
+            self.__setitem__(k, v)
+
     def configure(self, key, *args, **kwargs):
         """
         When configuring, all values are not instances of Field but are instead
@@ -207,10 +245,6 @@ class SetField(dict, Field):
         """
         Value passed in will be a dictionary with each key corresponding to
         a field in the set.  They should be case insensitive.
-
-        [x] TODO:
-        --------
-        Maybe have a __keytransform__ method that converts them all to lowercase?
         """
         if not isinstance(value, dict):
             raise FieldValidationError.ExpectedDict(key, value)
@@ -326,13 +360,30 @@ class DictField(TypeField):
     in the dict.
     """
 
-    def __init__(self, default, help=None, type=None):
+    def __init__(self, default, help=None, type=None, keys=None, values=None):
         super(DictField, self).__init__(default, help=help, type=dict)
-        self.sub_type = type
+
+        self._keys = keys or {}
+        self._values = values or {}
+
+    def _validate_key(self, k):
+        if self._keys:
+            tp = self._keys.get('type')
+            if tp:
+                types = ensure_iterable(tp, coercion=tuple, force_coerce=True)
+                if not isinstance(k, types):
+                    raise FieldValidationError.ExpectedKeyType(k, ','.join(types))
+
+    def _validate_val(k, v):
+        pass
 
     @check_null_value
     def validate(self, key, value):
         super(DictField, self).validate(key, value)
+        for k, v in self.value.items():
+            self._validate_key(k)
+            self._validate_val(k, v)
+
         if self.sub_type:
             types = ensure_iterable(self.sub_type, coercion=tuple, force_coerce=True)
             for k, v in self.value.items():
@@ -342,6 +393,10 @@ class DictField(TypeField):
 
     def __str__(self):
         return "<%s %s>" % (self.__class__.__name__, self.value)
+
+
+class PersistentDictField(DictField):
+    pass
 
 
 class ListField(TypeField):

@@ -43,7 +43,7 @@ class ProxyEvaluation:
 
 def evaluate_errors(proxy):
 
-    errors = settings.proxies.pool.limits.get('errors', {})
+    errors = settings.proxies.pool.limits.errors
     evaluations = ProxyEvaluation(reasons=[])
 
     max_params = [
@@ -58,7 +58,7 @@ def evaluate_errors(proxy):
     for param_set in max_params:
         config_errors = errors.get(param_set[0])
         if config_errors:
-            config_active_errors = config_errors.get('active')
+            config_active_errors = config_errors.active
             if config_active_errors:
                 actual_active_errors = proxy.num_errors(*param_set[1], active=True)
 
@@ -70,7 +70,7 @@ def evaluate_errors(proxy):
                     )
                     evaluations.add(reason)
 
-            config_hist_errors = config_errors.get('historical')
+            config_hist_errors = config_errors.historical
             if config_hist_errors:
                 actual_hist_errors = proxy.num_errors(*param_set[1], active=False)
 
@@ -87,7 +87,7 @@ def evaluate_errors(proxy):
 def evaluate_requests(proxy):
 
     evaluations = ProxyEvaluation(reasons=[])
-    requests = settings.proxies.pool.limits.get('requests', {})
+    requests = settings.proxies.pool.limits.requests
 
     max_params = [
         ('all', (None, ), ),
@@ -99,7 +99,7 @@ def evaluate_requests(proxy):
         config_requests = requests.get(param_set[0])
         if config_requests:
 
-            config_active_requests = config_requests.get('active')
+            config_active_requests = config_requests.active
             if config_active_requests:
                 actual_active_requests = proxy.num_requests(active=True, success=param_set[1])
 
@@ -151,10 +151,10 @@ def evaluate_error_rate(proxy):
     evaluations = ProxyEvaluation(reasons=[])
     limits = settings.proxies.pool.limits
 
-    if limits.get('error_rate'):
-        config_error_rate = limits['error_rate']
+    if limits.error_rate:
+        config_error_rate = limits.error_rate
 
-        config_active_rate = config_error_rate.get('active')
+        config_active_rate = config_error_rate.active
         if config_active_rate:
             actual_active_rate = proxy.error_rate(active=True)
 
@@ -166,7 +166,7 @@ def evaluate_error_rate(proxy):
                 )
                 evaluations.add(reason)
 
-        config_hist_rate = config_error_rate.get('historical')
+        config_hist_rate = config_error_rate.historical
         if config_hist_rate:
             actual_hist_rate = proxy.error_rate(active=False)
 
@@ -203,11 +203,11 @@ def evaluate(proxy):
     evaluations.merge(request_eval, errors_eval, error_rate_eval)
 
     # Will Have to be Included in evaluate_from_pool When We Start Manually Calculating
-    if limits.get('resp_time'):
-        if proxy.avg_resp_time > limits['resp_time']:
+    if limits.resp_time:
+        if proxy.avg_resp_time > limits.resp_time:
             reason = AttributeEvaluation(
                 value=proxy.avg_resp_time,
-                relative_value=limits['resp_time'],
+                relative_value=limits.resp_time,
                 name="Avg. Response Time",
             )
             evaluations.add(reason)

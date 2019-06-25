@@ -1,5 +1,7 @@
 import re
 from termx import settings
+from termx.ext.utils import humanize_list
+
 from instattack.core.exceptions import InstattackError
 
 
@@ -83,20 +85,52 @@ class FieldValidationError(FieldError, metaclass=FieldErrorMeta):
 
         EXCEEDS_MAX = "The value for field %s exceeds the maximum (%s > %s)."
         EXCEEDS_MIN = "The value for field %s exceeds the minimum (%s < %s)."
-        EXPECTED_INT = "Expected an integer for field %s, not %s."
-        EXPECTED_FLOAT = "Expected a float for field %s, not %s."
-        EXPECTED_DICT = "Expected a dict for field %s, not %s."
-        EXPECTED_LIST = "Expected a list for field %s, not %s."
+        # EXPECTED_INT = "Expected an integer for field %s, not %s."
+        # EXPECTED_FLOAT = "Expected a float for field %s, not %s."
+        # EXPECTED_DICT = "Expected a dict for field %s, not %s."
+        # EXPECTED_LIST = "Expected a list for field %s, not %s."
+        # EXPECTED_STR = "Expected a string for field %s, not %s."
+
+        # EXPECTED_KEY_INT = "Expected key %s to be an int instance."
+        # EXPECTED_KEY_STR = "Expected key %s to be a str instance."
+
+    # @classmethod
+    # def ExpectedKeyType(cls, key, type):
+    #     types = {
+    #         int: cls.ExpectedKeyInt,
+    #         str: cls.ExpectedKeyStr
+    #     }
+    #     return types[type](key)
 
     @classmethod
-    def ExpectedType(cls, key, value, type):
-        types = {
-            list: cls.ExpectedList,
-            dict: cls.ExpectedDict,
-            float: cls.ExpectedFloat,
-            int: cls.ExpectedInt,
+    def ExpectedType(cls, key, *args):
+        type_lookup = {
+            list: 'list',
+            dict: 'dict',
+            float: 'float',
+            int: 'int',
+            str: 'str',
         }
-        return types[type](key, value)
+
+        CODE = "Expected field %s to be instance of %s"
+        if len(args) == 0:
+            raise RuntimeError('Not enough arguments for string formatting.')
+
+        value = None
+        types = tuple(list(args))
+        if args[0] not in type_lookup:
+            value = args[0]
+            types = tuple(list(args[1:]))
+
+        type_strings = [type_lookup[tp] for tp in types]
+        types = humanize_list(type_strings, conjunction='or')
+
+        if value:
+            CODE += ', not %s.'
+            return cls(CODE, types, value)
+        else:
+            CODE += '.'
+            return cls(CODE, types)
 
 
 class ConfigFieldError(FieldError, metaclass=FieldErrorMeta):

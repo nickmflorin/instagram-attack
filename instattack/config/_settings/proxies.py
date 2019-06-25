@@ -124,33 +124,29 @@ POOL = fields.SetField(
         (1, ('error_rate', 'historical')),
         (1, ('avg_resp_time')),
     ]),
+
     TIMEOUTS=fields.SetField(
+        # TODO: Add Max Values to these Parameters
         TOO_MANY_REQUESTS=fields.SetField(
             INCREMENT=fields.PositiveIntField(
                 default=5,
-                # TODO: Add Max
             ),
             START=fields.PositiveIntField(
                 default=5,
-                # TODO: Add Max
             ),
             MAX=fields.PositiveIntField(
                 default=40,
-                # TODO: Add Max
             ),
         ),
         TOO_MANY_OPEN_CONNECTIONS=fields.SetField(
             INCREMENT=fields.PositiveIntField(
                 default=5,
-                # TODO: Add Max
             ),
             START=fields.PositiveIntField(
                 default=5,
-                # TODO: Add Max
             ),
             MAX=fields.PositiveIntField(
                 default=40,
-                # TODO: Add Max
             ),
         ),
         help=(

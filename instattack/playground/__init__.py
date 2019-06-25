@@ -43,6 +43,7 @@ components that make up the instattack app.
 
 
 def playground():
-    from termx import settings as settt
-    import ipdb; ipdb.set_trace()
-    print(settt.colors.green('test'))
+    from instattack.config.exceptions import FieldValidationError
+
+    e1 = FieldValidationError.ExpectedType('key1', str)
+    print(e1)

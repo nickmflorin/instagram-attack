@@ -51,7 +51,7 @@ class train_client(client):
         'test_field_2': 'test_value_2'
     }
 
-    HEADERS = settings.header
+    HEADERS = settings.headers
 
     def post(self, session, proxy):
         return super(train_client, self).post(

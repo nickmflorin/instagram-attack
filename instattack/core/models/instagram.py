@@ -67,7 +67,7 @@ class InstagramResult:
         # it is safer to associate the entire set of variable values that
         # should be returned by the request with a state of the result.
         # Checkpoint URL is the only thing that would vary
-        return self.message == settings.CHECKPOINT_REQUIRED
+        return self.message == settings.checkpoint_required
 
     @property
     def authorized(self):
@@ -105,8 +105,8 @@ class InstagramResult:
 
     @property
     def has_generic_request_error(self):
-        if self.errors == InstagramResultErrors(error=[settings.GENERIC_REQUEST_MESSAGE]):
-            if self.error_type == settings.GENERIC_REQUEST_ERROR:
+        if self.errors == InstagramResultErrors(error=[settings.generic_request_message]):
+            if self.error_type == settings.generic_request_error:
                 return True
         return False
 
