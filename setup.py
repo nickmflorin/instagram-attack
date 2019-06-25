@@ -12,11 +12,10 @@ This means that if we want to use another settings file, we have to specify the
 ENV variable before any import from instattack is performed.
 """
 
-os.environ['INSTATTACK_SIMPLE_SETTINGS'] = 'prod'
+os.environ['INSTATTACK_SIMPLE_SETTINGS'] = 'dev'
 
 from instattack import settings  # noqa
-# from termx.library import get_version  # noqa
-
+from termx.library import get_version  # noqa
 
 f = open('README.md', 'r')
 LONG_DESCRIPTION = f.read()
@@ -24,7 +23,7 @@ f.close()
 
 setup(
     name=settings.NAME,
-    version="0.0.2.dev20190622074230",
+    version=get_version(settings.APP_VERSION),
     description=settings.FORMAL_NAME,
     long_description=LONG_DESCRIPTION,
     long_description_content_type='text/markdown',

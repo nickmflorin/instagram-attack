@@ -8,7 +8,7 @@ import threading
 
 from instattack import settings
 
-from termx.config import config
+from termx import settings as termx
 from termx.spinner import Spinner
 from termx.ext.utils import break_before
 
@@ -59,11 +59,11 @@ class Instattack(App):
 
     @break_before
     def success(self, text):
-        sys.stdout.write("%s\n" % Formats.SUCCESS(text))
+        sys.stdout.write("%s\n" % termx.Formats.SUCCESS(text))
 
     @break_before
     def failure(self, e, exit_code=1, traceback=True):
-        sys.stdout.write("%s\n" % Formats.ERROR(str(e)))
+        sys.stdout.write("%s\n" % termx.Formats.ERROR(str(e)))
 
         self.exit_code = exit_code
 
@@ -135,7 +135,10 @@ class Instattack(App):
         # with self.spinner.reenter('Validating Config') as grandchild:
         super(Instattack, self).validate_config()
         data = self.config.get_dict()
-        config(data)
+
+        # This is where we would configure the system settings with the user
+        # defined settings.
+        # config(data)
 
         # grandchild.warning('Not Currently Validating Schema', fatal=False, options={
         #     'label': True,

@@ -43,5 +43,5 @@ def find_optimal_size(grid):
 
 
 def playground():
-    print('In Playground')
-    import ipdb; ipdb.set_trace()
+    from termx import settings as settt
+    print(settt.colors.green('test'))

@@ -3,7 +3,7 @@ from cement.core.exc import CaughtSignal
 import sys
 import warnings
 
-# from termx.library import remove_pybyte_data
+from termx.library import remove_pybyte_data
 from instattack.core.exceptions import InstattackError
 
 from .ext import get_app_root, get_root

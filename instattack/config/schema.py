@@ -1,3 +1,10 @@
+"""
+[!] Temporarily Deprecated
+----------------------
+We are not currently using Cerberus schema validation.
+"""
+
+
 def positive_int(required=True, **kwargs):
     config = {
         'required': required,

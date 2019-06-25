@@ -1,3 +1,4 @@
+import re
 from termx import settings
 from instattack.core.exceptions import InstattackError
 
@@ -7,6 +8,11 @@ class ConfigError(InstattackError):
 
 
 class ConfigValueError(ConfigError):
+    """
+    Not currently used, but we will hold onto just in case we want to reference
+    a more general field error.
+    """
+
     def __init__(self, value, ext=None):
         self.value = value
         self.ext = ext
@@ -17,66 +23,70 @@ class ConfigValueError(ConfigError):
         return f"Invalid configuration value {self.value}; {self.ext}"
 
 
+class FieldErrorMeta(type):
+
+    def __getattr__(cls, name):
+        try:
+            code = cls.Codes.get_for_func(name)
+        except AttributeError:
+            raise AttributeError('Invalid Field Error Callable %s.' % name)
+        else:
+            def wrapped(*args, **kwargs):
+                return cls(code, *args, **kwargs)
+            return wrapped
+
+
 class FieldError(ConfigError):
 
-    EXCEEDS_MAX = "The value for field %s exceeds the maximum (%s > %s)."
-    EXCEEDS_MIN = "The value for field %s exceeds the minimum (%s < %s)."
-    EXPECTED_INT = "Expected an integer for field %s, not %s."
-    EXPECTED_FLOAT = "Expected a float for field %s, not %s."
-    EXPECTED_DICT = "Expected a dict for field %s, not %s."
-    EXPECTED_LIST = "Expected a list for field %s, not %s."
-    REQUIRED_FIELD = "The field %s is required."
-    NON_CONFIGURABLE_FIELD = "The field %s is not configurable."
-    UNEXPECTED_SET_FIELD = "The field %s does not belong in the set."
-    EXPECTED_FIELD_INSTANCE = "The provided field %s should be a Field instance."
-    FIELD_ALREADY_SET = "The provided field %s was already set."
-
-    def __init__(self, code, *args):
+    def __init__(self, code, *args, **kwargs):
         self.code = code
         self.msg_args = args
+        self.ext = kwargs.get('ext')
 
     def __str__(self):
-        return self.code % self.msg_args
+        encoded = self.code % self.msg_args
+        if self.ext:
+            return "%s\n%s" % (encoded, self.ext)
+        return encoded
+
+
+class FieldCodes(object):
 
     @classmethod
-    def FieldAlreadySet(cls, key):
-        return FieldError(cls.FIELD_ALREADY_SET, key)
+    def camel_case_split(cls, identifier):
+        matches = re.finditer('.+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)', identifier)
+        return [m.group(0) for m in matches]
 
     @classmethod
-    def ExpectedFieldInstance(cls, key):
-        return FieldError(cls.EXPECTED_FIELD_INSTANCE, key)
+    def get_for_func(cls, name):
+        """
+        Instead of specifying a specific classmethod method initializing the
+        exception with each code, this allows us to call arbitrary methods on
+        the FieldError instance to instantiate a FieldError with the corresponding
+        code:
 
-    @classmethod
-    def UnexpectedSetField(cls, key):
-        return FieldError(cls.UNEXPECTED_SET_FIELD, key)
+        >>> raise FieldError.ExceedsMax(key, val, max)
+        >>> err = FieldError(code=Codes.EXCEEDS_MAX, key, val, max)
+        """
+        parts = cls.camel_case_split(name)
+        parts = [pt.upper() for pt in parts]
+        val = '_'.join(parts)
+        return getattr(cls, val)
 
-    @classmethod
-    def NonConfigurableField(cls, key):
-        return FieldError(cls.NON_CONFIGURABLE_FIELD, key)
 
-    @classmethod
-    def ExceedsMax(cls, key, value, max):
-        return FieldError(cls.EXCEEDS_MAX, key, value, max)
+class FieldValidationError(FieldError, metaclass=FieldErrorMeta):
+    """
+    Raised when a field does not validate properly.
+    """
 
-    @classmethod
-    def ExceedsMin(cls, key, value, min):
-        return FieldError(cls.EXCEEDS_MIN, key, value, min)
+    class Codes(FieldCodes):
 
-    @classmethod
-    def ExpectedInt(cls, key, value):
-        return FieldError(cls.EXPECTED_INT, key, value)
-
-    @classmethod
-    def ExpectedFloat(cls, key, value):
-        return FieldError(cls.EXPECTED_FLOAT, key, value)
-
-    @classmethod
-    def ExpectedList(cls, key, value):
-        return FieldError(cls.EXPECTED_LIST, key, value)
-
-    @classmethod
-    def ExpectedDict(cls, key, value):
-        return FieldError(cls.EXPECTED_DICT, key, value)
+        EXCEEDS_MAX = "The value for field %s exceeds the maximum (%s > %s)."
+        EXCEEDS_MIN = "The value for field %s exceeds the minimum (%s < %s)."
+        EXPECTED_INT = "Expected an integer for field %s, not %s."
+        EXPECTED_FLOAT = "Expected a float for field %s, not %s."
+        EXPECTED_DICT = "Expected a dict for field %s, not %s."
+        EXPECTED_LIST = "Expected a list for field %s, not %s."
 
     @classmethod
     def ExpectedType(cls, key, value, type):
@@ -88,13 +98,30 @@ class FieldError(ConfigError):
         }
         return types[type](key, value)
 
-    @classmethod
-    def RequiredField(cls, key):
-        return FieldError(cls.REQUIRED_FIELD, key)
+
+class ConfigFieldError(FieldError, metaclass=FieldErrorMeta):
+    """
+    Raised when a field is used improperly.
+    """
+    class Codes(FieldCodes):
+
+        # This shouldn't really be needed since we define all
+        # required fields in system settings.
+        REQUIRED_FIELD = "The field %s is required."
+
+        NON_CONFIGURABLE_FIELD = "The field %s is not configurable."
+        EXPECTED_FIELD_INSTANCE = "The provided field %s should be a Field instance."
+        FIELD_ALREADY_SET = "The provided field %s was already set."
+        CANNOT_ADD_FIELD = "The field %s does not exist in settings and cannot be configured."
+        CANNOT_ADD_CONFIGURABLE_FIELD = "Cannot add configurable field %s to a non-configurable set."
 
 
 class ConfigSchemaError(Exception):
     """
+    [!] Temporarily Deprecated
+    ----------------------
+    We are not currently using Cerberus schema validation.
+
     Used to convert Cerberus schema validation errors into more human readable
     series of errors, each designated on a separate line.
     """

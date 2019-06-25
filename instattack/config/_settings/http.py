@@ -1,3 +1,8 @@
+from instattack.config import fields
+
+# TODO:
+# Join URLS in a Non-Configurable Set Field
+
 # Instagram Constants
 INSTAGRAM_URL = 'https://www.instagram.com/'
 INSTAGRAM_LOGIN_URL = 'https://www.instagram.com/accounts/login/ajax/'
@@ -15,22 +20,28 @@ USERAGENT = (
     f'320dpi; 720x1280; {MFG}; {MODEL}; armani; qcom; en_US)'
 )
 
-# Instagram Requests
-HEADER = {
+# HEADER Has to be Field - Configured w/ Token
+# TODO: Restrict configuration to just adding the token.
+HEADER = fields.DictField({
     'Referer': INSTAGRAM_URL,
     "User-Agent": USERAGENT,
-}
+})
 
-# Only Configurable One Here
-CONNECTION = {
-    'LIMIT_PER_HOST': 0,
-    'CONNECTION_TIMEOUT': 14,
-    'CONNECTION_LIMIT': 0
-}
-
-
-def HEADERS(token=None):
-    headers = HEADER.copy()
-    if token:
-        headers["X-CSRFToken"] = token
-    return headers
+# TODO: Get descriptions of each field from aiohttp docs.
+CONNECTION = fields.SetField(
+    LIMIT_PER_HOST=fields.PositiveIntField(
+        max=10,
+        default=0,
+        help="Need to retrieve from aiohttp docs."
+    ),
+    CONNECTION_TIMEOUT=fields.PositiveIntField(
+        max=20,
+        default=5,
+        help="Need to retrieve from aiohttp docs."
+    ),
+    CONNECTION_LIMIT=fields.PositiveIntField(
+        max=100,
+        default=0,
+        help="Need to retrieve from aiohttp docs."
+    )
+)
