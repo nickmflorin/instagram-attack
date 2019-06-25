@@ -3,6 +3,7 @@ import aiohttp
 
 from termx.ext.utils import percentage
 
+from instattack import settings
 from instattack.lib import logger
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
@@ -156,7 +157,7 @@ class AttackHandler(AbstractLoginHandler):
         ) as session:
             async for fut, pending, num_tries in limit_as_completed(
                 coros=self.generate_attempts_for_passwords(session),
-                batch_size=config['login']['passwords']['passwords_batch_size'],
+                batch_size=settings.login.passwords.batch_size,
                 done_callback=done_callback,
                 stop_event=self.stop_event
             ):
