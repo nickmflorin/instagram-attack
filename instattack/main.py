@@ -64,7 +64,6 @@ def run_playground():
     --------
     Remove from production distribution/package.
     """
-    import ipdb; ipdb.set_trace()
     playground()
 
 

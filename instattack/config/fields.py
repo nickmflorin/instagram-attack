@@ -1,87 +1,254 @@
+from abc import ABC, abstractmethod, abstractproperty
 from datetime import datetime
 
 from termx.library import ensure_iterable
 from termx.ext.utils import string_format_tuple
 
-from .exceptions import ConfigFieldError, FieldValidationError
+from .exceptions import ConfigFieldError
+from .utils import SettingsFieldDict, SettingsDict
 
 
 def check_null_value(func):
-    def wrapped(instance, key, value):
+    def wrapped(instance, value):
         if value is None:
             if not instance.optional:
-                raise ConfigFieldError.RequiredField(key)
+                raise ConfigFieldError.RequiredField()
             else:
                 return None
-        return func(instance, key, value)
+        return func(instance, value)
     return wrapped
 
 
-class Field(object):
+class Field(ABC):
+
+    @abstractproperty
+    def optional(self):
+        pass
+
+    @abstractproperty
+    def configurable(self):
+        pass
+
+    @abstractproperty
+    def help(self):
+        pass
+
+    @abstractmethod
+    def configure(self, value):
+        pass
+
+    @abstractmethod
+    def _validate(self, value):
+        pass
+
+    @abstractmethod
+    def __str__(self):
+        pass
+
+    def __repr__(self):
+        return self.__str__()
+
+
+class BaseField(object):
+
+    def __init__(self, *args, **kwargs):
+        self._help = kwargs.pop('help', None)
+
+    @property
+    def help(self):
+        return self._help
+
+
+class ValueField(BaseField):
     """
-    Abstract base class for all field objects.
+    Abstract base class for all field objects that are not represented by
+    a collection of valus.
 
     Provides the interface for defining methods on a field and the basic
     configuration steps for configurable fields.
     """
 
-    def __init__(self, default, help=None, optional=False, configurable=True):
+    def __init__(self, default, **kwargs):
+        self._optional = kwargs.pop('optional', False)
+        self._configurable = kwargs.pop('configurable', True)
+        super(ValueField, self).__init__(**kwargs)
 
-        self._default = default
-        self._help = help
         self._value = default
 
-        # Optional Has to be Accessed Externally to Determine if Missing Value
-        # Allowed
-        self.optional = optional
-        self.configurable = configurable
+    @property
+    def optional(self):
+        return self._optional
+
+    @property
+    def configurable(self):
+        return self._configurable
+
+    def configure(self, value):
+        self.value = value
 
     @property
     def value(self):
         return self._value
 
-    def configure(self, key, value):
+    @value.setter
+    def value(self, val):
         if not self.configurable:
-            raise ConfigFieldError.NonConfigurableField(key)
-        value = self.validate(key, value)
-        self._value = value
-
-    def validate(self, key, value):
-        raise NotImplementedError(
-            "%s must implement a validation method." % self.__class__.__name__)
+            raise ConfigFieldError.NonConfigurableField(
+                ext="Configurability should be checked by container and not field itself."
+            )
+        val = self._validate(val)
+        self._value = val
 
     def __str__(self):
         if isinstance(self.value, tuple):
             return "%s" % string_format_tuple(self.value)
         return "%s" % self.value
 
-    def __repr__(self):
-        return self.__str__()
+
+class SeriesMixin(object):
+
+    def _validate_element_val(self, v):
+        """
+        [x] TODO:
+        --------
+        Differentiate between expected types of fields vs. values in the
+        ConfigFieldError instantiations.
+        """
+        if isinstance(v, Field):
+            raise ConfigFieldError.UnexpectedFieldInstance()
+
+        if self._values:
+            tp = self._values.get('type')
+            if tp:
+                types = ensure_iterable(tp, coercion=tuple, force_coerce=True)
+                if not isinstance(v, types):
+                    raise ConfigFieldError.ExpectedType(v, *types)
+
+            allowed = self._values.get('allowed')
+            if allowed:
+                if v not in allowed:
+                    raise ConfigFieldError.DisallowedValue(value=v)
 
 
-class ConstantField(Field):
+class MappedMixin(SeriesMixin):
+
+    def _validate_element_key(self, k):
+        """
+        [x] TODO:
+        --------
+        Differentiate between expected types of fields vs. values in the
+        ConfigFieldError instantiations.
+        """
+        if self._keys:
+            tp = self._keys.get('type')
+            if tp:
+                types = ensure_iterable(tp, coercion=tuple, force_coerce=True)
+                if not isinstance(k, types):
+                    raise ConfigFieldError.ExpectedType(k, *types)
+
+            allowed = self._values.get('allowed')
+            if allowed:
+                if k not in allowed:
+                    raise ConfigFieldError.DisallowedKey(key=k)
+
+
+class SeriesField(ValueField, SeriesMixin):
+
+    def __init__(self, default, values=None, **kwargs):
+        super(SeriesField, self).__init__(default, **kwargs)
+
+        # Validate Parameters
+        self._values = values or {}
+
+    @check_null_value
+    def _validate(self, value):
+        """
+        We do not allow a ListField to store instances of other fields, that
+        would be more appropriate for a SetField.
+        """
+        if not isinstance(value, list):
+            raise ConfigFieldError.ExpectedType(value, list)
+
+        for v in value:
+            self._validate_element_val(v)
+        return value
+
+
+class MappedField(SettingsDict, MappedMixin):
     """
-    A constant field that is non configurable.  This will more often be used
-    internally to create Field instances of system settings values that are
-    not initialized as Field instances, which we treat as non-configurable
-    constants by default.
+    Abstract base class for field instances that store collections of fields
+    or other values.
+
+    Offers attribute access and key access by case insensitive values and
+    stores the collections of values in the field as a dict.
     """
 
-    def __init__(self, value, help=None):
-        super(ConstantField, self).__init__(
-            default=value,
-            configurable=False,
-            optional=False,
-            help=help
-        )
+    def __init__(self, default, values=None, keys=None, **kwargs):
+        super(MappedField, self).__init__(**default)
+
+        self._optional = kwargs.pop('optional', False)
+        self._configurable = kwargs.pop('configurable', True)
+        self._help = kwargs.pop('help', None)
+
+        # Validate Parameters
+        self._values = values or {}
+        self._keys = keys or {}
+
+    @property
+    def help(self):
+        return self._help
+
+    @property
+    def optional(self):
+        return self._optional
+
+    @property
+    def configurable(self):
+        return self._configurable
+
+    @check_null_value
+    def _validate(self, value):
+        """
+        We do not allow a DictField to store instances of other fields, that
+        would be more appropriate for a SetField.
+        """
+        if not isinstance(value, dict):
+            raise ConfigFieldError.ExpectedType(value, dict)
+
+        for k, v in value.items():
+            if isinstance(v, Field):
+                raise ConfigFieldError.UnexpectedFieldInstance(field=k)
+
+            if k not in self:
+                raise ConfigFieldError.CannotAddField(field=k)
+
+            self._validate_element_key(k)
+            self._validate_element_val(v)
+        return value
+
+    def configure(self, *args, **kwargs):
+        if not self.configurable:
+            raise ConfigFieldError.NonConfigurableField()
+
+        data = dict(*args, **kwargs)
+        self._validate(data)
+
+        for k, v in data.items():
+            self[k] = v
+
+    def __str__(self):
+        return "<%s %s>" % (self.__class__.__name__, dict(self))
 
 
-class SetField(dict, Field):
+class SetField(SettingsFieldDict):
 
-    def __init__(self, help=None, configurable=True, **fields):
-        self._help = help
-        self.configurable = configurable
-        self.update(**fields)
+    def __init__(self, *args, **kwargs):
+
+        self._optional = kwargs.pop('optional', False)
+        self._configurable = kwargs.pop('configurable', True)
+        self._help = kwargs.pop('help', None)
+
+        super(SetField, self).__init__(*args, **kwargs)
 
     @property
     def optional(self):
@@ -91,24 +258,22 @@ class SetField(dict, Field):
         """
         return all([v.optional for k, v in self.items()])
 
-    def __getattr__(self, key):
+    @property
+    def configurable(self):
         """
-        Allows flexible case insensitive access of set field values as either
-        dictionary fields or object attributes.
+        Sets, as a whole, are only configurable if ANY field in the set is
+        configurable.
         """
-        return self.__getitem__(key)
+        return all([v.configurable for k, v in self.items()])
 
-    def get(self, key):
-        try:
-            self.__getitem__(key)
-        except KeyError:
-            return None
-
-    def __getitem__(self, key):
-        field = super(SetField, self).__getitem__(self.__keytransform__(key))
-        if isinstance(field, SetField):
-            return field
-        return field.value
+    @check_null_value
+    def _validate(self, value):
+        """
+        Value passed in will be a dictionary with each key corresponding to
+        a field in the set.  They should be case insensitive.
+        """
+        if not isinstance(value, Field):
+            raise ConfigFieldError.ExpectedFieldInstance()
 
     def __setitem__(self, key, value):
         """
@@ -120,37 +285,27 @@ class SetField(dict, Field):
         SetFields cannot be configured, and thus all sub-values must be
         non-configurable and set once.
         """
+        if not self.configurable:
+            raise ConfigFieldError.NonConfigurableField(
+                ext="Configurability should be checked by container and not field itself."
+            )
 
-        # Even for Constants - Must always be Field instance, ConstantField will
-        # be initialized on update() method.
-        assert isinstance(value, Field)
+        self._validate(value)
+        super(SetField, self).__setitem__(self.__keytransform__(key), value)
 
-        if self.configurable:
-            super(SetField, self).__setitem__(self.__keytransform__(key), value)
-            return
-
-        # Non Configurable Set Field:
-        # --------------------------
-        # (1) All sub fields must be non configurable.
-        #    - Usually instances of ConstantField, which is non-configurable by default.
-        # (2) Cannot add fields that are already present.
-        #    - This would indicate updating or configuring a non-configurable field.
-        if key in self:
-            raise ConfigFieldError.NonConfigurableField(key)
-        elif value.configurable:
-            raise ConfigFieldError.CannotAddConfigurableField(key)
-        else:
-            # This Should Only be on Initial Population
-            super(SetField, self).__setitem__(self.__keytransform__(key), value)
-
-    def __delitem__(self, key):
-        super(SetField, self).__delitem__(self.__keytransform__(key))
-
-    def __contains__(self, key):
-        return super(SetField, self).__contains__(self.__keytransform__(key))
-
-    def __keytransform__(self, key):
-        return key.upper()
+        # # Non Configurable Set Field:
+        # # --------------------------
+        # # (1) All sub fields must be non configurable.
+        # #    - Usually instances of ConstantField, which is non-configurable by default.
+        # # (2) Cannot add fields that are already present.
+        # #    - This would indicate updating or configuring a non-configurable field.
+        # if key in self:
+        #     raise ConfigFieldError.NonConfigurableField(key)
+        # elif value.configurable:
+        #     raise ConfigFieldError.CannotAddConfigurableField(key)
+        # else:
+        #     # This Should Only be on Initial Population
+        #     super(SetField, self).__setitem__(self.__keytransform__(key), value)
 
     def __addfields__(self, **fields):
         """
@@ -178,44 +333,46 @@ class SetField(dict, Field):
                 "User-Agent": USERAGENT,
             })
 
-            INSTAGRAM.__adfields__(HEADERS=HEADERES)
+            INSTAGRAM.__addfields__(HEADERS=HEADERES)
         """
         for k, v in fields.items():
-            if self.__keytransform__(k) in self:
-                raise ConfigFieldError.FieldAlreadySet(k)
+            # DO WE EVEN NEED THIS?
+            # if self.__keytransform__(k) in self:
+            #     raise ConfigFieldError.FieldAlreadySet(k)
 
-            # There is No Reason to Add Constants After the Fact
-            if not isinstance(v, Field):
-                raise ConfigFieldError.ExpectedFieldInstance(k)
+            # if not isinstance(v, Field):
+            #     raise ConfigFieldError.ExpectedFieldInstance(k)
 
             self.__setitem__(k, v)
 
-    def configure(self, key, *args, **kwargs):
+    def configure(self, *args, **kwargs):
         """
-        When configuring, all values are not instances of Field but are instead
-        constant values that will be overridden for each Field instance in the
-        SetField already created.
+        Overrides the fields that belong to the SetField.  All keys must already
+        belong to the SetField and all values must be non-Field instances.
+
+        Updating the SetField requires the values to be Field instances, whereas
+        configuring requires dict instances.
         """
-        data = dict(*args, **kwargs)
-        for k, v in data.items():
+        if not self.configurable:
+            raise ConfigFieldError.NonConfigurableField(
+                ext="Configurability should be checked by container and not field itself."
+            )
+
+        # TODO: Ensure value is a dict
+        for k, v in dict(*args, **kwargs).items():
+
+            # Do Not Allow Configuration w/ Fields - Only on Initialization
+            if isinstance(v, Field):
+                raise ConfigFieldError.UnexpectedFieldInstance(field=k)
+
             if k not in self:
-                raise ConfigFieldError.CannotAddField(k)
+                raise ConfigFieldError.CannotAddField(field=k)
 
-            if isinstance(self[k], Field):
-                if isinstance(self[k], SetField):
+            field = self[k]
+            if not field.configurable:
+                raise ConfigFieldError.NonConfigurableField(field=k)
 
-                    # Only reason we have to check this here vs. in the field is
-                    # because we provide the values as **v.
-                    if not isinstance(v, dict):
-                        raise FieldValidationError.ExpectedDict(v,
-                            ext='SetField(s) must be configured with dict instance.')
-
-                    self[k].configure(**v)
-                else:
-                    self[k].configure(k, v)
-            else:
-                # Constant Fields Not Configurable
-                raise ConfigFieldError.NonConfigurableField(k)
+            self[k].configure(v)
 
     def update(self, *args, **kwargs):
         """
@@ -223,40 +380,67 @@ class SetField(dict, Field):
         on initialization.  Updating of the SetField afterwards must be done
         through the configure method.
 
-        [x] Note:
-        ---------
-        The difference between the update() and configure() method is that
-        update() is the traditional dict form that will be used to set the
-        field objects in the dict.  The configure() method is used to set constant
-        values that override the fields stored in the dict.
+        Updating the SetField requires the values to be Field instances, whereas
+        configuring requires dict instances.
         """
         for k, v in dict(*args, **kwargs).items():
-            if self.__keytransform__(k) in self:
-                raise ConfigFieldError.FieldAlreadySet(k)
 
-            # If Not a Field Instead, Assume Constant Non Configurable Field
+            # Update Requires Field Instances (Initialization of SetField)
             if not isinstance(v, Field):
-                v = ConstantField(v)
+                raise ConfigFieldError.ExpectedFieldInstance(field=k)
+
+            if self.__keytransform__(k) in self:
+                raise ConfigFieldError.FieldAlreadySet(field=k)
 
             self.__setitem__(k, v)
 
-    @check_null_value
-    def validate(self, key, value):
-        """
-        Value passed in will be a dictionary with each key corresponding to
-        a field in the set.  They should be case insensitive.
-        """
-        if not isinstance(value, dict):
-            raise FieldValidationError.ExpectedDict(key, value)
 
-    def __str__(self):
-        return "<SetField %s>" % dict(self)
-
-    def __repr__(self):
-        return self.__str__()
+Field.register(ValueField)
+Field.register(SeriesField)
+Field.register(MappedField)
+Field.register(SetField)
 
 
-class NumericField(Field):
+class ConstantField(ValueField):
+    """
+    A constant field that is non configurable.  This will more often be used
+    internally to create Field instances of system settings values that are
+    not initialized as Field instances, which we treat as non-configurable
+    constants by default.
+    """
+
+    def __init__(self, value, help=None):
+        super(ConstantField, self).__init__(
+            default=value,
+            configurable=False,
+            optional=False,
+            help=help
+        )
+
+    def _validate(self, v):
+        if isinstance(v, dict):
+            raise ConfigFieldError.UnexpectedType(v, dict,
+                ext='ConstantField(s) cannot be configured with dict instances.')
+        return v
+
+
+class DictField(MappedField):
+    """
+    DictField represents a configurable field where the entire field must be
+    configured, vs. allowing the configuration of individual keys independent
+    from one another.
+
+    This is NOT a SetField, it does not have an update() method and when being
+    configured, the entire value of the field will be set to the value supplied.
+    """
+    pass
+
+
+class ListField(SeriesField):
+    pass
+
+
+class NumericField(ValueField):
     """
     Abstract base class for numeric fields where a max and a min may be
     specified.
@@ -268,42 +452,43 @@ class NumericField(Field):
         self._min = min
 
     @check_null_value
-    def validate(self, key, value):
+    def _validate(self, value):
         if self._max and value > self._max:
-            raise FieldValidationError.ExceedsMax(key, value, self._max)
+            raise ConfigFieldError.ExceedsMax(value=value, max=self._max)
         if self._min and value < self._min:
-            raise FieldValidationError.ExceedsMin(key, value, self._min)
+            raise ConfigFieldError.ExceedsMin(value=value, min=self._min)
         return value
 
 
 class IntField(NumericField):
 
     @check_null_value
-    def validate(self, key, value):
+    def _validate(self, value):
         try:
             float(value)
         except ValueError:
-            raise FieldValidationError.ExpectedType(key, value, int)
+            raise ConfigFieldError.ExpectedType(value, int)
         else:
             value = int(value)
             if value != float(value):
-                raise FieldValidationError.ExpectedType(key, value, int)
-            return super(IntField, self).validate(key, value)
+                raise ConfigFieldError.ExpectedType(value, int)
+            return super(IntField, self).validate(value)
 
 
 class FloatField(NumericField):
 
     @check_null_value
-    def validate(self, key, value):
+    def _validate(self, value):
         try:
             value = float(value)
         except ValueError:
-            raise FieldValidationError.ExpectedType(key, value, float)
+            raise ConfigFieldError.ExpectedType(value, float)
         else:
-            return super(IntField, self).validate(key, value)
+            return super(IntField, self).validate(value)
 
 
 class PositiveIntField(IntField):
+
     def __init__(self, *args, **kwargs):
         kwargs['min'] = 0
         super(PositiveIntField, self).__init__(*args, **kwargs)
@@ -327,97 +512,12 @@ class PositiveFloatField(FloatField):
         super(PositiveFloatField, self).__init__(*args, **kwargs)
 
 
-class TypeField(Field):
-
-    def __init__(self, default, type, help=None):
-        super(TypeField, self).__init__(default, help=help)
-        self.type = type
+class BooleanField(ValueField):
 
     @check_null_value
-    def validate(self, key, value):
-        if not isinstance(value, self.type):
-            raise FieldValidationError.ExpectedType(key, value, self.type)
-        return value
-
-
-class BooleanField(TypeField):
-    def __init__(self, default, help=None):
-        super(BooleanField, self).__init__(default, help=help, type=bool)
-
-
-class DictField(TypeField):
-    """
-    DictField represents a configurable field where the entire field must be
-    configured, vs. allowing the configuration of individual keys independent
-    from one another.
-
-    This is NOT a SetField, it does not have an update() method and when being
-    configured, the entire value of the field will be set to the value supplied.
-
-    [x] TODO:
-    --------
-    Add validation rules for type of keys but more importantly type of values
-    in the dict.
-    """
-
-    def __init__(self, default, help=None, type=None, keys=None, values=None):
-        super(DictField, self).__init__(default, help=help, type=dict)
-
-        self._keys = keys or {}
-        self._values = values or {}
-
-    def _validate_key(self, k):
-        if self._keys:
-            tp = self._keys.get('type')
-            if tp:
-                types = ensure_iterable(tp, coercion=tuple, force_coerce=True)
-                if not isinstance(k, types):
-                    raise FieldValidationError.ExpectedKeyType(k, ','.join(types))
-
-    def _validate_val(k, v):
-        pass
-
-    @check_null_value
-    def validate(self, key, value):
-        super(DictField, self).validate(key, value)
-        for k, v in self.value.items():
-            self._validate_key(k)
-            self._validate_val(k, v)
-
-        if self.sub_type:
-            types = ensure_iterable(self.sub_type, coercion=tuple, force_coerce=True)
-            for k, v in self.value.items():
-                if not isinstance(v, types):
-                    raise FieldValidationError.ExpectedType(k, v, ','.join(types))
-        return value
-
-    def __str__(self):
-        return "<%s %s>" % (self.__class__.__name__, self.value)
-
-
-class PersistentDictField(DictField):
-    pass
-
-
-class ListField(TypeField):
-    """
-    [x] TODO:
-    --------
-    Add better validation rules for the types of elements in the list.
-    """
-
-    def __init__(self, default, type=None, help=help):
-        super(ListField, self).__init__(default, help=help, type=list)
-        self.sub_type = type
-
-    @check_null_value
-    def validate(self, key, value):
-        super(ListField, self).validate(key, value)
-        if self.sub_type:
-            types = ensure_iterable(self.sub_type, coercion=tuple, force_coerce=True)
-            for k, v in self.value.items():
-                if not isinstance(v, types):
-                    raise FieldValidationError.ExpectedType(k, v, ','.join(types))
+    def _validate(self, value):
+        if not isinstance(value, bool):
+            raise ConfigFieldError.ExpectedType(value, bool)
         return value
 
 
@@ -431,5 +531,5 @@ class PriorityField(ListField):
     initialization.
     """
     @check_null_value
-    def validate(self, value):
+    def _validate(self, value):
         return value

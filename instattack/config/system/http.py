@@ -27,7 +27,8 @@ INSTAGRAM = fields.SetField(
             f'Instagram 9.2.0 Android ({_VERSION}/{_RELEASE}; '
             f'320dpi; 720x1280; {_MFG}; {_MODEL}; armani; qcom; en_US)'
         ),
-        configurable=False,
+        # Only Headers Are Configurable
+        configurable=True,
     ),
     FIELDS=fields.SetField(
         USERNAME='username',
@@ -51,7 +52,12 @@ USERAGENT = (
     f'320dpi; 720x1280; {_MFG}; {_MODEL}; armani; qcom; en_US)'
 )
 
+# HEADERS = {
+#     'Referer': INSTAGRAM.urls.home,
+#     "User-Agent": USERAGENT,
+# }
 # HEADER Has to be Field - Configured w/ Token
+
 HEADERS = fields.PersistentDictField(
     {
         'Referer': INSTAGRAM.urls.home,

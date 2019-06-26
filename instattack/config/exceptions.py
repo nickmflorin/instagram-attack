@@ -1,28 +1,11 @@
 import re
-from termx import settings
-from termx.ext.utils import humanize_list
+from termx.ext.utils import humanize_list, ConditionalString
 
 from instattack.core.exceptions import InstattackError
 
 
 class ConfigError(InstattackError):
     pass
-
-
-class ConfigValueError(ConfigError):
-    """
-    Not currently used, but we will hold onto just in case we want to reference
-    a more general field error.
-    """
-
-    def __init__(self, value, ext=None):
-        self.value = value
-        self.ext = ext
-
-    def __str__(self):
-        if not self.ext:
-            return f"Invalid configuration value {self.value}."
-        return f"Invalid configuration value {self.value}; {self.ext}"
 
 
 class FieldErrorMeta(type):
@@ -33,20 +16,21 @@ class FieldErrorMeta(type):
         except AttributeError:
             raise AttributeError('Invalid Field Error Callable %s.' % name)
         else:
-            def wrapped(*args, **kwargs):
-                return cls(code, *args, **kwargs)
+            def wrapped(**kwargs):
+                return cls(code, **kwargs)
             return wrapped
 
 
 class FieldError(ConfigError):
 
-    def __init__(self, code, *args, **kwargs):
-        self.code = code
-        self.msg_args = args
-        self.ext = kwargs.get('ext')
+    def __init__(self, message, **kwargs):
+        self.message = message
+
+        self.ext = kwargs.pop('ext', None)
+        self.context = kwargs
 
     def __str__(self):
-        encoded = self.code % self.msg_args
+        encoded = self.message.format(**self.context)
         if self.ext:
             return "%s\n%s" % (encoded, self.ext)
         return encoded
@@ -76,136 +60,233 @@ class FieldCodes(object):
         return getattr(cls, val)
 
 
-class FieldValidationError(FieldError, metaclass=FieldErrorMeta):
-    """
-    Raised when a field does not validate properly.
-    """
-
-    class Codes(FieldCodes):
-
-        EXCEEDS_MAX = "The value for field %s exceeds the maximum (%s > %s)."
-        EXCEEDS_MIN = "The value for field %s exceeds the minimum (%s < %s)."
-        # EXPECTED_INT = "Expected an integer for field %s, not %s."
-        # EXPECTED_FLOAT = "Expected a float for field %s, not %s."
-        # EXPECTED_DICT = "Expected a dict for field %s, not %s."
-        # EXPECTED_LIST = "Expected a list for field %s, not %s."
-        # EXPECTED_STR = "Expected a string for field %s, not %s."
-
-        # EXPECTED_KEY_INT = "Expected key %s to be an int instance."
-        # EXPECTED_KEY_STR = "Expected key %s to be a str instance."
-
-    # @classmethod
-    # def ExpectedKeyType(cls, key, type):
-    #     types = {
-    #         int: cls.ExpectedKeyInt,
-    #         str: cls.ExpectedKeyStr
-    #     }
-    #     return types[type](key)
-
-    @classmethod
-    def ExpectedType(cls, key, *args):
-        type_lookup = {
-            list: 'list',
-            dict: 'dict',
-            float: 'float',
-            int: 'int',
-            str: 'str',
-        }
-
-        CODE = "Expected field %s to be instance of %s"
-        if len(args) == 0:
-            raise RuntimeError('Not enough arguments for string formatting.')
-
-        value = None
-        types = tuple(list(args))
-        if args[0] not in type_lookup:
-            value = args[0]
-            types = tuple(list(args[1:]))
-
-        type_strings = [type_lookup[tp] for tp in types]
-        types = humanize_list(type_strings, conjunction='or')
-
-        if value:
-            CODE += ', not %s.'
-            return cls(CODE, types, value)
-        else:
-            CODE += '.'
-            return cls(CODE, types)
+field = '{field}'
+value = '{value}'
+for_field = 'for field {field}'
+key = '{key}'
 
 
 class ConfigFieldError(FieldError, metaclass=FieldErrorMeta):
     """
-    Raised when a field is used improperly.
+    Raised when a field is used improperly or validation fails.
     """
+    TYPE_LOOKUP = {
+        list: 'list',
+        dict: 'dict',
+        float: 'float',
+        int: 'int',
+        str: 'str',
+    }
+
     class Codes(FieldCodes):
 
-        # This shouldn't really be needed since we define all
-        # required fields in system settings.
-        REQUIRED_FIELD = "The field %s is required."
+        # This shouldn't really be needed since we define all required fields in system settings.
+        REQUIRED_FIELD = ConditionalString("The field", field, "is required.")
+        EXCEEDS_MAX = ConditionalString("The value", for_field, 'exceeds the maximum', '({value} > {max})')
+        EXCEEDS_MIN = ConditionalString("The value", for_field, 'exceeds the minimum', '({value} < {min})')
+        DISALLOWED_VALUE = ConditionalString("The field", field, 'value', value, 'is not allowed')
+        DISALLOWED_KEY = ConditionalString('The field', field, 'key', key, 'is not allowed')
+        NON_CONFIGURABLE_FIELD = ConditionalString('The field', field, 'is not configurable')
+        EXPECTED_FIELD_INSTANCE = ConditionalString('The field', field, 'is not a Field instance')
+        UNEXPECTED_FIELD_INSTANCE = ConditionalString('The field', field, 'should not be a Field instance')
+        FIELD_ALREADY_SET = ConditionalString('The field', field, 'was already set')
+        CANNOT_ADD_FIELD = ConditionalString('The field', field, 'does not already exist and thus cannot be configured')
+        CANNOT_ADD_CONFIGURABLE_FIELD = ConditionalString('Cannot add configurable field',
+            field, 'to a non-configurable set')
 
-        NON_CONFIGURABLE_FIELD = "The field %s is not configurable."
-        EXPECTED_FIELD_INSTANCE = "The provided field %s should be a Field instance."
-        FIELD_ALREADY_SET = "The provided field %s was already set."
-        CANNOT_ADD_FIELD = "The field %s does not exist in settings and cannot be configured."
-        CANNOT_ADD_CONFIGURABLE_FIELD = "Cannot add configurable field %s to a non-configurable set."
-
-
-class ConfigSchemaError(Exception):
-    """
-    [!] Temporarily Deprecated
-    ----------------------
-    We are not currently using Cerberus schema validation.
-
-    Used to convert Cerberus schema validation errors into more human readable
-    series of errors, each designated on a separate line.
-    """
-
-    def __init__(self, errors):
-        self.errors = errors
-
-    def __str__(self):
-        return "\n" + "\n" + self.humanize_errors(self.errors) + "\n"
-
-    def humanize_error_list(self, error_list, prev_key=None):
-        errs = []
-
-        for err in error_list:
-            if not isinstance(err, str):
-                errs.extend(self.convert_errors(err, prev_key=prev_key))
+    @classmethod
+    def _find_types(cls, *args):
+        for i in range(len(args)):
+            if isinstance(args[i], tuple):
+                return args[i], i
+            elif isinstance(args[i], type):
+                return args[i:], i
             else:
-                errs.append(err)
-        return errs
+                continue
+        return None
 
-    def convert_errors(self, error_dict, prev_key=None):
-        errors = []
-        prev_key = prev_key or ""
+    @classmethod
+    def _parse_referenced_types(cls, *args, **kwargs):
+        """
+        Unexpected vs. expected differs because unexpected type exceptions can
+        be raised without referencing the types that were expected.  Expected
+        type exceptions must reference what types were expected.
 
-        for key, value in error_dict.items():
-            if prev_key:
-                new_key = f"{prev_key}.{key}"
-            else:
-                new_key = key
+        Raises a TypeError if the types were not supplied as arguments for an
+        expected type error.
+        """
+        expected = kwargs.pop('expected', False)
 
-            if len(value) == 1 and type(value[0]) is str:
-                errors.append((new_key, value[0]))
-            else:
-                errs = self.humanize_error_list(value, prev_key=new_key)
-                errors.extend(errs)
-        return errors
+        types, index = cls._find_types(*args)
+        if not types:
+            if expected:
+                raise TypeError('The expected types must be supplied as arguments.')
 
-    def humanize_errors(self, errors):
-        tuples = self.convert_errors(errors)
+            if len(args) == 1:
+                return None, args[0], None  # Return Without Key, With Value
+            return args + (None, )   # Return With Key and Value
 
-        humanized = []
-        for error in tuples:
+        # Types Supplied - Parse Key/Value Arguments
+        # If no direct *args supplied, the key must be referenced as a keyword
+        # argument, otherwise there is not enough context for the exception.
+        leftover = args[:index]
+        if len(leftover) == 2:
+            return leftover + (types, )  # Return With Key and Value
+        elif len(leftover) == 1:
+            return None, leftover[0], types  # Return Without Key, With Value
+        elif len(leftover) == 0:
+            if 'key' not in kwargs:
+                raise TypeError(
+                    'The key must be provided as a keyword argument if not providing the value.'
+                )
+            return kwargs['key'], None, types  # Return With Key and Without Value
+        else:
+            raise TypeError('Invalid arguments supplied.')
 
-            label_formatter = settings.Colors.MED_GRAY
-            formatted_attr = settings.Colors.BLACK.format(bold=True)(error[0])
-            formatted_error = settings.Colors.ALT_RED.format(bold=True)(error[1].title())
-
-            humanize = (
-                f"{label_formatter('Attr')}: {formatted_attr} "
-                f"{label_formatter('Error')}: {formatted_error}"
+    @classmethod
+    def _get_unexpected_message(cls, key, value, types):
+        if value:
+            return ConditionalString(
+                "Did not expect",
+                'field `{key}`',
+                'value {value}',
+                'to be an instance of {value_type}'
+                ', expected {types}'
             )
-            humanized.append(humanize)
-        return "\n".join(humanized)
+        return ConditionalString(
+            "Did not expect",
+            'field `{key}`',
+            'to be an instance of {types},'
+        )
+
+    @classmethod
+    def _get_expected_message(cls, key, value, types):
+        if not types:
+            raise TypeError('Types must be supplied as arguments for expected type exceptions.')
+        return ConditionalString(
+            'Expected',
+            'field `{key}`',
+            'to be an instance of {types}',
+            ', not {value_type} (value={value})'
+        )
+
+    @classmethod
+    def _get_message(cls, *args, **kwargs):
+        expected = kwargs.pop('expected')
+        key, value, types = cls._parse_referenced_types(*args, **kwargs)
+
+        value_type = string_types = None
+        if value:
+            value_type = cls.TYPE_LOOKUP.get(type(value), str(type(value)))
+        if types:
+            string_types = humanize_list([
+                cls.TYPE_LOOKUP[tp] for tp in types], conjunction='or')
+
+        if expected:
+            MESSAGE = cls._get_expected_message(key, value, types)
+        else:
+            MESSAGE = cls._get_unexpected_message(key, value, types)
+
+        return MESSAGE.format(
+            key=key,
+            value_type=value_type,
+            value=value,
+            types=string_types,
+        )
+
+    @classmethod
+    def UnexpectedType(cls, *args, **kwargs):
+        """
+        When referencing an error due to an unexpected type, the method can
+        be called in thee following ways:
+
+        (1) ConfigFieldError.UnexpectedType(value)
+            - Infers invalid type based on supplied value.
+            - Notes the type was unexpected.
+
+            >>> Did not expect value 1 to be an instance of int.
+
+        (2) ConfigFieldError.UnexpectedType(value, *types)
+            - Infers invalid type based on supplied value.
+            - Notes that it is not what was expected, in *types.
+
+            >>> Did not expect value 4 to be an instance of int, expected
+                list or dict.
+
+        (3) ConfigFieldError.UnexpectedType(key, value)
+            - Infers invalid type based on supplied value.
+            - References key that value is associated with.
+
+            >>> Did not expect field `some_key` to be an instance of int.
+
+        (4) ConfigFieldError.UnexpectedType(key, value, **types)
+            - Infers invalid type based on supplied value.
+            - Notes that it is not what was expected, in *types.
+            - References key that value is associated with.
+
+            >>> Did not expect field `some_key` to be an instance of int
+                (value=4), expected list or dict.
+
+        (5) ConfigFieldError.UnexpectedType(**types, key='some_key')
+            - References that we did not expect the type provided at `key`
+              to be an instance of *types.
+
+            >>> Did not expect field `key` to be an instance of list or dict.
+
+        Location of values is intelligently determined based on the presence
+        of the first argument in *args that is an instance of type.
+
+        [x] NOTE:
+        --------
+        The primary difference between argument schema for UnexpectedType vs.
+        ExpectedType is that for ExpectedType, the types are always required,
+        since we cannot note what was expected without them.
+        """
+        kwargs['expected'] = False
+        message = cls._get_message(*args, **kwargs)
+        return cls(message, **kwargs)
+
+    @classmethod
+    def ExpectedType(cls, *args, **kwargs):
+        """
+        When referencing an error due to an expected type that was not seen,
+        the method can be called in thee following ways:
+
+        (1) ConfigFieldError.ExpectedType(value, *types)
+            - Infers invalid type received based on supplied value.
+            - Notes that it is not what was expected, in *types.
+
+            >>> Expected value 4 to be an instance of dict, not int.
+
+        (2) ConfigFieldError.ExpectedType(key, value, *types)
+            - Infers invalid type received based on supplied value.
+            - References key that value is associated with.
+            - Notes that it is not what was expected, in *types.
+
+            >>> Expected field `some_key` to be an instance of dict or list,
+                not int (value=4).
+
+        (3) ConfigFieldError.ExpectedType(value, **types)
+            - Infers invalid type received based on supplied value.
+            - Notes that it is not what was expected, in *types.
+
+            >>> Expected value 4 to be an instance of dict, not int.
+
+        (4) ConfigFieldError.ExpectedType(**types, key='some_key')
+            - References that we expected but did not receive a type in **types
+              for key `key`.
+
+            >>> Expected field `some_key` to be an instance of list or dict.
+
+        Location of values is intelligently determined based on the presence
+        of the first argument in *args that is an instance of type.
+
+        [x] NOTE:
+        --------
+        The primary difference between argument schema for UnexpectedType vs.
+        ExpectedType is that for ExpectedType, the types are always required,
+        since we cannot note what was expected without them.
+        """
+        kwargs['expected'] = True
+        message = cls._get_message(*args, **kwargs)
+        return cls(message, **kwargs)

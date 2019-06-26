@@ -1,3 +1,3 @@
-from .lazy import LazierSettings
+from .lazy import LazySettings
 
-settings = LazierSettings()
+settings = LazySettings()

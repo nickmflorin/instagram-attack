@@ -42,7 +42,7 @@ async def limit_as_completed(
     of concurrent tasks at any given time, specified by `batch_size`.
 
     When coroutines complete, and the pool of concurrent tasks drops below the
-    batch_size, coroutines will be added to the batch until there are none left.and
+    batch_size, coroutines will be added to the batch until there are none left.
 
     [!] IMPORTANT:
     --------------

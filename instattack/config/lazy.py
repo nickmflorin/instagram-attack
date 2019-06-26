@@ -1,4 +1,3 @@
-from cerberus import Validator  # Not Currently Validating with Cerberus  # noqa
 import importlib
 import inspect
 import os
@@ -7,43 +6,12 @@ import sys
 
 from instattack.ext import get_root
 
-from .schema import Schema  # Not Currently Validating with Cerberus  # noqa
-from .exceptions import ConfigFieldError, FieldValidationError, ConfigError
+from .exceptions import ConfigFieldError, ConfigError
 from .fields import Field, SetField
+from .utils import SettingsFieldDict
 
 
-class SettingsStructure(dict):
-    """
-    Defines the general dict interface for allowing the structures that contain
-    our settings to be accessible and settable without case sensitivity and
-    with attribute access.
-    """
-
-    def __init__(self, *args, **kwargs):
-        self.update(*args, **kwargs)
-
-    def __getattr__(self, key):
-        return self.__getitem__(key)
-
-    def __getitem__(self, key):
-        key = self.__keytransform__(key)
-        return super(SettingsStructure, self).__getitem__(key)
-
-    def __setitem__(self, key, value):
-        super(SettingsStructure, self).__setitem__(self.__keytransform__(key), value)
-
-    def __contains__(self, key):
-        key = self.__keytransform__(key)
-        return super(SettingsStructure, self).__contains__(key)
-
-    def __delitem__(self, key):
-        super(SettingsStructure, self).__delitem__(self.__keytransform__(key))
-
-    def __keytransform__(self, key):
-        return key.upper()
-
-
-class LazierSettings(SettingsStructure):
+class LazySettings(SettingsFieldDict):
     """
     Adopted from simple_settings module
     < https://github.com/drgarcia1986/simple-settings >
@@ -61,51 +29,16 @@ class LazierSettings(SettingsStructure):
 
         When we access values on the settings instance, they do not return
         the raw field objects but return the .value property of those field
-        objects.
-
-        We want to be able to access the nested fields as well, so that we can
-        easily configure fields nested several layers deep, so we also track the
-        raw fields in the fields dict.
+        objects.  We have to initialize SettingsFieldDict to have the .fields
+        attribute to track the field objects themselves.
         """
         self._settings_list = list(settings_list)
         self._initialized = False
-
-        # When we access values on the settings instance, they do not return
-        # the raw field objects but return the .value property of those field
-        # objects.  We want to be able to access the nested fields as well, so
-        # that we can easily configure fields nested several layers deep.
-        self.fields = SettingsStructure()
-
-    def __getattr__(self, key):
-        self.setup()  # Force Setup if Not Initialized
-        return super(LazierSettings, self).__getattr__(key)
-
-    def __getfield__(self, key):
-        try:
-            value = super(LazierSettings, self).__getitem__(key)
-        except KeyError:
-            raise AttributeError('You did not set {} setting'.format(key))
-        else:
-            return value
-
-    def __configurefield__(self, key, *args, **kwargs):
-        field = self.__getfield__(key)
-        field.configure(key, *args, **kwargs)
+        super(LazySettings, self).__init__({})
 
     def __getitem__(self, key):
-        """
-        We do not want to return a `value` attribute for the SetField since
-        it does not have a `value` attribute, but represents a series of fields
-        with individual values.
-        """
-        field = self.__getfield__(key)
-        if isinstance(field, Field) and not isinstance(field, SetField):
-            return field.value
-        return field
-
-    def __setitem__(self, key, value):
-        self.fields.__setitem__(key, value)
-        super(LazierSettings, self).__setitem__(self.__keytransform__(key), value)
+        self.setup()  # Force Setup if Not Initialized
+        return super(LazySettings, self).__getattr_(key)
 
     def setup(self):
         """
@@ -134,14 +67,25 @@ class LazierSettings(SettingsStructure):
 
         This is only called once, to initially populate the settings.  Any changes
         to the settings afterwards must be done with the .configure() method.
-        """
-        if self._initialized:
-            raise RuntimeError('Can only call update one time.')
 
-        for k, v in dict(*args, **kwargs).items():
-            if k in self:
-                raise ConfigFieldError.FieldAlreadySet(k)
-            self.__setitem__(k, v)
+        [x] NOTE:
+        --------
+        On init, in order to set the `fields` attribute, we have to call:
+            >>> super(LazierSettings, self).__init__({})
+
+        This will call the update() method.
+
+        In order to prevent multiple initial updates for LazySettings, we will
+        only udpate if there is data present (since there is none on init).
+        """
+        if args or kwargs:
+            if self._initialized:
+                raise RuntimeError('Can only call update one time.')
+
+            for k, v in dict(*args, **kwargs).items():
+                if k in self:
+                    raise ConfigFieldError.FieldAlreadySet(k)
+                self.__setitem__(k, v)
 
     def configure(self, *args, **kwargs):
         """
@@ -168,32 +112,31 @@ class LazierSettings(SettingsStructure):
         """
         self.setup()   # Force Setup if Not Initialized
 
+        raise ConfigFieldError.ExpectedType('test', 'not-a-dict', dict,
+                        ext='SetField(s) must be configured with dict instance.')
+
         for k, v in dict(*args, **kwargs).items():
 
             # Do Not Allow Additional Fields to be Added to Settings
             if k not in self:
                 raise ConfigFieldError.CannotAddField(k)
 
-            # Do Not Allow Configuring of Constants
-            if not isinstance(self.__getfield__(k), Field):
+            field = self.__getfield__(k)
+
+            # Do Not Allow Configuring of Constants & Check Field Configurability
+            # at Top Level
+            if not isinstance(field, Field) or not field.configurable:
                 raise ConfigFieldError.NonConfigurableField(k)
 
-            # We Might Not Need This - Should be checked in field itself.
-            if not self.__getfield__(k).configurable:
-                raise ConfigFieldError.NonConfigurableField(k)
-
-            if isinstance(self.__getfield__(k), SetField):
-                # Only reason we have to check this here vs. in the field is
-                # because we provide the values as **v to the configure method.
+            # [x] TODO: To be more consistent, we might just want to plugin
+            # the dict directly and not use the keyword arg method.
+            if isinstance(field, SetField):
                 if not isinstance(v, dict):
-                    raise FieldValidationError.ExpectedDict(v,
+                    raise ConfigFieldError.ExpectedType(k, v, dict,
                         ext='SetField(s) must be configured with dict instance.')
-
-                self.__configurefield__(k, **v)
+                field.configure(**v)
             else:
-                # Any inconsistent types for value we are configuring with
-                # will raise exceptions in Field instance.
-                self.__configurefield__(k, v)
+                field.configure(v)
 
     @staticmethod
     def _is_valid_file(file_name):
@@ -206,9 +149,8 @@ class LazierSettings(SettingsStructure):
         """
         try:
             importlib.import_module(file_name)
-            return True
-        except (ImportError, TypeError):
-            return False
+        except (ImportError, TypeError) as e:
+            return e
 
     @staticmethod
     def _load_settings_file(settings_file):
@@ -244,11 +186,15 @@ class LazierSettings(SettingsStructure):
         for config.
         """
         for settings_file in self._settings_list:
-            if self._is_valid_file(settings_file):
-                settings = self._load_settings_file(settings_file)
-                self.update(settings)
-            else:
-                raise ConfigError('Invalid settings file [{}]'.format(settings_file))
+            exc = self._is_valid_file(settings_file)
+            if exc:
+                raise ConfigError(
+                    f'\nInvalid settings file [{settings_file}]'
+                    f"\n{exc.__class__.__name__}: {exc}"
+                )
+
+            settings = self._load_settings_file(settings_file)
+            self.update(settings)
 
     @classmethod
     def _get_settings_paths(cls):
@@ -325,10 +271,7 @@ class LazierSettings(SettingsStructure):
                         return
 
     def configure_token(self, token):
-        # Headers -> DictField: Must be updated entirely.
-        header = self.header.copy()
-        header["X-CSRFToken"] = token
-        self.fields.header.configure('header', header)
+        self.fields.instagram.request.headers.configure({'X-CSRFToken': token})
 
     # def validate(self, conf):
     #     """

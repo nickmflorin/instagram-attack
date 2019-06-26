@@ -32,7 +32,6 @@ class client:
     async def request_wrapper(self, coro, proxy):
         try:
             return await coro
-
         except asyncio.CancelledError:
             pass
 
@@ -71,14 +70,11 @@ class train_client(client):
         ) as response:
             try:
                 response.raise_for_status()
-
             except HTTP_RESPONSE_ERRORS as e:
                 await self.on_error(proxy, e)
-
             else:
                 json = await response.json()
                 await self.on_success(proxy)
-
                 return json['form']
 
     async def request(self, session, token, password, proxy):
@@ -166,10 +162,8 @@ class instagram_client(client):
         ) as response:
             try:
                 result = await raise_for_result(response)
-
             except HTTP_RESPONSE_ERRORS as e:
                 await self.on_error(proxy, e)
-
             else:
                 await self.on_success(proxy)
                 return result

@@ -9,41 +9,17 @@ It is in this module where we play around with certain packages, code and
 ideas, not being in the Cement app framework but still having access to the
 components that make up the instattack app.
 """
-# from instattack import settings
-
-# from instattack.lib.diagnostics.cells import Grid
-# from instattack.config.fields import *
-
-
-# def find_optimal_size(grid):
-#     # For now, we will limit how many levels deep we go to avoid complication,
-#     # but eventually might want to make this recursive.
-#     def get_for_obj(obj):
-#         rh_values = []
-#         for row in obj.rows:
-#             if not row.columns:
-#                 rh_values.append((row._rh, ))
-#             else:
-#                 div_by = []
-#                 for col in row.columns:
-#                     if col.rows:
-#                         div_by.extend(get_for_obj(col))
-#                         # for row2 in col.rows:
-#                         #     div_by.append(row2._rh)
-
-#                 # All Columns Have No Rows
-#                 if len(div_by) == 0:
-#                     rh_values.append((row._rh, ))
-#                 else:
-#                     rh_values.append((row._rh, div_by))
-#         return rh_values
-
-
-#     return get_for_obj(grid)
 
 
 def playground():
-    from instattack.config.exceptions import FieldValidationError
 
-    e1 = FieldValidationError.ExpectedType('key1', str)
-    print(e1)
+    class ConditionalString(str):
+
+        def __new__(cls, *args):
+            value = str.__new__(cls, args[-1])
+            setattr(value, 'conditionals', args[:-1])
+
+    s = ConditionalString('field', 'for field {field}')
+    print(s)
+
+    # EXCEEDS_MAX = "The value " + Conditional('field', 'for field {field}') + Conditional('value', 'max', 'exceeds the maximum ({value} > {max})') + '.'

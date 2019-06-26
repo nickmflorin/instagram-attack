@@ -2,9 +2,7 @@ import asyncio
 import aiohttp
 
 from instattack import settings
-
 from instattack.lib import logger
-
 from instattack.lib.utils import limit_as_completed, cancel_remaining_tasks
 
 from instattack.core.exceptions import TokenNotFound, PoolNoProxyError

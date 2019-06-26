@@ -12,7 +12,7 @@ from .proxies import ProxyController
 from .utils import existing_user_command
 
 
-VERSION_BANNER = f"{settings.FORMAL_NAME} {settings.VERSION} {get_version_banner()}"
+VERSION_BANNER = f"{settings.FORMAL_NAME} {settings.APP_VERSION} {get_version_banner()}"
 
 
 class Base(InstattackController, UserInterface):
