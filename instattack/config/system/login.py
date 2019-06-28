@@ -4,9 +4,12 @@ from instattack.config import fields
 GENERATOR = fields.SetField(
     # TODO: Add validation to make sure all elements of nested lists are
     # integers.
-    CAPITALIZE_AT_INDICES=fields.ListField(
+    name='GENERATOR',
+    CAPITALIZE_AT_INDICES=fields.SeriesField(
         default=[0, 1, [0, 1]],
-        type=(int, list),
+        values={
+            'type': (int, list),
+        }
     ),
     # TODO: Add Validation to Key/Value Types
     COMMON_CHAR_REPLACEMENTS=fields.DictField({
@@ -31,6 +34,7 @@ GENERATOR = fields.SetField(
 )
 
 PASSWORDS = fields.SetField(
+    name='PASSWORDS',
     BATCH_SIZE=fields.PositiveIntField(
         default=10,
         max=50,
@@ -40,6 +44,7 @@ PASSWORDS = fields.SetField(
 )
 
 ATTEMPTS = fields.SetField(
+    name='ATTEMPTS',
     BATCH_SIZE=fields.PositiveIntField(
         default=10,
         max=50,

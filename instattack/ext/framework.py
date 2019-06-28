@@ -9,10 +9,11 @@ be placed in the utils.py file.
 """
 
 import os
+from instattack.info import __NAME__
 from termx.library import find_first_parent
 
 
-def get_root(NAME=None):
+def get_root():
     """
     Given the path of the file calling the function, incrementally moves up
     directory by directory until either the root is reached (when the parent
@@ -23,27 +24,17 @@ def get_root(NAME=None):
     is the path's parent.
     """
     path = os.path.dirname(os.path.realpath(__file__))
-
-    if not NAME:
-        from instattack import settings
-        NAME = settings.NAME
-
-    parent = find_first_parent(path, NAME)
+    parent = find_first_parent(path, __NAME__)
     return str(parent.parent)
 
 
-def get_app_root(NAME=None):
-
-    if not NAME:
-        from instattack import settings
-        NAME = settings.NAME
-
-    root = get_root(NAME=NAME)
-    return os.path.join(root, NAME)
+def get_app_root():
+    root = get_root()
+    return os.path.join(root, __NAME__)
 
 
-def get_root_file_path(filename, NAME=None, ext=None):
+def get_root_file_path(filename, ext=None):
     if ext:
         filename = "%s.%s" % (filename, ext)
-    root = get_root(NAME=NAME)
+    root = get_root()
     return os.path.join(root, filename)

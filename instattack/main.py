@@ -3,18 +3,7 @@ from cement.core.exc import CaughtSignal
 import sys
 import warnings
 
-from termx.library import remove_pybyte_data
-from instattack.core.exceptions import InstattackError
-
-from .ext import get_app_root, get_root
-from .playground import playground
-
-from .app import Instattack
-from .hooks import system_exception_hook
-
-
 warnings.simplefilter('ignore')
-sys.excepthook = system_exception_hook
 
 
 def instattack():
@@ -26,6 +15,12 @@ def instattack():
     (3) Loop Exception Handler at Top Level
     (4) Reimplementation: Validation of Config Schema
     """
+    from .core.exceptions import InstattackError
+    from .app import Instattack
+
+    from .hooks import system_exception_hook
+    sys.excepthook = system_exception_hook
+
     with Instattack() as app:
         try:
             app.run()
@@ -64,16 +59,23 @@ def run_playground():
     --------
     Remove from production distribution/package.
     """
+    from .playground import playground
     playground()
 
 
 def clean():
+    from termx.library import remove_pybyte_data
+    from .ext import get_app_root
+
     root = get_app_root()
     print('Cleaning %s' % root)
     remove_pybyte_data(root)
 
 
 def cleanroot():
+    from termx.library import remove_pybyte_data
+    from .ext import get_root
+
     root = get_root()
     print('Cleaning %s' % root)
     remove_pybyte_data(root)

@@ -11,6 +11,7 @@ _MODEL = "HM 1SW"
 
 
 INSTAGRAM = fields.SetField(
+    name='INSTAGRAM',
     URLS=fields.SetField(
         HOME='https://www.instagram.com/',
         LOGIN='https://www.instagram.com/accounts/login/ajax/',
@@ -58,11 +59,12 @@ USERAGENT = (
 # }
 # HEADER Has to be Field - Configured w/ Token
 
-HEADERS = fields.PersistentDictField(
+HEADERS = fields.SetField(
     {
         'Referer': INSTAGRAM.urls.home,
         "User-Agent": USERAGENT,
     },
+    name='HEADERS',
     keys={
         'allowed': ('Referer', 'User-Agent', 'X-CSRFToken'),
         'type': str,
@@ -77,6 +79,7 @@ INSTAGRAM.REQUEST.__addfields__(HEADERS=HEADERS)
 
 # TODO: Get descriptions of each field from aiohttp docs.
 CONNECTION = fields.SetField(
+    name='CONNECTION',
     LIMIT_PER_HOST=fields.PositiveIntField(
         max=10,
         default=0,
@@ -91,5 +94,5 @@ CONNECTION = fields.SetField(
         max=100,
         default=0,
         help="Need to retrieve from aiohttp docs."
-    )
+    ),
 )

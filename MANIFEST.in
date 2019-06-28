@@ -3,4 +3,3 @@ include setup.cfg
 include README.md CHANGELOG.md LICENSE.md
 include *.txt
 recursive-include instatttack/templates *
-recursive-include termx/termx *.py

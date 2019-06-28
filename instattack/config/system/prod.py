@@ -11,6 +11,7 @@ DEBUG = False
 
 # Make Non Configurable for Now
 LOGGING = fields.SetField(
+    name='LOGGING',
     LEVEL='INFO',
     LOG_REQUEST_ERRORS=True,
     LOG_PROXY_QUEUE=True,

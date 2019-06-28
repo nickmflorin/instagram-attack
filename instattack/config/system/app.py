@@ -1,15 +1,13 @@
-from instattack.ext import get_root
 import os
 import signal
 
-NAME = 'instattack'
-FORMAL_NAME = NAME.title()
-APP_VERSION = (0, 0, 1, 'alpha', 0)
+from instattack.info import __NAME__
+from instattack.ext import get_root
 
-CONFIG_SECTION = NAME
+CONFIG_SECTION = __NAME__
 
-CONFIG_DIRS = [os.path.join(get_root(NAME=NAME), 'config')]
-CONFIG_FILES = [f'{NAME}.yml']
+CONFIG_DIRS = [os.path.join(get_root(), 'config')]
+CONFIG_FILES = [f'{__NAME__}.yml']
 
 EXTENSIONS = ['yaml', 'colorlog', 'jinja2']
 CONFIG_HANDLER = 'yaml'

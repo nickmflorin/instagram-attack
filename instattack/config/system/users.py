@@ -1,9 +1,9 @@
 import os
 
 from instattack.ext import get_root
-from .app import NAME
 
-USER_DIR = os.path.join(get_root(NAME=NAME), 'users')
+
+USER_DIR = os.path.join(get_root(), 'users')
 
 # TODO: Join File Names in Non Configurable Set Field
 PASSWORDS = "passwords"

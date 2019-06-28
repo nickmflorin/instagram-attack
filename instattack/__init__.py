@@ -10,4 +10,7 @@ instead of
 
 >>> from simple_settings import settings
 """
+import os
+os.environ['INSTATTACK_SIMPLE_SETTINGS'] = 'dev'
+
 from .config import settings  # noqa

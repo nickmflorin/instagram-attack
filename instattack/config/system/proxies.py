@@ -1,6 +1,7 @@
 from instattack.config import fields
 
 LIMITS = fields.SetField(
+    name='LIMITS',
     # TODO: Allow Historical & Current
     RESP_TIME=fields.PositiveFloatField(
         default=None,
@@ -83,6 +84,7 @@ LIMITS = fields.SetField(
 )
 
 POOL = fields.SetField(
+    name='POOL',
     TIMEOUT=fields.PositiveIntField(
         default=10,
         max=30,
@@ -117,7 +119,7 @@ POOL = fields.SetField(
     # --------
     # We do not need the confirmed fields since they already are factored
     # in based on the separate queues.
-    PRIORITY=fields.ListField([
+    PRIORITY=fields.SeriesField([
         (-1, ('requests', 'active', 'success')),
         (1, ('error_rate', 'active')),
         (-1, ('requests', 'historical', 'success')),
@@ -165,6 +167,7 @@ Settings Here Only Matter if Collect = True
 Do we want to add a limit to the broker collection?
 """
 BROKER = fields.SetField(
+    name='BROKER',
     MAX_CONN=fields.PositiveIntField(
         default=200,
         max=500,
@@ -189,6 +192,7 @@ BROKER = fields.SetField(
 
 
 PROXIES = fields.SetField(
+    name='PROXIES',
 
     # Non-Configurable Fields
     # --------------------------------------------------------------------------
@@ -243,9 +247,11 @@ PROXIES = fields.SetField(
     # Configurable Fields
     # --------------------------------------------------------------------------
 
-    COUNTRIES=fields.ListField(
+    COUNTRIES=fields.SeriesField(
         default=['US'],
-        type=str,
+        values={
+            'type': str,
+        },
     ),
 
     TRAIN=fields.SetField(

@@ -12,14 +12,4 @@ components that make up the instattack app.
 
 
 def playground():
-
-    class ConditionalString(str):
-
-        def __new__(cls, *args):
-            value = str.__new__(cls, args[-1])
-            setattr(value, 'conditionals', args[:-1])
-
-    s = ConditionalString('field', 'for field {field}')
-    print(s)
-
-    # EXCEEDS_MAX = "The value " + Conditional('field', 'for field {field}') + Conditional('value', 'max', 'exceeds the maximum ({value} > {max})') + '.'
+    from sysconfig import fields
