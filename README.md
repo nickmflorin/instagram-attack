@@ -1,5 +1,7 @@
 # Instattack
 
+System for guessing your friend's Instagram passwords by algorithmically generating password combinations based on patterns configured on a username by username basis.  The purpose of this tool is NOT to brute force attack Instagram, nor will it work for that purpose.  Instead, it can be used for password recovery, messing with friends or in general, playing around with Python3's asyncio implementations.
+
 ## Installation
 
 ```
@@ -21,42 +23,16 @@ The following demonstrates setting up and working with a development environment
 $ make virtualenv
 $ source env/bin/activate
 
-### Run instatttack CLI Application
+### Running CLI Application
 
 $ instatttack --help
-
-### Run pytest / coverage
-
-$ make test
+$ instattack users login <username> <password_attempt>
+$ instattack attack username --pwlimit=10
 ```
 
-### Releasing to PyPi
+## Background
 
-Before releasing to PyPi, you must configure your login credentials:
+### Password Generation
 
-**~/.pypirc**:
+Password generation is based on algorithmically combining common strings, numeric patterns and alterations (like `a!` at the end of a password) that a given username might use.  If birthdays are provided, it will even include numeric combinations of their birthday.
 
-```
-[pypi]
-username = YOUR_USERNAME
-password = YOUR_PASSWORD
-```
-
-Then use the included helper function via the `Makefile`:
-
-```
-$ make dist
-$ make dist-upload
-```
-
-## Deployments
-
-### Docker
-
-Included is a basic `Dockerfile` for building and distributing `Instattack`,
-and can be built with the included `make` helper:
-
-```
-$ make docker
-$ docker run -it instatttack --help
-```
