@@ -12,3 +12,5 @@ env
 
 instattack.egg-info
 instattack.egg-info/*
+
+pip-wheel-metadata
