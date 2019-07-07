@@ -1,6 +1,3 @@
 [submodule "termx"]
 	path = termx
 	url = git@github.com:nickmflorin/termx.git
-[submodule "sysconfig"]
-	path = sysconfig
-	url = git@github.com:nickmflorin/sysconfig.git
