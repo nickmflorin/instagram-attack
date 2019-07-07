@@ -1,3 +1,6 @@
 [submodule "termx"]
 	path = termx
 	url = git@github.com:nickmflorin/termx.git
+[submodule "pickysettings"]
+	path = pickysettings
+	url = git@github.com:nickmflorin/pickysettings.git
